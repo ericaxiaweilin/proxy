@@ -693,13 +693,17 @@ export function SceneActivityDiscovery({
               </ScrollView>
 
               <ScrollView contentContainerStyle={styles.sceneList} showsVerticalScrollIndicator={false} style={styles.waimaiList}>
-                {/* 档内的动作筛选（咖啡 / 用餐 / City Walk…）：左栏是四档，动作退到这一行；点已选的取消。 */}
-                <View style={styles.detailChipGrid}>{actionsOfMoreCategory(moreCategory).map((id) => {
-                  const active = actionMatchId(actionId) === id;
-                  return <Pressable accessibilityLabel={`动作 ${taxon(ACTIONS, id).label}`} key={id} onPress={() => { setActionId(active ? undefined : id); setPickedMomentId(undefined); }} style={[styles.detailChip, active && styles.detailChipActive]}>
-                    <Text selectable style={[styles.detailChipText, active && styles.detailChipTextActive]}>{taxon(ACTIONS, id).label}</Text>
-                  </Pressable>;
-                })}</View>
+                {/* 档内的动作筛选：用首页那套动作 logo（图标 + 名字），左右滑；点已选的取消。 */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.moreActionRow} style={styles.moreActionScroll}>
+                  {actionsOfMoreCategory(moreCategory).map((id) => {
+                    const action = taxon(ACTIONS, id);
+                    const active = actionMatchId(actionId) === id;
+                    return <Pressable accessibilityLabel={`动作 ${action.label}`} key={id} onPress={() => { setActionId(active ? undefined : id); setPickedMomentId(undefined); }} style={styles.moreActionItem}>
+                      <View style={[styles.actionGlyph, active && styles.actionGlyphActive]}><Image contentFit="contain" source={action.icon} style={styles.actionIcon} /></View>
+                      <Text selectable numberOfLines={1} style={styles.actionLabel}>{action.label}</Text>
+                    </Pressable>;
+                  })}
+                </ScrollView>
                 {actionFamily(actionId) ? <View style={styles.detailGroup}>
                   <Text selectable style={styles.detailGroupTitle}>{ACTION_FAMILY_LABELS[actionFamily(actionId)!]}</Text>
                   <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === actionFamily(actionId)).map((detailAction) => {
@@ -811,6 +815,9 @@ const styles = StyleSheet.create({
   // 二进制的 react-native-svg，不是斑马条纹近似）。
   sceneList: { gap: 14, marginTop: 13 },
   sceneCard: { backgroundColor: "#DDD7CF", borderRadius: 18, justifyContent: "flex-end", minHeight: 224, overflow: "hidden" },
+  moreActionScroll: { flexGrow: 0, marginBottom: 10 },
+  moreActionRow: { gap: 14, paddingRight: 8 },
+  moreActionItem: { alignItems: "center", gap: 6, width: 52 },
   sceneCardPicked: { borderColor: "#151515", borderWidth: 3 },
   sceneCardPhoto: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   sceneCardShade: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
