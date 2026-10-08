@@ -4,12 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
@@ -255,4 +257,96 @@ func (s *Server) operatorAuthorityCommand(commandType, auditAction, idField stri
 		s.auditWrite(r, auditAction, string(ScopeAuthority), entry)
 		writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "id": result.Aggregate.ID, "state": result.Aggregate.State})
 	}
+}
+
+// OPS-RESTRICT-001：账号受限 / 封禁——让举报处置真的生效。
+//
+//	GET  /v1/operator/restrictions                      生效中的限制 + 每人手上没结束的订单数
+//	POST /v1/operator/restrictions        {userId, level: RESTRICTED|SUSPENDED, reason, reportId?}
+//	POST /v1/operator/restrictions/lift   {userId, reason}
+//
+// 理由必填、操作人署名、append-only 留痕。封禁不会自动取消进行中的订单——响应里给出订单数，由人工善后。
+// 申诉成立不会自动解除：解除是另一个明确的动作。
+type restrictionView struct {
+	accountstatus.Active
+	InFlightOrders *int `json:"inFlightOrders"` // nil = 没读出来（不是 0）
+}
+
+func (s *Server) operatorRestrictions(w http.ResponseWriter, r *http.Request) {
+	if s.AccountStatus == nil {
+		notConnected("账号限制（没有配数据库）", "OPS-RESTRICT-001")(w, r)
+		return
+	}
+	active, err := s.AccountStatus.ListActive(r.Context())
+	if err != nil {
+		log.Printf("operator restrictions: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "restrictions_query_failed"})
+		return
+	}
+	views := make([]restrictionView, 0, len(active))
+	for _, a := range active {
+		v := restrictionView{Active: a}
+		if s.AccountInFlight != nil {
+			if n, err := s.AccountInFlight(r.Context(), a.UserID); err == nil {
+				v.InFlightOrders = &n
+			}
+		}
+		views = append(views, v)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dataSource": OperatorLiveSource, "restrictions": views, "levels": accountstatus.Levels(),
+		"notes": []string{
+			"受限：不能发布内容 / 发单 / 报名 / 发消息，其余照常，手上已有的订单可以继续完成。",
+			"封禁：只剩申诉、同意管理、隐私请求（导出 / 删除）和登出。",
+			"封禁不会自动取消进行中的订单：「进行中订单」一列是需要人工善后的数量（读不出来显示 —）。",
+			"申诉成立不会自动解除限制；解除是单独的动作，同样要写理由。",
+		},
+	})
+}
+
+func (s *Server) operatorRestrictionSet(w http.ResponseWriter, r *http.Request) {
+	s.operatorRestrictionChange(w, r, "RESTRICTION_SET")
+}
+func (s *Server) operatorRestrictionLift(w http.ResponseWriter, r *http.Request) {
+	s.operatorRestrictionChange(w, r, "RESTRICTION_LIFT")
+}
+
+func (s *Server) operatorRestrictionChange(w http.ResponseWriter, r *http.Request, action string) {
+	if s.AccountStatus == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "account_status_not_configured"})
+		return
+	}
+	var body struct {
+		UserID   string `json:"userId"`
+		Level    string `json:"level"`
+		Reason   string `json:"reason"`
+		ReportID string `json:"reportId"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "json_body_required"})
+		return
+	}
+	operator, _ := s.operatorIdentity(r)
+	var err error
+	if action == "RESTRICTION_SET" {
+		err = s.AccountStatus.Set(r.Context(), body.UserID, body.Level, body.Reason, body.ReportID, operator)
+	} else {
+		err = s.AccountStatus.Lift(r.Context(), body.UserID, body.Reason, operator)
+	}
+	entry := operatoraudit.Entry{TargetKind: "Account", TargetID: body.UserID, Detail: map[string]any{"level": body.Level, "reportId": body.ReportID}}
+	if err != nil {
+		entry.Outcome = operatoraudit.OutcomeDenied
+		entry.Detail["error"] = err.Error()
+		s.auditWrite(r, action, string(ScopeModeration), entry)
+		status := http.StatusUnprocessableEntity
+		if !errors.Is(err, accountstatus.ErrInvalidLevel) && !errors.Is(err, accountstatus.ErrReasonNeeded) && !errors.Is(err, accountstatus.ErrActorNeeded) &&
+			!errors.Is(err, accountstatus.ErrNothingToLift) && !errors.Is(err, accountstatus.ErrUserNeeded) {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	entry.Outcome = operatoraudit.OutcomeOK
+	s.auditWrite(r, action, string(ScopeModeration), entry)
+	writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "ok": true})
 }

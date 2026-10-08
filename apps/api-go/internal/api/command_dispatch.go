@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"context"
 	"encoding/json"
 	"errors"
@@ -258,6 +259,20 @@ func (s *Server) executeCommand(ctx context.Context, envelope command.Envelope) 
 }
 
 func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope) command.Result {
+	// OPS-RESTRICT-001：账号受限 / 封禁在命令边界执行。读不出状态时放行并记日志（保护性措施不该因为
+	// 一次数据库抖动把所有人锁在外面）。匿名命令（登录等）没有 Actor.ID，不受影响。
+	if s.AccountStatus != nil && envelope.Actor.ID != "" {
+		level, err := s.AccountStatus.LevelOf(ctx, envelope.Actor.ID)
+		if err != nil {
+			log.Printf("account status unreadable (allowing): actor=%s err=%v", envelope.Actor.ID, err)
+		} else if accountstatus.Blocked(level, envelope.CommandType) {
+			code := "ACCOUNT_RESTRICTED"
+			if level == accountstatus.LevelSuspended {
+				code = "ACCOUNT_SUSPENDED"
+			}
+			return command.Rejected(envelope, code, "AUTHORIZATION", "NEVER", "account.restricted", map[string]any{"level": level})
+		}
+	}
 	switch {
 	case s.Identity != nil && s.Identity.Supports(envelope.CommandType):
 		return s.Identity.HandleContext(ctx, envelope)

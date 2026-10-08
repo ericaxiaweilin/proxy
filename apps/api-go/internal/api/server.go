@@ -33,6 +33,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -139,6 +140,10 @@ type Server struct {
 	// ProviderList / ProviderProfile：小美画像（OPS-PROVIDER-PROFILE-001），组合根接线。
 	ProviderList    ProviderListFunc
 	ProviderProfile ProviderProfileFunc
+	// AccountStatus：账号受限 / 封禁（OPS-RESTRICT-001）。nil = 不执行任何限制。
+	AccountStatus *accountstatus.Service
+	// AccountInFlight：一个人手上没结束的订单数（封禁不自动取消，运营页提醒人工善后）。
+	AccountInFlight func(ctx context.Context, userID string) (int, error)
 	TagStore     tagging.Store
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
@@ -303,6 +308,14 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 	mux.HandleFunc("/v1/operator/authority-requests/response", s.operatorConsoleGated(http.MethodPost, ScopeAuthority, s.operatorAuthorityCommand("RecordAuthorityResponse", "AUTHORITY_RESPONSE_RECORD", "requestId")))
+	mux.HandleFunc("/v1/operator/restrictions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.operatorConsoleGated(http.MethodGet, ScopeModeration, s.operatorRestrictions)(w, r)
+			return
+		}
+		s.operatorConsoleGated(http.MethodPost, ScopeModeration, s.operatorRestrictionSet)(w, r)
+	})
+	mux.HandleFunc("/v1/operator/restrictions/lift", s.operatorConsoleGated(http.MethodPost, ScopeModeration, s.operatorRestrictionLift))
 	mux.HandleFunc("/v1/operator/appeals", s.operatorConsoleGated(http.MethodGet, ScopeModeration, s.operatorAppealQueue))
 	mux.HandleFunc("/v1/operator/appeals/decision", s.operatorConsoleGated(http.MethodPost, ScopeModeration, s.operatorAppealDecision))
 	mux.HandleFunc("/v1/operator/moderation/disposition", s.operatorConsoleGated(http.MethodPost, ScopeModeration, s.operatorModerationDisposition))

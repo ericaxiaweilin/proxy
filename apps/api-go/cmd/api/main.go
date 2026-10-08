@@ -41,6 +41,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
@@ -726,6 +727,10 @@ func main() {
 		server.Gravity = gravity.NewPostgres(pool)
 		// TAG-SYSTEM-001：标签层（粗粒度位置写入 + 运营读取）。
 		server.Insight = insight.NewPostgres(pool)
+		// OPS-RESTRICT-001：账号受限 / 封禁在命令边界执行。
+		accountPG := accountstatus.NewPostgres(pool)
+		server.AccountStatus = &accountstatus.Service{Store: accountPG}
+		server.AccountInFlight = accountPG.InFlightOrders
 		tagPG := tagging.NewPostgres(pool)
 		server.Tagging = &tagging.Commands{Sink: tagPG, Store: tagPG}
 		server.TagStore = tagPG
