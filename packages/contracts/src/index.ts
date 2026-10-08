@@ -718,6 +718,33 @@ export type ListMyActivitiesPayload = z.infer<typeof ListMyActivitiesPayloadSche
 // 调用方给出的这批小美里，哪些时段已经被约走了（谁约的都算，但不说是谁）。
 export const CompanionBookedSlotSchema = z.object({ companionId: z.string(), time: z.string() });
 export type CompanionBookedSlot = z.infer<typeof CompanionBookedSlotSchema>;
+// STORE-CROWD-001：下单时这家店这个时段偏不偏满（估算）。crowded=true 只是建议换，**不拦下单**。
+// available=false（服务端没有估算能力）⇒ 客户端什么都不提示，绝不当成「不拥挤」。
+export const VenueCrowdingAlternativeSchema = z.object({
+  activityId: z.string().min(1),
+  title: z.string(),
+  venueName: z.string(),
+  timeLabel: z.string(),
+  loadPct: z.number().int()
+});
+export const VenueCrowdingSchema = z.object({
+  activityId: z.string().min(1),
+  venueName: z.string(),
+  timeLabel: z.string(),
+  capacityPeople: z.number().int(),
+  peopleNow: z.number().int(),
+  projected: z.number().int(),
+  loadPct: z.number().int(),
+  crowded: z.boolean(),
+  alternatives: z.array(VenueCrowdingAlternativeSchema).default([]),
+  estimate: z.boolean()
+});
+export type VenueCrowding = z.infer<typeof VenueCrowdingSchema>;
+export const GetVenueCrowdingPayloadSchema = z.object({
+  available: z.boolean(),
+  crowding: VenueCrowdingSchema.optional()
+});
+
 export const ListCompanionBookedSlotsPayloadSchema = z.object({ slots: z.array(CompanionBookedSlotSchema).default([]) });
 
 // MarketOpportunitySchema：机会读模型 wire 契约。

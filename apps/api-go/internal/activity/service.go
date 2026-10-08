@@ -270,7 +270,7 @@ func (s *Service) SeedDefaults() {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "ListActivities", "ListMyActivities", "ListCompanionBookedSlots", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
+	case "ListActivities", "ListMyActivities", "ListCompanionBookedSlots", "GetVenueCrowding", "PublishActivity", "ToggleActivityInterest", "JoinActivity", "CancelActivity", "CheckinActivity", "MarkNoShow":
 		return true
 	default:
 		return false
@@ -289,6 +289,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.listMyActivities(ctx, e)
 	case "ListCompanionBookedSlots":
 		return s.listCompanionBookedSlots(ctx, e)
+	case "GetVenueCrowding":
+		return s.getVenueCrowding(ctx, e)
 	case "PublishActivity":
 		return s.publishActivity(ctx, e)
 	case "ToggleActivityInterest":
