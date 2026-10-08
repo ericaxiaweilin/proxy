@@ -172,8 +172,8 @@ func TestOverlapRewardsSharedInterestAndPenalisesAversion(t *testing.T) {
 	}
 }
 
-// TAG-SYSTEM-002：一条显式场所行为同时贡献 店 / 类型 / 风格 / 区 四个轴；一条孤立信号不是画像。
-func TestAffinityNeedsMoreThanOneSignalAndKeepsTheFineGrainedValues(t *testing.T) {
+// TAG-SYSTEM-002：一条显式场所行为同时贡献 店 / 类型 / 风格 / 区 四个轴；信号少就置信度低，而不是不出标签。
+func TestAffinityKeepsTheFineGrainedValuesAndTrustsThinEvidenceLess(t *testing.T) {
 	sig := func(axis, value string, w float64) Signal {
 		return Signal{Axis: axis, Value: value, Weight: w, N: 1, First: ago(72 * time.Hour), Last: ago(time.Hour), Explicit: true}
 	}
@@ -189,8 +189,12 @@ func TestAffinityNeedsMoreThanOneSignalAndKeepsTheFineGrainedValues(t *testing.T
 	if kind, ok := find(tags, AxisVenueKind, "咖啡"); !ok || kind.EvidenceCount != 2 || kind.Source != SourceExplicit {
 		t.Fatalf("two coffee venues give a kind tag (unicode value, explicit source): %+v ok=%v", kind, ok)
 	}
-	if _, ok := find(tags, AxisVenueKind, "餐厅"); ok {
-		t.Fatal("a single restaurant is not a kind preference yet")
+	single, ok := find(tags, AxisVenueKind, "餐厅")
+	if !ok {
+		t.Fatal("even one restaurant is a kind tag: finer is better")
+	}
+	if kind, _ := find(tags, AxisVenueKind, "咖啡"); !(single.Confidence < kind.Confidence) {
+		t.Fatalf("but one signal must be less trusted than two: single=%v two=%v", single.Confidence, kind.Confidence)
 	}
 	if d, ok := find(tags, AxisDistrict, "Hoàn_Kiếm"); !ok || d.Strength < 0.6 {
 		t.Fatalf("district value is normalised (space -> underscore) and saturates: %+v ok=%v", d, ok)

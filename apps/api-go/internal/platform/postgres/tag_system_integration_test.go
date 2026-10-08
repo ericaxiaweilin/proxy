@@ -225,8 +225,8 @@ func TestFineGrainedTagsFromVenuesCreatorsAndDeclaredProfile(t *testing.T) {
 			t.Errorf("saver should have %s:%s", want[0], want[1])
 		}
 	}
-	if has(saver, tagging.AxisVenueKind, "餐厅") {
-		t.Error("a single restaurant must not become a kind preference")
+	if !has(saver, tagging.AxisVenueKind, "餐厅") {
+		t.Error("even a single saved restaurant gives a (low-confidence) kind tag")
 	}
 	if !has(watcher, tagging.AxisCreatorAffinity, author) {
 		t.Error("a consenting viewer who dwelt on one creator's posts has a creator-affinity tag")

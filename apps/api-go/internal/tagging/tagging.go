@@ -95,16 +95,16 @@ var axes = []Axis{
 	{AxisArea, "常去区域", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
 	// 显式场所行为（收藏 / 计划去 / 去过 / 打卡）：用户自己做的事，不需要浏览同意，保留得久一些。
 	{AxisVenueFavorite, "常去 / 收藏的店", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 3, 1, false},
-	{AxisVenueKind, "场所类型", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
-	{AxisVenueStyle, "场所风格", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
-	{AxisDistrict, "常活动的区", "NEUTRAL", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
+	{AxisVenueKind, "场所类型", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 1, false},
+	{AxisVenueStyle, "场所风格", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 1, false},
+	{AxisDistrict, "常活动的区", "NEUTRAL", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 1, false},
 	// 被动：看哪个创作者的内容停得久（要浏览同意）。
 	{AxisCreatorAffinity, "偏爱的创作者", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 6, 3, false},
 	// 声明：她自己写在接单资料里的能力 / 语种，是当前状态。
 	{AxisSkill, "声明的服务能力", "POSITIVE", 365 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0.5, 1, true},
 	{AxisLanguage, "声明的语种", "POSITIVE", 365 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0.5, 1, true},
 	// 内容话题：看（被动，要同意）+ 自己发（主动）带这个话题的帖子。两条独立信号才出。
-	{AxisInterestTopic, "内容话题", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
+	{AxisInterestTopic, "内容话题", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 1, false},
 	// 交易侧：用户自己下过的单（交易事实，不需要浏览同意）。
 	{AxisOrderService, "买过的服务", "POSITIVE", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
 	{AxisPriceBand, "消费价位", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
