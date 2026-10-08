@@ -300,3 +300,30 @@ func (r *MemoryRepository) Events() []event.DomainEvent {
 	copy(out, r.events)
 	return out
 }
+
+func (r *MemoryRepository) ListAppealQueue(_ context.Context) ([]AppealQueueEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return nil, ErrReportRepositoryDown
+	}
+	out := make([]AppealQueueEntry, 0, len(r.appeals))
+	for _, a := range r.appeals {
+		e := AppealQueueEntry{Appeal: a}
+		for _, rep := range r.rows {
+			if rep.ID == a.ReportID {
+				e.ReportReason, e.ReportTargetType, e.ReportTargetID = rep.Reason, rep.TargetType, rep.TargetID
+			}
+		}
+		for _, d := range r.appealDecisions {
+			if d.AppealID == a.ID {
+				e.DecisionCount++
+				if d.CreatedAt.After(e.LastDecisionAt) || e.LastDecisionAt.IsZero() {
+					e.LastDecision, e.LastDecisionAt = d.Decision, d.CreatedAt
+				}
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}

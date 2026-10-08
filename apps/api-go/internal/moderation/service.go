@@ -149,6 +149,8 @@ type Repository interface {
 	// 却没有任何路径把举报交到人手上）。返回的每一行都带处置链摘要，
 	// 让「这条现在到哪一步」不必再查一次（避免 N+1）。
 	ListReportQueue(ctx context.Context) ([]ReportQueueEntry, error)
+	// ListAppealQueue（OPS-APPEALS-001）：申诉 + 原举报摘要 + 复核链摘要。
+	ListAppealQueue(ctx context.Context) ([]AppealQueueEntry, error)
 	AddAppeal(ctx context.Context, appeal Appeal) error
 	FindAppeal(ctx context.Context, appealID string) (Appeal, bool)
 	AddAppealDecision(ctx context.Context, decision AppealDecision) error

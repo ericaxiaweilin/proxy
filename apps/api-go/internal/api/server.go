@@ -289,6 +289,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/dispatch/run", s.operatorConsole(s.operatorDispatchRun))
 	// OPS-MODERATION-001: 举报处置队列 + 处置（走 Moderation 命令边界，不绕过校验）。
 	mux.HandleFunc("/v1/operator/moderation", s.operatorConsoleGated(http.MethodGet, ScopeModeration, s.operatorModerationQueue))
+	mux.HandleFunc("/v1/operator/appeals", s.operatorConsoleGated(http.MethodGet, ScopeModeration, s.operatorAppealQueue))
+	mux.HandleFunc("/v1/operator/appeals/decision", s.operatorConsoleGated(http.MethodPost, ScopeModeration, s.operatorAppealDecision))
 	mux.HandleFunc("/v1/operator/moderation/disposition", s.operatorConsoleGated(http.MethodPost, ScopeModeration, s.operatorModerationDisposition))
 	mux.HandleFunc("/v1/operator/dispatch/actions", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorDispatchAction))
 	// MARKET-FAST-001：市场发单看板 —— 快速发单一段时间内的表现（只读，同一道 ANALYTICS 门）。

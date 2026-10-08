@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -126,4 +127,69 @@ func (s *Server) operatorModerationDisposition(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dataSource": OperatorLiveSource, "dispositionId": result.Aggregate.ID, "state": result.Aggregate.State, "enforcement": "RECORD_ONLY",
 	})
+}
+
+// OPS-APPEALS-001：申诉复核。
+//
+//	GET  /v1/operator/appeals?includeClosed=1&limit=100
+//	POST /v1/operator/appeals/decision  {appealId, decision: UPHELD|REJECTED, note}
+//
+// 复核走 RecordAppealDecision 命令（驳回必须写理由、复核人必须署名、申诉必须真实存在），
+// 与举报处置一样只记录、不执行：「申诉成立」只是推翻原处置的**决定**，恢复账号 / 撤销下架另有各自的域。
+func (s *Server) operatorAppealQueue(w http.ResponseWriter, r *http.Request) {
+	if s.Moderation == nil {
+		notConnected("申诉复核（没有配数据库）", "COMP-REPORT-004")(w, r)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	queue, err := s.Moderation.AppealQueue(r.Context(), r.URL.Query().Get("includeClosed") == "1", limit)
+	if err != nil {
+		log.Printf("operator appeals: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "appeal_queue_failed"})
+		return
+	}
+	s.auditWrite(r, "APPEAL_QUEUE_VIEW", string(ScopeModeration), operatoraudit.Entry{TargetKind: "AppealQueue", TargetID: "-", Outcome: operatoraudit.OutcomeOK})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dataSource":  OperatorLiveSource,
+		"appealQueue": queue,
+		"decisions":   moderation.AppealDecisions(),
+		"enforcement": "RECORD_ONLY",
+	})
+}
+
+func (s *Server) operatorAppealDecision(w http.ResponseWriter, r *http.Request) {
+	if s.Moderation == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "moderation_not_configured"})
+		return
+	}
+	var body struct {
+		AppealID string `json:"appealId"`
+		Decision string `json:"decision"`
+		Note     string `json:"note"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body) != nil || strings.TrimSpace(body.AppealID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "appeal_and_decision_required"})
+		return
+	}
+	envelope, ok := s.moderationEnvelope(r, "RecordAppealDecision", map[string]any{"appealId": body.AppealID, "decision": body.Decision, "note": body.Note})
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "access_token_required"})
+		return
+	}
+	result := s.Moderation.HandleContext(r.Context(), envelope)
+	entry := operatoraudit.Entry{TargetKind: "Appeal", TargetID: body.AppealID, Detail: map[string]any{"decision": body.Decision}}
+	if result.Error != nil {
+		entry.Outcome = operatoraudit.OutcomeDenied
+		entry.Detail["error"] = result.Error.ErrorCode
+		s.auditWrite(r, "APPEAL_DECISION", string(ScopeModeration), entry)
+		status := http.StatusUnprocessableEntity
+		if result.Error.ErrorCode == "APPEAL_DECISION_FAILED" {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]any{"error": result.Error.ErrorCode})
+		return
+	}
+	entry.Outcome = operatoraudit.OutcomeOK
+	s.auditWrite(r, "APPEAL_DECISION", string(ScopeModeration), entry)
+	writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "decisionId": result.Aggregate.ID, "state": result.Aggregate.State, "enforcement": "RECORD_ONLY"})
 }

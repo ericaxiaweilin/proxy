@@ -359,3 +359,44 @@ func (r *ModerationRepository) AddAuthorityResponse(ctx context.Context, respons
 
 // 签名漂移就在这里编译失败，而不是运行期静默写不进去。
 var _ moderation.Repository = (*ModerationRepository)(nil)
+
+// OPS-APPEALS-001 — 申诉复核队列（只读）。
+const listAppealQueueSQL = `
+SELECT a.id, a.report_id, a.appellant_account_id, COALESCE(a.reason, ''), a.created_at,
+       COALESCE(r.reason, ''), COALESCE(r.target_type, ''), COALESCE(r.target_id, ''),
+       COALESCE(d.decision, ''), d.created_at, COALESCE(c.cnt, 0)
+  FROM moderation.appeals a
+  LEFT JOIN moderation.reports r ON r.id = a.report_id
+  LEFT JOIN LATERAL (
+      SELECT decision, created_at FROM moderation.appeal_decisions
+       WHERE appeal_id = a.id ORDER BY created_at DESC, id DESC LIMIT 1
+  ) d ON TRUE
+  LEFT JOIN LATERAL (
+      SELECT count(*) AS cnt FROM moderation.appeal_decisions WHERE appeal_id = a.id
+  ) c ON TRUE
+ ORDER BY a.created_at ASC, a.id ASC`
+
+func (r *ModerationRepository) ListAppealQueue(ctx context.Context) ([]moderation.AppealQueueEntry, error) {
+	if r == nil || r.pool == nil {
+		return nil, moderation.ErrReportRepositoryDown
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, listAppealQueueSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []moderation.AppealQueueEntry{}
+	for rows.Next() {
+		var e moderation.AppealQueueEntry
+		var lastAt *time.Time
+		if err := rows.Scan(&e.Appeal.ID, &e.Appeal.ReportID, &e.Appeal.AppellantID, &e.Appeal.Reason, &e.Appeal.CreatedAt,
+			&e.ReportReason, &e.ReportTargetType, &e.ReportTargetID, &e.LastDecision, &lastAt, &e.DecisionCount); err != nil {
+			return nil, err
+		}
+		if lastAt != nil {
+			e.LastDecisionAt = *lastAt
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

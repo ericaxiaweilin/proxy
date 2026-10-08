@@ -100,3 +100,52 @@ func TestModerationDispositionRunsTheDomainRulesAndMovesTheQueue(t *testing.T) {
 		t.Fatalf("queue should show the report as ACTIONED: %s", rec.Body.String())
 	}
 }
+
+func fileAppeal(t *testing.T, server *Server, reportID string) string {
+	t.Helper()
+	res := server.Moderation.Handle(command.Envelope{
+		CommandType: "FileAppeal", CommandID: "ca", IdempotencyKey: "ka", CorrelationID: "ca",
+		Actor:   command.Actor{Type: "USER", ID: "reported_user"},
+		Payload: map[string]any{"reportId": reportID, "reason": "我没有做这件事"},
+	})
+	if res.Error != nil {
+		t.Fatalf("file appeal: %+v", res.Error)
+	}
+	return res.Aggregate.ID
+}
+
+// OPS-APPEALS-001：申诉队列看得见、复核走域规则（驳回必须写理由）、复核后状态变、仍是只记录。
+func TestAppealQueueAndDecisionRunTheDomainRules(t *testing.T) {
+	server, reportID := moderationServer(t)
+	appealID := fileAppeal(t, server, reportID)
+	if rec := consoleGet(server, "appeals", "user_token"); rec.Code != http.StatusForbidden {
+		t.Fatalf("ordinary user must be 403, got %d", rec.Code)
+	}
+	rec := consoleGet(server, "appeals", "op_all_token")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), appealID) || !strings.Contains(rec.Body.String(), `"state":"FILED"`) ||
+		!strings.Contains(rec.Body.String(), "RECORD_ONLY") || !strings.Contains(rec.Body.String(), "MINOR_SAFETY") {
+		t.Fatalf("queue should list the open appeal with the original report's reason: %d %s", rec.Code, rec.Body.String())
+	}
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/operator/appeals/decision", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer op_all_token")
+		out := httptest.NewRecorder()
+		server.Handler().ServeHTTP(out, req)
+		return out
+	}
+	if r := post(`{"appealId":"` + appealID + `","decision":"REJECTED"}`); r.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("rejecting without a reason must be refused, got %d %s", r.Code, r.Body.String())
+	}
+	if r := post(`{"appealId":"nope","decision":"UPHELD"}`); r.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("an appeal that does not exist must be refused, got %d", r.Code)
+	}
+	if r := post(`{"appealId":"` + appealID + `","decision":"REJECTED","note":"证据充分"}`); r.Code != http.StatusOK {
+		t.Fatalf("a well-formed decision: %d %s", r.Code, r.Body.String())
+	}
+	if open := consoleGet(server, "appeals", "op_all_token"); strings.Contains(open.Body.String(), appealID) {
+		t.Fatal("a decided appeal must leave the open queue")
+	}
+	if closed := consoleGet(server, "appeals?includeClosed=1", "op_all_token"); !strings.Contains(closed.Body.String(), `"state":"REJECTED"`) {
+		t.Fatalf("with includeClosed it shows as REJECTED: %s", closed.Body.String())
+	}
+}
