@@ -305,3 +305,12 @@ func (p *Postgres) Stats(ctx context.Context, now time.Time) (Stats, error) {
 	}
 	return ComputeStats(byUser, now), nil
 }
+
+// PruneOlderThan 删掉窗口外的粗粒度位置观测：窗口外的事实不参与任何标签，留着只是多留一份位置痕迹。
+func (p *Postgres) PruneOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM tag.coarse_locations WHERE observed_at < $1`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}

@@ -122,3 +122,35 @@ func TestTagLayerOnlyBuildsFromConsentedFactsAndClearsOnWithdrawal(t *testing.T)
 		t.Fatalf("stats: %+v err=%v", stats, err)
 	}
 }
+
+// 账户删除要把派生出来的「这个人」一起删掉：用户标签 + 粗粒度位置观测。
+func TestAccountErasureDeletesTagsAndCoarseLocations(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	user := "u_tag_erase_" + time.Now().Format("150405.000000")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tag.user_tags WHERE user_id = $1`, user)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM tag.coarse_locations WHERE user_id = $1`, user)
+	})
+	now := time.Now().UTC()
+	store := tagging.NewPostgres(pool)
+	if err := store.ReplaceUserTags(ctx, user, []tagging.Tag{{Axis: tagging.AxisInterestScene, Value: "COFFEE", Strength: .5, Confidence: .5, Source: tagging.SourceBehavior,
+		EvidenceCount: 5, SourceDiversity: 1, FirstSeen: now, LastSeen: now, ExpiresAt: now.Add(time.Hour), ComputedAt: now, RuleVersion: tagging.RuleVersion}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordCoarseCell(ctx, user, "21.03,105.85", now); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := NewIdentityRepository(pool).EraseCrossAggregateIdentity(ctx, user)
+	if err != nil {
+		t.Fatalf("erase: %v", err)
+	}
+	if receipt.UserTags != 1 || receipt.CoarseLocations != 1 {
+		t.Fatalf("receipt must count what it deleted: %+v", receipt)
+	}
+	var n int
+	_ = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM tag.user_tags WHERE user_id=$1) + (SELECT count(*) FROM tag.coarse_locations WHERE user_id=$1)`, user).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d derived rows survived the erasure", n)
+	}
+}

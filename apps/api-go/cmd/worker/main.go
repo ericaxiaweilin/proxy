@@ -704,7 +704,13 @@ func main() {
 }
 
 // recomputeTags 重算所有人的用户标签；失败只记日志（派生数据，下个小时再来）。
-func recomputeTags(ctx context.Context, store tagging.Store) {
+func recomputeTags(ctx context.Context, store *tagging.Postgres) {
+	// 先清掉窗口外的位置观测（多留 7 天缓冲），再重算。
+	if pruned, err := store.PruneOlderThan(ctx, time.Now().UTC().Add(-tagging.Window-7*24*time.Hour)); err != nil {
+		log.Printf("tag prune failed: %v", err)
+	} else if pruned > 0 {
+		log.Printf("tag prune: coarse_locations=%d", pruned)
+	}
 	n, err := tagging.Recompute(ctx, store, time.Now().UTC())
 	if err != nil {
 		log.Printf("tag recompute failed: %v", err)

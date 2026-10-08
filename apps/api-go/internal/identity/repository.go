@@ -297,23 +297,26 @@ type ErasedCrossAggregate struct {
 	ConversationSnapshots int `json:"conversationSnapshots"`
 	AvatarAssetsUnserved  int `json:"avatarAssetsUnserved"`
 	PushTokens            int `json:"pushTokens"`
+	// TAG-SYSTEM-001：账户删除要连带删掉「派生出来的人」——用户标签和粗粒度位置观测。
+	UserTags        int `json:"userTags"`
+	CoarseLocations int `json:"coarseLocations"`
 }
 
 // Total is the number of rows the pass scrubbed or un-served.
 func (e ErasedCrossAggregate) Total() int {
 	return e.PostDisplayNames + e.StatusDisplayNames + e.OpportunityOwners +
 		e.BusinessDirectoryNames + e.ConversationSnapshots +
-		e.AvatarAssetsUnserved + e.PushTokens
+		e.AvatarAssetsUnserved + e.PushTokens + e.UserTags + e.CoarseLocations
 }
 
 // Summary renders the receipt for the privacy_request_events audit
 // trail, alongside ErasedPersonalData.Summary().
 func (e ErasedCrossAggregate) Summary() string {
 	return fmt.Sprintf(
-		"external: post_names=%d status_names=%d opportunity_owners=%d business_directory_names=%d conversation_snapshots=%d avatar_assets_unserved=%d push_tokens=%d",
+		"external: post_names=%d status_names=%d opportunity_owners=%d business_directory_names=%d conversation_snapshots=%d avatar_assets_unserved=%d user_tags=%d coarse_locations=%d push_tokens=%d",
 		e.PostDisplayNames, e.StatusDisplayNames, e.OpportunityOwners,
 		e.BusinessDirectoryNames, e.ConversationSnapshots,
-		e.AvatarAssetsUnserved, e.PushTokens,
+		e.AvatarAssetsUnserved, e.UserTags, e.CoarseLocations, e.PushTokens,
 	)
 }
 

@@ -171,6 +171,16 @@ func (r *IdentityRepository) EraseCrossAggregateIdentity(ctx context.Context, us
 		return identity.ErasedCrossAggregate{}, err
 	}
 
+	// 6. TAG-SYSTEM-001：由行为派生出来的「这个人」——用户标签和粗粒度位置观测。它们是个人数据
+	//    （位置观测尤其），账户删除之后继续留着，就等于把一个注销的人继续留在撮合的读取面里。
+	//    没有账本语义，直接 DELETE。
+	if err := step(&receipt.UserTags, `DELETE FROM tag.user_tags WHERE user_id = $1`, userID); err != nil {
+		return identity.ErasedCrossAggregate{}, err
+	}
+	if err := step(&receipt.CoarseLocations, `DELETE FROM tag.coarse_locations WHERE user_id = $1`, userID); err != nil {
+		return identity.ErasedCrossAggregate{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return identity.ErasedCrossAggregate{}, err
 	}
