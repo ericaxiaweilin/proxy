@@ -886,7 +886,7 @@ type nudgeEmitter struct{ pipeline notification.Producer }
 func (n nudgeEmitter) Nudge(ctx context.Context, userID, key, title, body, target string) error {
 	_, _, err := n.pipeline.Emit(ctx, notification.Notification{
 		RecipientID: userID, Type: "NUDGE_" + key, Title: title, Body: body,
-		DeepLink: "app://nudge/" + target, DedupeKey: "nudge:" + key + ":" + userID,
+		DeepLink: "/nudge/" + target, DedupeKey: "nudge:" + key + ":" + userID,
 	})
 	return err
 }
