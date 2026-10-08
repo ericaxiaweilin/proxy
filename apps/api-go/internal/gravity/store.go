@@ -79,7 +79,18 @@ func (p *Postgres) Occurrences(ctx context.Context, since time.Time) ([]Occurren
 		SELECT sender_id, 'CHAT_ACTIVE', created_at FROM conversation.messages
 			WHERE created_at >= $1 AND deleted_at IS NULL AND COALESCE(authored_by, '') = '' AND message_type <> 'SYSTEM_CONTEXT'
 		UNION ALL
-		SELECT actor_id, 'BROWSE_ACTIVE', created_at FROM localnet.interaction_events WHERE created_at >= $1
+		SELECT e.actor_id, 'BROWSE_ACTIVE', e.created_at FROM localnet.interaction_events e
+			WHERE e.created_at >= $1
+			  -- COMP-GRAVITY-CONSENT-001：浏览行为是敏感个人数据（Nghị định 356/2025 Art. 4.1(l)），
+			  -- 只有「事件发生那一刻同意是有效的、并且用户现在也没撤回」的事件才参与计算。
+			  -- 写入闸（localnet.appendInteraction）只管 2026-09-27 之后的新事件；之前默认开的时期留下的
+			  -- 事件没有任何同意记录，不能因为它们还躺在表里就继续喂给画像。
+			  AND (SELECT c.action FROM privacy.purpose_consents c
+			        WHERE c.user_id = e.actor_id AND c.purpose = 'BEHAVIOR_ANALYTICS' AND c.acted_at <= e.created_at
+			        ORDER BY c.acted_at DESC LIMIT 1) = 'GRANT'
+			  AND (SELECT c.action FROM privacy.purpose_consents c
+			        WHERE c.user_id = e.actor_id AND c.purpose = 'BEHAVIOR_ANALYTICS'
+			        ORDER BY c.acted_at DESC LIMIT 1) = 'GRANT'
 		UNION ALL
 		SELECT actor_id, 'SCENE_VISIT', declared_at FROM reality.scene_checkins WHERE declared_at >= $1
 		UNION ALL
