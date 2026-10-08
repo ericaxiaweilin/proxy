@@ -2,6 +2,7 @@ package tagging
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -121,4 +122,43 @@ func Topics() []string {
 		out = append(out, r.topic)
 	}
 	return out
+}
+
+// TopicHit 是正文命中的一个主题标签取值及其权重系数（叶 1、父 0.5、祖父 0.25…）。
+type TopicHit struct {
+	Value  string  // 如 "outdoor/hiking"（词典节点 id 去掉 "interest/" 前缀），或旧词表的中文词
+	Factor float64
+}
+
+// TopicHits：正文 → 主题命中。词典（taxonomy/*.json）足够大时按词典走（带祖先汇总，根节点 interest 太泛不计）；
+// 词典还只有根类目时退回旧的小词表。两者的取值格式不同，过渡期内共存，词典合入后旧词表即可删除。
+func TopicHits(body string) []TopicHit {
+	if tx, err := DefaultTaxonomy(); err == nil && tx.Size() >= 200 {
+		exp := tx.Expand(tx.Match(body))
+		out := make([]TopicHit, 0, len(exp))
+		for id, f := range exp {
+			if id == "interest" {
+				continue
+			}
+			out = append(out, TopicHit{Value: strings.TrimPrefix(id, "interest/"), Factor: f})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Value < out[j].Value })
+		return out
+	}
+	legacy := ExtractTopics(body)
+	out := make([]TopicHit, 0, len(legacy))
+	for _, v := range legacy {
+		out = append(out, TopicHit{Value: v, Factor: 1})
+	}
+	return out
+}
+
+// TopicLabel：主题取值的人话名字（词典里的中文名；旧词表的取值本身就是中文）。
+func TopicLabel(value string) string {
+	if tx, err := DefaultTaxonomy(); err == nil {
+		if _, ok := tx.Node("interest/" + value); ok {
+			return tx.Label("interest/" + value)
+		}
+	}
+	return value
 }

@@ -183,7 +183,7 @@ type Tag struct {
 // ID 是 axis:value，对人和日志都可读。
 func (t Tag) ID() string { return t.Axis + ":" + t.Value }
 
-var valuePattern = regexp.MustCompile(`^[\p{L}\p{N}_.,:+-]{1,48}$`)
+var valuePattern = regexp.MustCompile(`^[\p{L}\p{N}_.,:+/-]{1,48}$`)
 var spaces = regexp.MustCompile(`\s+`)
 
 // NormalizeValue：首尾去空白、内部空白折成下划线（"City Walk" → "City_Walk"）。折完仍不合格的是脏数据，Derive 会拒。

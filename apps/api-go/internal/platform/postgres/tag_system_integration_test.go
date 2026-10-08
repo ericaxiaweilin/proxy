@@ -333,3 +333,55 @@ func TestTopicAndOrderTagsBuildAFinePictureAndCosineSeparatesPeople(t *testing.T
 		t.Errorf("viewer should have a non-empty profile: %+v", p)
 	}
 }
+
+// 行为体系：互动（赞/评/转/藏）、活动（感兴趣/报名/看）、市场需求（发/报名）都按条目正文归主题，
+// 主动行为不需要浏览同意；每个主动行为都带主题标签。
+func TestEveryBehaviourSourceFeedsTopicTags(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	liker, joiner, publisher, applicant, author := "u_bs_l_"+stamp, "u_bs_j_"+stamp, "u_bs_p_"+stamp, "u_bs_a_"+stamp, "u_bs_au_"+stamp
+	users := []string{liker, joiner, publisher, applicant, author}
+	post, activity, opp := "p_bs_"+stamp, "a_bs_"+stamp, "opp_bs_"+stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM tag.user_tags WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM engagement.reactions WHERE post_id = $1`, post)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.posts WHERE id = $1`, post)
+		_, _ = pool.Exec(bg, `DELETE FROM activity.participants WHERE activity_id = $1`, activity)
+		_, _ = pool.Exec(bg, `DELETE FROM activity.activities WHERE id = $1`, activity)
+		_, _ = pool.Exec(bg, `DELETE FROM marketplace.opportunities WHERE id = $1`, opp)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'周末去徒步',$3,'PUBLISHED')`, post, author, now)
+	exec(`INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at) VALUES ($1,$2,$3,'LIKE',$4)`, "rx_"+stamp, post, liker, now)
+	exec(`INSERT INTO activity.activities (id, payload) VALUES ($1,$2::jsonb)`, activity, `{"title":"咖啡拉花体验课","category":"WORKSHOP"}`)
+	exec(`INSERT INTO activity.participants (activity_id, actor_id, joined_at) VALUES ($1,$2,$3)`, activity, joiner, now)
+	exec(`INSERT INTO marketplace.opportunities (id, owner_id, payload, created_at) VALUES ($1,$2,$3::jsonb,$4)`, opp, publisher, `{"title":"找人一起摄影","theme":"摄影搭子"}`, now)
+	exec(`INSERT INTO marketplace.applications (id, opportunity_id, applicant_id, payload, created_at) VALUES ($1,$2,$3,'{"status":"SUBMITTED"}'::jsonb,$4)`, "app_bs_"+stamp, opp, applicant, now)
+
+	store := tagging.NewPostgres(pool)
+	if _, err := tagging.Recompute(ctx, store, now); err != nil {
+		t.Fatalf("Recompute: %v", err)
+	}
+	hasTopic := func(user, label string) bool {
+		tags, _ := store.TagsOf(ctx, user)
+		for _, tg := range tags {
+			if tg.Axis == tagging.AxisInterestTopic && tagging.TopicLabel(tg.Value) == label {
+				return true
+			}
+		}
+		return false
+	}
+	for who, label := range map[string]string{liker: "徒步", joiner: "咖啡", publisher: "摄影", applicant: "摄影"} {
+		if !hasTopic(who, label) {
+			t.Errorf("%s should have the topic %q from an active behaviour", who, label)
+		}
+	}
+}

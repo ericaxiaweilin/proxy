@@ -57,7 +57,11 @@ func (p *Postgres) LoadEvidence(ctx context.Context, since time.Time) (map[strin
 			return nil, err
 		}
 		ev := get(id)
-		for _, topic := range ExtractTopics(body) {
+		for _, hit := range TopicHits(body) {
+			if hit.Factor < 0.5 {
+				continue // 回避只看叶子和它的父类，更粗的类目太泛，不拿来判「不喜欢」
+			}
+			topic := hit.Value
 			prev := ev.TopicViews[topic]
 			prev.Events += s.Events
 			prev.DwellMs += s.DwellMs
@@ -334,8 +338,8 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 			rows.Close()
 			return err
 		}
-		for _, topic := range ExtractTopics(body) {
-			push(user, Signal{Axis: AxisInterestTopic, Value: topic, Weight: w, N: 1, First: first, Last: last})
+		for _, hit := range TopicHits(body) {
+			push(user, Signal{Axis: AxisInterestTopic, Value: hit.Value, Weight: w * hit.Factor, N: 1, First: first, Last: last})
 		}
 	}
 	rows.Close()
@@ -355,8 +359,8 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 			rows.Close()
 			return err
 		}
-		for _, topic := range ExtractTopics(body) {
-			push(user, Signal{Axis: AxisInterestTopic, Value: topic, Weight: 1.5, N: 1, First: at, Last: at, Explicit: true})
+		for _, hit := range TopicHits(body) {
+			push(user, Signal{Axis: AxisInterestTopic, Value: hit.Value, Weight: 1.5 * hit.Factor, N: 1, First: at, Last: at, Explicit: true})
 		}
 	}
 	rows.Close()
@@ -416,6 +420,17 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 2d) 其余行为源（架构文档 §3）：互动 / 活动 / 市场需求的主题。
+	if err := p.loadInteractionTopics(ctx, since, push); err != nil {
+		return err
+	}
+	if err := p.loadActivityTopics(ctx, since, valid, push); err != nil {
+		return err
+	}
+	if err := p.loadMarketTopics(ctx, since, push); err != nil {
 		return err
 	}
 
