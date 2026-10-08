@@ -33,8 +33,12 @@ export function WeatherChip({ city, lat, lng }: { city: string; lat: number | un
 }
 
 /** 发布时的天气提醒：雨提醒、暴雨建议改期（能直接设的时间可点）。 */
-export function WeatherAdviceBanner({ lat, lng, at, hours, onPickSlot }: {
-  lat: number | undefined; lng: number | undefined; at: Date; hours: number; onPickSlot: (slot: string) => void;
+export function WeatherAdviceBanner({ lat, lng, at, hours, onPickSlot, onPickAt }: {
+  lat: number | undefined; lng: number | undefined; at: Date; hours: number;
+  /** 只有「时刻」可选（没有日期）的表单：只有能直接设的建议可点。 */
+  onPickSlot?: (slot: string) => void;
+  /** 日期 + 时刻都可选的表单：所有建议都可点。 */
+  onPickAt?: (when: Date) => void;
 }): React.JSX.Element | null {
   const report = useWeather(lat, lng, at, hours);
   const msg = adviceMessage(report?.advice, at, new Date());
@@ -42,10 +46,10 @@ export function WeatherAdviceBanner({ lat, lng, at, hours, onPickSlot }: {
   return (
     <View style={[styles.banner, msg.tone === "warn" ? styles.bannerWarn : null]} testID="weather-advice">
       <Text selectable style={styles.bannerText}>{msg.text}</Text>
-      {msg.options.some((o) => o.slot) ? (
+      {msg.options.some((o) => (onPickAt ? true : o.slot)) ? (
         <View style={styles.options}>
-          {msg.options.filter((o) => o.slot).map((o) => (
-            <Pressable accessibilityLabel={`改到 ${o.label}`} key={o.label} onPress={() => onPickSlot(o.slot!)} style={styles.option}>
+          {msg.options.filter((o) => (onPickAt ? true : o.slot)).map((o) => (
+            <Pressable accessibilityLabel={`改到 ${o.label}`} key={o.label} onPress={() => { if (onPickAt) onPickAt(new Date(o.iso)); else if (o.slot) onPickSlot?.(o.slot); }} style={styles.option}>
               <Text style={styles.optionText}>{o.label}</Text>
             </Pressable>
           ))}

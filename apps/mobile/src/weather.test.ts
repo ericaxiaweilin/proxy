@@ -25,8 +25,8 @@ describe("weather", () => {
     const msg = adviceMessage({ level: "WARN", condition: "heavy_rain", maxPrecipProb: 90, suggestions: [same, nextDay] }, at, now);
     expect(msg?.tone).toBe("warn");
     expect(msg?.text).toContain("暴雨");
-    expect(msg?.options[0]).toEqual({ label: "18:00", slot: "18:00" });
-    expect(msg?.options[1]).toEqual({ label: "明天 18:00" });
+    expect(msg?.options[0]).toEqual({ label: "18:00", iso: same, slot: "18:00" });
+    expect(msg?.options[1]).toEqual({ label: "明天 18:00", iso: nextDay });
   });
 
   it("ordinary rain is a reminder; dry or unknown says nothing", () => {

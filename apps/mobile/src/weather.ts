@@ -64,6 +64,8 @@ export const slotOf = (d: Date): string => `${pad(d.getHours())}:${pad(d.getMinu
 
 export type AdviceOption = {
   label: string;
+  /** 这个建议时间的绝对时刻（ISO）。 */
+  iso: string;
   /** 点一下能直接设成这个见面时间；不能（跨天且滚轮只有时刻）就是 undefined，只当文字。 */
   slot?: string;
 };
@@ -83,7 +85,7 @@ export function adviceMessage(advice: WeatherAdvice | undefined, at: Date, now: 
     const tomorrow = d.toDateString() === new Date(now.getTime() + 86400000).toDateString();
     const label = `${sameDay ? "" : tomorrow ? "明天 " : `${d.getMonth() + 1}/${d.getDate()} `}${slotOf(d)}`;
     const settable = nextOccurrence(slotOf(d), now).getTime() === d.getTime();
-    return settable ? { label, slot: slotOf(d) } : { label };
+    return settable ? { label, iso, slot: slotOf(d) } : { label, iso };
   });
   const head = `${slotOf(at)} 前后预报有${cond}`;
   return {

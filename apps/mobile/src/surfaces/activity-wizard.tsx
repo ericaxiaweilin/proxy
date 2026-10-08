@@ -29,6 +29,7 @@ import { MediaClient } from "../media-client";
 import { activityCoverUri, mediaThumbUrl } from "../media-thumb-url";
 import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { getCurrentFix } from "../device-location";
+import { WeatherAdviceBanner } from "../components/weather-chip";
 import { expoLocationApi } from "../device-location-native";
 import { sceneDistanceMeters, shopCardDistance, type SceneOrigin } from "../scene-shop-directory";
 import { ProxyBackGlyph, ProxyLoading } from "../components/proxy-foundation";
@@ -677,6 +678,21 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
           })}
         </ScrollView>
       </View>
+
+      {/* WEATHER-001：选了场地后，那个日期 + 时间 + 时长的天气；雨提醒，暴雨建议改期（点一下改日期和时间）。 */}
+      {selectedSpot !== undefined && form.duration !== "all" ? (
+        <WeatherAdviceBanner
+          at={new Date(`${form.dateISO}T${String(form.hour).padStart(2, "0")}:${String(form.minute).padStart(2, "0")}:00`)}
+          hours={form.duration / 60}
+          lat={selectedSpot.latitude}
+          lng={selectedSpot.longitude}
+          onPickAt={(when) => patch({
+            dateISO: `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, "0")}-${String(when.getDate()).padStart(2, "0")}`,
+            hour: when.getHours(),
+            minute: when.getMinutes() >= 30 ? 30 : 0,
+          })}
+        />
+      ) : null}
 
       {/* 6. 时长 */}
       <View style={[styles.block, restActive && styles.blockActive]}>
