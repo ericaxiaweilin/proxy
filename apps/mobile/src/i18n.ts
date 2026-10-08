@@ -714,6 +714,14 @@ export interface Messages {
   "consent.twin.desc": string;
   "consent.ops.title": string;
   "consent.ops.desc": string;
+  // NEXT-STEPS-001（2026-10-08）：首页「下一步」卡的外壳 + 动态空态那颗按钮。
+  //
+  // 进字典的只有界面**自己**说的这三句：卡片标题、那颗按钮、以及动态空态里的
+  // 「发动态」。title / reason 来自服务端（那是内容不是文案），按仓库惯例留在
+  // 业务载荷里不过字典。
+  "nextStepSection": string;
+  "nextStepAction": string;
+  "feedEmptyPostCta": string;
 }
 
 const ZH: Messages = {
@@ -1309,6 +1317,9 @@ settingsCacheClearedWith: "缓存已清理，释放 {size}",
   "consent.twin.desc": "默认关闭。开启后记录你看过哪些动态和主页，用来生成「AI 分身 · 好友洞察」里的浏览统计。随时可关。",
   "consent.ops.title": "运营可查看我的浏览明细",
   "consent.ops.desc": "默认关闭。开启后，平台运营侧可以查看你浏览别人动态的逐人明细（看了哪条、停留几秒、放大几次），用于内容运营。随时可关。",
+  "nextStepSection": "下一步",
+  "nextStepAction": "去做",
+  "feedEmptyPostCta": "发动态",
 };
 
 const VI: Messages = {
@@ -1902,6 +1913,9 @@ settingsCacheClearedWith: "Đã dọn bộ nhớ đệm, giải phóng {size}",
   "consent.twin.desc": "Mặc định tắt. Khi bật, ứng dụng ghi lại bạn đã xem những bài và trang cá nhân nào để tạo thống kê lượt xem trong “Bản sao AI · Thấu hiểu bạn bè”. Bạn có thể tắt bất cứ lúc nào.",
   "consent.ops.title": "Bộ phận vận hành có thể xem chi tiết lượt xem của tôi",
   "consent.ops.desc": "Mặc định tắt. Khi bật, bộ phận vận hành của nền tảng có thể xem theo từng người chi tiết về việc bạn xem bài của người khác (xem bài nào, xem bao lâu, phóng to mấy lần), dùng cho vận hành nội dung. Bạn có thể tắt bất cứ lúc nào.",
+  "nextStepSection": "Bước tiếp theo",
+  "nextStepAction": "Làm ngay",
+  "feedEmptyPostCta": "Đăng bài",
 };
 
 const EN: Messages = {
@@ -2495,6 +2509,9 @@ settingsCacheClearedWith: "Cache cleared, {size} freed",
   "consent.twin.desc": "Off by default. When on, it records which posts and profiles you viewed to produce the browsing statistics in “AI twin · Friend insights”. You can turn it off at any time.",
   "consent.ops.title": "Operations staff can see my per-person view details",
   "consent.ops.desc": "Off by default. When on, the platform's operations team can see, person by person, how you viewed other people's posts (which post, how many seconds, how many zooms), for content operations. You can turn it off at any time.",
+  "nextStepSection": "Next step",
+  "nextStepAction": "Do it",
+  "feedEmptyPostCta": "Post",
 };
 
 const LO: Messages = {
@@ -3087,6 +3104,9 @@ settingsCacheClearedWith: "ລ້າງ cache ແລ້ວ, ຄືນ {size}",
   "consent.twin.desc": "ປິດໂດຍລີ່ມຕົ້ນ. ເມື່ອເປີດ ຈະບັນທຶກວ່າທ່ານໄດ້ເບິ່ງຂໍ້ຄວາມໃດ ແລະ ໜ້າເວັບຂອງຜູ້ຊື່ໃດ ເພື່ອສ້າງສະຖິດການເບິ່ງເນື່ອງໃນ “AI ຕົວຕຽນ · ເຂົ້າໃຈເພື່ອນ”. ປິດໄດ້ເວລາໃດກໍໄດ້.",
   "consent.ops.title": "ຝ່າຍດູແລດຫນ້າທີ່ເຫັນລາຍລະອຽດການເບິ່ງຂອງຂ້ອຍໄດ້",
   "consent.ops.desc": "ປິດໂດຍລີ່ມຕົ້ນ. ເມື່ອເປີດ ຝ່າຍດູແລດຫນ້າຂອງແພລັດຟອມຈະເຫັນລາຍລະອຽດ ຕໍ່ຄົນ ຂອງການທີ່ທ່ານໄດ້ເບິ່ງຂໍ້ຄວາມຂອງຜູ້ອື່ນ (ຂໍ້ຄວາມໃດ, ຢູ່ນາທີໃດ, ຂະຍາຍໃຫ້ຂະຍານກາຍຈັດຈຸດ), ໃຊ້ສຳລັບການດູແລຫນ້າເນື້ອງ. ປິດໄດ້ເວລາໃດກໍໄດ້.",
+  "nextStepSection": "ຂັ້ນຕໍ່ໄປ",
+  "nextStepAction": "ເຮັດດຽວນີ້",
+  "feedEmptyPostCta": "ເຜີຍແຜັຂໍ້ຄວາມ",
 };
 
 const KO: Messages = {
@@ -3679,6 +3699,9 @@ settingsCacheClearedWith: "캐시를 정리해 {size}를 확보했습니다",
   "consent.twin.desc": "기본값은 꺼짐입니다. 켜면 어떤 게시물과 프로필을 봤는지 기록해 「AI 분신 · 친구 인사이트」의 조회 통계를 만듭니다. 언제든지 끌 수 있습니다.",
   "consent.ops.title": "운영팀이 내 조회 내역을 볼 수 있음",
   "consent.ops.desc": "기본값은 꺼짐입니다. 켜면 플랫폼 운영측이 다른 사람의 게시물을 본 내역을 사람별로 볼 수 있습니다(어느 게시물, 몇 초 체류, 몇 번 확대). 이는 콘텐츠 운영에 사용됩니다. 언제든지 끌 수 있습니다.",
+  "nextStepSection": "다음 단계",
+  "nextStepAction": "지금 하기",
+  "feedEmptyPostCta": "게시글 작성",
 };
 
 const JA: Messages = {
@@ -4271,6 +4294,9 @@ settingsCacheClearedWith: "キャッシュを削除し、{size} 空きました"
   "consent.twin.desc": "初期状態はオフです。有効にすると、どの投稿とプロフィールを見たかを記録し、「AI 分身 · 友達インサイト」の閲覧統計を作成します。いつでもオフにできます。",
   "consent.ops.title": "運営チームが私の閲覧履歴の詳細を見られる",
   "consent.ops.desc": "初期状態はオフです。有効にすると、プラットフォームの運営チームが、他人の投稿を私がどう見たかを本人ごとに把握できます（どの投稿、何秒間、何回拡大したか）。これはコンテンツ運営のためのものです。いつでもオフにできます。",
+  "nextStepSection": "次のステップ",
+  "nextStepAction": "はじめる",
+  "feedEmptyPostCta": "投稿する",
 };
 
 export const I18N: Record<Language, Messages> = {

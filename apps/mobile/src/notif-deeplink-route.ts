@@ -1,14 +1,23 @@
+// NEXT-STEPS-001：引导推送那条 `/nudge/<TARGET>` 的解法与上面那张表不同
+// （它指向一个动作而不是一条记录），所以单独一个函数 nudgeRouteFor；但四个
+// TARGET 落到哪一页，与首页那张卡共用同一份映射 —— 一处改，两处不漂。
+import { targetToRoute, type NextStepDestination } from "./next-steps";
+
 // NOTIF-DEEPLINK-ROUTE-001（2026-10-02）：通知深链 → App 内真实存在的目的地。
 //
 // 服务端 `isResolvableDeepLink` 放行前缀：
 //   /orders /tasks /vouchers /offers /invitations
 // MARKET-SELECT-NOTIFY-001 又加了 /market（「你被选中了」「附近有个单适合你」
-// 两条通知带的深链）。但「深链合法」不等于「App 里有这一页」—— 这里只登记
-// **真的有屏幕**的前缀：
+// 两条通知带的深链），NEXT-STEPS-001 再加 /posts /profiles /nudge。但「深链合法」
+// 不等于「App 里有这一页」—— 这里只登记 **真的有屏幕**的前缀：
 //
 //   /orders/<id>       → myorders（我的订单 · MyOrdersSurface，真界面）
 //   /invitations/<id>  → myscenes（我的场景 · 我发起的 Scene 与收到的邀请）
 //   /market/<id>       → market（市场 · MarketSurface，直达那一单订单详情）
+//   /posts/<id>        → feed（动态。没有独立的「单条帖子」页 —— 帖子就在动态流里，
+//                        所以落动态流并**带上 id**：那是通知里说的那一条）
+//   /profiles/<id>     → otherprofile（对方主页 · OtherProfileSurface，feed 点头像
+//                        与市场选人步点头像走的是同一页）
 //
 // 其余三个（/tasks /vouchers /offers）**故意不登记** —— apps/mobile/src 下没有
 // 对应屏幕。硬塞一个「看起来差不多」的页面（比如把 offer 指到「我的订单」）就是
@@ -22,7 +31,12 @@ const DEEP_LINK_ROUTES: Record<string, string> = {
   // 就是它。落点是 MarketSurface 里**已有的**订单详情页（OpportunityDetail）：
   // 报名过的人看到自己的申请（被选中时那颗「确认合作」按钮就在详情页里），
   // 没报名的看到「报名报价」。不新造一屏 —— 通知点进去看到的必须是平时那一页。
-  "/market": "market"
+  "/market": "market",
+  // NEXT-STEPS-001：评论 / 转发 / 关注通知带的深链，服务端已在
+  // notification.deepLinkPrefixes 里放行。见上面注释里这两个前缀为什么落到
+  // 动态流与对方主页。
+  "/posts": "feed",
+  "/profiles": "otherprofile"
 };
 
 /** 一条能落地的深链 = 目的地路由 + 通知指向的那条记录自己的 id。 */
@@ -72,4 +86,28 @@ function canonicalise(link: string): string {
   // 站内路径：`//evil.com/...` 这种协议相对地址不是我们的链接。
   if (raw.startsWith("//")) return "";
   return raw;
+}
+
+/**
+ * NEXT-STEPS-001：`/nudge/<TARGET>`（引导推送「发第一条动态」等）→ 落点。
+ *
+ * 与 deepLinkRouteFor **故意分开**，因为它的形状不同：引导深链指向的是**一个
+ * 动作**（去动态发帖），不是**某一条记录**，所以没有 id 可带。若把它塞进上面那个
+ * 函数，就只能给一个假 id —— 那是把「前缀必须带 id」那条规则反过来糟蹋。
+ *
+ * TARGET 用 targetToRoute 解（同一份映射，首页那张卡也用它）。解不出来的 TARGET
+ * 返回 undefined：调用方退回「只标已读」，不跳。
+ *
+ * 形状仍然是**有 id 式的**：必须是 `/nudge/<TARGET>`，`/nudge` 与 `/nudge/` 都
+ * 不认（残缺的引导链接指向哪一步是猜的）。
+ */
+export function nudgeRouteFor(link: string): NextStepDestination | undefined {
+  const path = canonicalise(link);
+  if (!path) return undefined;
+  const slash = path.indexOf("/", 1);
+  if (slash <= 1) return undefined;
+  if (path.slice(0, slash) !== "/nudge") return undefined;
+  const target = path.slice(slash + 1).trim();
+  if (!target) return undefined;
+  return targetToRoute(target);
 }

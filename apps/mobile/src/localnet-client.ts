@@ -5,6 +5,7 @@ import type { CommandResult, CreatePostPayload, FeedMediaItem, FeedPost } from "
 import { ListFeedPostsPayloadSchema } from "@proxy/contracts";
 import type { TransportResponse } from "./auth-client";
 import { filterPostsByFeedSearch, normalizeFeedSearchQuery } from "./feed-search";
+import { parseNextSteps, type NextSteps } from "./next-steps";
 import { parseCommandResult } from "./login-client";
 import type { SecureSessionStore, StoredSession } from "./secure-session";
 import { OfflineFallbackSessionError } from "./secure-session";
@@ -596,6 +597,28 @@ export class LocalNetClient {
       actedAt: typeof body.actedAt === "string" ? body.actedAt : undefined,
       consentHistory: Array.isArray(body.consentHistory) ? body.consentHistory : [],
     };
+  }
+
+  /**
+   * NEXT-STEPS-001 — 读「我下一步该做什么」（服务端 GetNextSteps）。
+   *
+   * 读的是**自己**的状态，所以没有 userId 参数（服务端按 actor 取）。它只说自己
+   * 做过什么，不给 App 内部路由；跳转映射在 ./next-steps 的 targetToRoute。
+   *
+   * 形状不对时**抛**（parseNextSteps fail-closed）：调用方 catch 之后不显示任何东西 ——
+   * 引导卡读不出来时画一个「读不出来」的框，比没有这张卡更糟。
+   */
+  public async getNextSteps(): Promise<NextSteps> {
+    const session = await this.requireSession();
+    const result = await this.sendCommand(
+      session,
+      "GetNextSteps",
+      // 服务端 validateEnvelope 要求 target.id 非空（先于 dispatch）。读的是我的
+      // 资料状态，所以用 Profile + 具名哨兵 id（同 ListProfileViewStats 的写法）。
+      { type: "Profile", id: "next_steps" },
+      {}
+    );
+    return parseNextSteps(this.decodeOperationRef(result));
   }
 
   public async createPost(payload: CreatePostPayload, idempotencyKey?: string): Promise<string> {

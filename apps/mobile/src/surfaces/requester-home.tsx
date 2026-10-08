@@ -31,6 +31,8 @@ import type { ConversationInboxItem } from "../conversation-client";
 import type { HardDemandCategory } from "../uiplan/types";
 import type { DemandClient, RequesterHomeDraftItem, RequesterHomeTaskItem } from "../demand-client";
 import type { LocalNetClient } from "../localnet-client";
+// NEXT-STEPS-001：服务端说「你下一步该做什么」，这里只决定「有没有那一页可以跳」。
+import { targetToRoute, type NextSteps } from "../next-steps";
 import { buildCreatePostPayload, newPublishIdempotencyKey } from "../composer-publish";
 import type { MarketplaceClient } from "../marketplace-client";
 import type { ActivityClient } from "../activity-client";
@@ -182,6 +184,11 @@ export function RequesterHome({
   onEnterWorkspace,
   onOpenMarket,
   onOpenFeed,
+  // NEXT-STEPS-001：引导的 EDIT_PROFILE 落点是「我的 → 个人管理」子页。这里给一个
+  // 通用的子页入口，而不是一个「打开资料编辑器」的专用回调 —— 壳那边已有的
+  // meOpenSubPage 正好能接上（surfaces/me-sub-pages.ts 的 meSubPage(route)）。
+  // 没接就不画那一步（见下面 nextStepDestination 的可达性判定）。
+  onOpenMeSubPage,
   onChat,
   onOpenAssistantConversation,
   conversationPanel,
@@ -215,6 +222,7 @@ export function RequesterHome({
   onEnterWorkspace: (selection: RequesterGoal) => void;
   onOpenMarket?: ((tab: MarketTab) => void) | undefined;
   onOpenFeed?: (() => void) | undefined;
+  onOpenMeSubPage?: ((route: string) => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
   onOpenAssistantConversation?: (() => void) | undefined;
   conversationPanel?: ReactNode;
@@ -408,6 +416,9 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinMsg, setJoinMsg] = useState<string | undefined>(undefined);
   const [continueItems, setContinueItems] = useState<ReadonlyArray<ContinueCard>>([]);
+  // NEXT-STEPS-001：下一步。读不出来就保持 undefined —— 引导卡在加载中 / 失败 / 没有
+  // 下一步时不占首页一寸地方，也不给用户看一句「读不出来」。
+  const [nextSteps, setNextSteps] = useState<NextSteps | undefined>(undefined);
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
   // 看到摄影好搭子。
@@ -1468,6 +1479,57 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
     };
   }, [demandClient, homeRefreshNonce]);
 
+  // NEXT-STEPS-001：读下一步。deps 里有 viewerAccountId（身份换了就得重读）与
+  // homeRefreshNonce（下拉刷新）。回首页的重读靠**卸载重挂**：RequesterHome 只在
+  // tab === "HOME" 时渲染，跳去动态 / 市场 / 我的都会把它卸载，回来时这个 effect
+  // 重跑一次 —— 用户做完那件事回来，卡自然就没了。
+  useEffect(() => {
+    if (!localNet) {
+      setNextSteps(undefined);
+      return;
+    }
+    let cancelled = false;
+    void trackHomeLoad(
+      localNet.getNextSteps()
+        .then((result) => {
+          if (!cancelled) setNextSteps(result);
+        })
+        .catch(() => {
+          // fail-closed：读失败不画卡，也不提示（引导不是用户要办的事，
+          // 弹一句「读不出来」只会变成首页上的噪音）。
+          if (!cancelled) setNextSteps(undefined);
+        })
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [localNet, viewerAccountId, homeRefreshNonce]);
+
+  // NEXT-STEPS-001：这一步有没有**真的能跳的那一页**。落点由服务端给的 target
+  // 决定（targetToRoute），能不能跳由首页手上的回调决定 —— 两者缺一就不画卡，
+  // 绝不画一颗点不动的按钮。
+  const nextStep = nextSteps?.next ?? undefined;
+  const nextStepDestination = nextStep ? targetToRoute(nextStep.target) : undefined;
+  const nextStepReachable =
+    nextStepDestination !== undefined &&
+    (nextStepDestination.kind === "feed"
+      ? onOpenFeed !== undefined
+      : nextStepDestination.kind === "market"
+        ? onOpenMarket !== undefined
+        : onOpenMeSubPage !== undefined);
+  const openNextStep = (): void => {
+    if (!nextStepDestination) return;
+    if (nextStepDestination.kind === "feed") {
+      onOpenFeed?.();
+      return;
+    }
+    if (nextStepDestination.kind === "market") {
+      onOpenMarket?.(nextStepDestination.tab);
+      return;
+    }
+    onOpenMeSubPage?.(nextStepDestination.route);
+  };
+
   // SCROLL-CHROME-001: 共享控制器。卸载回显 chrome 也由它负责（与动态一致）：
   // 切走时壳会重置，内部替换（如进 Scene Composer）时靠这里复位，避免停在隐藏态。
   const onScroll = useScrollChrome(onChromeVisibilityChange);
@@ -2301,6 +2363,27 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
           </Pressable>
         ))}
       </View> : null}
+
+      {/* NEXT-STEPS-001：下一步卡。与上面「继续进行」同一口径 —— 服务端说什么
+          就显示什么，不多说一句；读不出来 / 没有下一步 / 那一步没有能跳的页面时
+          整张卡不出现（不占位、不解释）。标题与那颗「去做」是界面自己的话，走字典；
+          title / reason 是服务端下发的内容，原样显示。 */}
+      {nextStep && nextStepReachable ? (
+        <View style={styles.nextStepCard}>
+          <View style={styles.continueCopy}>
+            <Text selectable style={styles.nextStepLabel}>{t("nextStepSection")}</Text>
+            <Text selectable style={styles.continueTitle}>{nextStep.title}</Text>
+            <Text selectable style={styles.continueSub}>{nextStep.reason}</Text>
+          </View>
+          <Pressable
+            accessibilityLabel={`${t("nextStepSection")} · ${nextStep.title}`}
+            onPress={openNextStep}
+            style={styles.nextStepAction}
+          >
+            <Text selectable style={styles.nextStepActionText}>{t("nextStepAction")}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* Scene/Activity 是撮合完成后的见面道具，不抢人物发现首屏。
           放在进行中链路之后，并替代旧的重复“场景”横栏。 */}
@@ -3189,6 +3272,24 @@ const styles = StyleSheet.create({
   continueTitle: { color: color.ink, fontSize: 14, fontWeight: "700" },
   continueSub: { color: color.muted, fontSize: 12, marginTop: 4 },
   continueChevron: { color: color.muted, fontSize: 22, fontWeight: "300" },
+
+  // NEXT-STEPS-001：下一步卡。与「继续进行」同一套卡形（白底 / 描边 / 投影），
+  // 差别只是左边是文案、右边是一颗能点的按钮，不是一整张卡都能点。
+  nextStepCard: {
+    alignItems: "center",
+    backgroundColor: color.white,
+    borderColor: color.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 11,
+    marginVertical: 5,
+    padding: 11,
+    ...shadows.card
+  },
+  nextStepLabel: { color: color.muted, fontSize: 11, fontWeight: "700", lineHeight: 15, marginBottom: 2 },
+  nextStepAction: { alignItems: "center", backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 10 },
+  nextStepActionText: { color: color.white, fontSize: 12.5, fontWeight: "800", lineHeight: 17 },
 
   // R15.34: 推荐筛选 sheet (覆盖层)
   sheetBackdrop: {

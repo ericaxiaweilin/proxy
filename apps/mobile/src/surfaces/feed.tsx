@@ -27,6 +27,8 @@ import { type MediaClient } from "../media-client";
 import { ComposerV2Screen } from "./ComposerV2Screen";
 import { FilterChipRail } from "../components/filter-chip-rail";
 import { useScrollChrome } from "../shell/scroll-chrome";
+// NEXT-STEPS-001：空态那颗「发动态」走字典（写死中文就等于只有中文用户看得见它）。
+import { useI18n } from "../i18n";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { Asset, AssetField, MediaType, Query, requestPermissionsAsync } from "expo-media-library";
 import { isOpportunityPost } from "../feed-content";
@@ -304,6 +306,7 @@ export function FeedSurface({
   initialSearchQuery?: string | undefined;
   onSearchSeedConsumed?: (() => void) | undefined;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const [tab, setTab] = useState<FeedTab>(initialTab ?? "RECOMMENDED");
   // R15.23: 优先用 controlled prop (currentSection)，fallback 到内部 state (用于独立 mount / 测试)
   const [internalSection, setInternalSection] = useState<FeedSection>("POSTS");
@@ -770,6 +773,18 @@ export function FeedSurface({
     setComposerOpen(true);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: true }));
   }
+
+  // NEXT-STEPS-001：空态那颗「发动态」只给**真的是空的**动态 —— 已登录、读回来的
+  // 动态一条都没有、且当前既没有筛选 chip 也没有搜索词。
+  //
+  // 「筛选后为空」与「关注的人没发帖」都不是空：发一条解决不了「没关注到人」，
+  // 给一颗「发动态」是在指一条错路。所以判据用 posts.length（读回来的原始模型）
+  // 而不是 visible.length（那已经被 chip / 时间窗 / 自定义 feed 筛过了）。
+  const canPostFirstFeedPost =
+    (viewerAccountId ?? "") !== "" &&
+    posts.length === 0 &&
+    feedFilter === "ALL" &&
+    normalizeFeedSearchQuery(searchQuery) === "";
 
   // FEED-SHARE-TO-USER-001: 打开分享面板即拉一次收件箱。候选人跟 messages.tsx
   // 的"建群"同一诚实数据源（收件箱里真聊过天的人），过滤规则也一致：
@@ -2136,6 +2151,15 @@ export function FeedSurface({
 			  ? `当前筛选下没有足够内容。换个筛选，或直接搜索你想找的东西。`
 			  : "这里还没有足够的动态。关注本地的人和商家后会更有用。"}
           </Text>
+          {/* NEXT-STEPS-001：空白页上唯一说得清该做的事就是发一条。开的是**同一个**
+              发布器（顶部那枚 ＋、右下角 FAB 与这里是同一个 toggleEmbeddedComposer），
+              这里只是把「＋」说成人话；不给新入口，免得两处发布器各写一遍。
+              样式复用同屏「重试」那颗药丸：一屏里只有一种按钮形状。 */}
+          {canPostFirstFeedPost ? (
+            <Pressable accessibilityLabel={t("feedEmptyPostCta")} onPress={toggleEmbeddedComposer} style={styles.retryBtn}>
+              <Text selectable style={styles.retryBtnText}>{t("feedEmptyPostCta")}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : (
         <>
