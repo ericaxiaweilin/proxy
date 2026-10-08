@@ -115,3 +115,63 @@ func Affinity(a, b []Tag, now time.Time) float64 {
 	}
 	return round3(clamp01(dot / (math.Sqrt(na) * math.Sqrt(nb))))
 }
+
+// SharedTag 是两个人都有的一个标签：撮合理由里「你们都……」的那一条。
+type SharedTag struct {
+	Axis     string  `json:"axis"`
+	Label    string  `json:"label"`
+	Value    string  `json:"value"`
+	Strength float64 `json:"strength"` // 两人强度的较小者：只有两边都强才算强
+}
+
+// SharedTags 返回两个人共有的未过期标签，按 (较小强度 × 轴性质系数) 从高到低，最多 limit 条。
+// 回避标签不算共有；中性轴（区 / 价位 / 时段）系数 0.5，排在同强度的正向标签之后。
+func SharedTags(a, b []Tag, now time.Time, limit int) []SharedTag {
+	index := map[string]Tag{}
+	for _, t := range b {
+		if t.ExpiresAt.After(now) {
+			index[t.ID()] = t
+		}
+	}
+	type scored struct {
+		s     SharedTag
+		score float64
+	}
+	var list []scored
+	for _, ta := range a {
+		if !ta.ExpiresAt.After(now) {
+			continue
+		}
+		axis, ok := LookupAxis(ta.Axis)
+		if !ok || axis.Polarity == "NEGATIVE" {
+			continue
+		}
+		tb, ok := index[ta.ID()]
+		if !ok {
+			continue
+		}
+		strength := math.Min(ta.Strength, tb.Strength)
+		weight := 1.0
+		if axis.Polarity == "NEUTRAL" {
+			weight = 0.5
+		}
+		list = append(list, scored{SharedTag{Axis: ta.Axis, Label: axis.Label, Value: ta.Value, Strength: strength}, strength * weight})
+	}
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].score != list[j].score {
+			return list[i].score > list[j].score
+		}
+		if list[i].s.Axis != list[j].s.Axis {
+			return list[i].s.Axis < list[j].s.Axis
+		}
+		return list[i].s.Value < list[j].s.Value
+	})
+	if limit > 0 && len(list) > limit {
+		list = list[:limit]
+	}
+	out := make([]SharedTag, 0, len(list))
+	for _, l := range list {
+		out = append(out, l.s)
+	}
+	return out
+}

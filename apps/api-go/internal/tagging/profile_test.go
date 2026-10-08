@@ -79,3 +79,22 @@ func TestPriceBandAndTimeSlotAreCoarseOnPurposeAndNeverInvented(t *testing.T) {
 		t.Error("free-text start times are not parsed or invented")
 	}
 }
+
+func TestSharedTagsAreTheReasonsForAMatchStrongestFirstAndNeverAversions(t *testing.T) {
+	me := []Tag{tg(AxisInterestTopic, "摄影", .9), tg(AxisInterestTopic, "徒步", .4), tg(AxisDistrict, "Hoàn_Kiếm", .9), tg(AxisAversionScene, "SPA", .9)}
+	her := []Tag{tg(AxisInterestTopic, "摄影", .6), tg(AxisInterestTopic, "徒步", .8), tg(AxisDistrict, "Hoàn_Kiếm", .9), tg(AxisAversionScene, "SPA", .9), tg(AxisInterestTopic, "桌游", 1)}
+	got := SharedTags(me, her, now, 10)
+	if len(got) != 3 {
+		t.Fatalf("摄影, 徒步, 区 are shared; 桌游 is hers alone; the aversion is not a shared reason: %+v", got)
+	}
+	if got[0].Value != "摄影" || got[0].Strength != .6 {
+		t.Fatalf("strongest shared interest first, strength = the weaker of the two: %+v", got[0])
+	}
+	equal := SharedTags([]Tag{tg(AxisDistrict, "X", .8), tg(AxisInterestTopic, "摄影", .8)}, []Tag{tg(AxisDistrict, "X", .8), tg(AxisInterestTopic, "摄影", .8)}, now, 10)
+	if len(equal) != 2 || equal[0].Axis != AxisInterestTopic {
+		t.Fatalf("at equal strength a positive interest outranks a neutral axis: %+v", equal)
+	}
+	if len(SharedTags(me, her, now, 1)) != 1 {
+		t.Fatal("limit applies")
+	}
+}

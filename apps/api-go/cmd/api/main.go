@@ -781,7 +781,7 @@ func main() {
 		// MARKET-INVITE-001：快速发单 10 分钟没人报名 ⇒ 按同一套排名邀请 30km 内合适的人（两轮，各 5 人）。
 		if dispatchEngine != nil {
 			nearbyProfiles := postgres.NewIdentityRepository(pool)
-			dispatchEngine.Inviter = nearbyInviter{
+			inviter := nearbyInviter{
 				market: marketplaceService,
 				nearby: func(ctx context.Context, lat, lng, maxDistanceM float64, limit int) ([]string, error) {
 					profiles, err := nearbyProfiles.ListProfilesNearby(ctx, lat, lng, maxDistanceM, nil, nil, limit)
@@ -802,6 +802,11 @@ func main() {
 					}
 					return server.OrderPermission(ctx, id)
 				},
+			}
+			dispatchEngine.Inviter = inviter
+			// OPS-MATCH-PREVIEW-001：撮合预览用同一个 inviter（候选范围与真邀请一致），只读、不发邀约。
+			server.MatchPreview = func(ctx context.Context, opportunityID string, limit int) (api.MatchPreviewResult, error) {
+				return inviter.Preview(ctx, opportunityID, limit, &tagging.Service{Store: server.TagStore}, time.Now().UTC())
 			}
 		}
 		server.Dispatch = dispatchEngine

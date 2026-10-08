@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"time"
 
+	"github.com/proxy-app/proxy-api/internal/api"
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/matching"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 )
 
 // MARKET-INVITE-001：快速发单迟迟没人报名时，邀请附近合适的服务者来报名。
@@ -84,4 +87,58 @@ func (n nearbyInviter) Invite(ctx context.Context, run dispatch.Run, exclude map
 		out = append(out, r.AgentID)
 	}
 	return out, "", nil
+}
+
+// Preview 是撮合预览：与 Invite 同一套候选与排名，但不发任何邀约，并带上每个候选的明细与共同标签。
+func (n nearbyInviter) Preview(ctx context.Context, opportunityID string, limit int, tags *tagging.Service, now time.Time) (api.MatchPreviewResult, error) {
+	res := api.MatchPreviewResult{OpportunityID: opportunityID, TagFitWeight: matching.CurrentTunables().TagFitWeight, Candidates: []api.MatchPreviewItem{}}
+	opp, err := n.market.Opportunity(ctx, opportunityID)
+	if err != nil {
+		return res, err
+	}
+	if opp.Lat == nil || opp.Lng == nil {
+		res.Reason = "opportunity_has_no_location"
+		return res, nil
+	}
+	skip := map[string]bool{opp.OwnerID: true}
+	applied, err := n.market.ApplicationsForDispatch(ctx, opportunityID, opp.OwnerID)
+	if err != nil {
+		return res, err
+	}
+	for _, a := range applied {
+		skip[a.ApplicantID] = true
+	}
+	around, err := n.nearby(ctx, *opp.Lat, *opp.Lng, inviteRadiusM, 200)
+	if err != nil {
+		return res, err
+	}
+	ids := []string{}
+	for _, id := range around {
+		if !skip[id] {
+			ids = append(ids, id)
+		}
+	}
+	ids = onlyPermitted(ctx, ids, n.permitted)
+	if len(ids) == 0 {
+		res.Reason = "nobody_suitable_nearby"
+		return res, nil
+	}
+	rctx := matching.WithRequester(ctx, opp.OwnerID)
+	ranked, err := n.rank(rctx, ids, opp.Lat, opp.Lng)
+	if err != nil {
+		return res, err
+	}
+	mine := tags.TagsFor(ctx, opp.OwnerID, tagging.UseMatching)
+	res.OwnerTagCount = len(mine)
+	for i, r := range ranked {
+		if i >= limit {
+			break
+		}
+		theirs := tags.TagsFor(ctx, r.AgentID, tagging.UseMatching)
+		res.Candidates = append(res.Candidates, api.MatchPreviewItem{
+			Rank: i + 1, UserID: r.AgentID, Breakdown: r.Breakdown,
+			Affinity: tagging.Affinity(mine, theirs, now), Shared: tagging.SharedTags(mine, theirs, now, 5), TagCount: len(theirs),
+		})
+	}
+	return res, nil
 }

@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/insight"
+	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 )
 
 type fakeInsight struct {
 	gotAxis, gotWithAxis, gotWithValue string
-	gap                                 insight.DemandGap
+	gap                                insight.DemandGap
 }
 
 func (f *fakeInsight) DemandGap(context.Context, time.Time, int) (insight.DemandGap, error) {
@@ -74,5 +75,30 @@ func TestDemandGapNeverPublishesARatioAndSaysWhatItLeftOut(t *testing.T) {
 		if !strings.Contains(body, mustSay) {
 			t.Errorf("notes must explain %q", mustSay)
 		}
+	}
+}
+
+// OPS-MATCH-PREVIEW-001：看的是具体的人，要 MARKETPLACE 权限；缺参数 400；没接线诚实说。
+func TestMatchPreviewNeedsMarketplaceScopeAndAnOpportunity(t *testing.T) {
+	server := accessServer(operatoraudit.NewRecorder(&fakeAuditStore{}), []string{"op_all", "op_pay"}, map[string]map[OperatorScope]bool{"op_pay": {ScopePayments: true}})
+	if rec := consoleGet(server, "match-preview?opportunityId=x", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no session: %d", rec.Code)
+	}
+	if rec := consoleGet(server, "match-preview?opportunityId=x", "op_pay_token"); rec.Code != http.StatusForbidden {
+		t.Fatalf("an operator without MARKETPLACE must not see individual candidates: %d", rec.Code)
+	}
+	rec := consoleGet(server, "match-preview?opportunityId=x", "op_all_token")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), OperatorNotConnectedSource) {
+		t.Fatalf("unwired must say NOT_CONNECTED: %d %s", rec.Code, rec.Body.String())
+	}
+	server.MatchPreview = func(_ context.Context, id string, limit int) (MatchPreviewResult, error) {
+		return MatchPreviewResult{OpportunityID: id, Candidates: []MatchPreviewItem{{Rank: 1, UserID: "u1"}}}, nil
+	}
+	if rec := consoleGet(server, "match-preview", "op_all_token"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing opportunityId: %d", rec.Code)
+	}
+	rec = consoleGet(server, "match-preview?opportunityId=opp1", "op_all_token")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"userId":"u1"`) || !strings.Contains(rec.Body.String(), "共同兴趣的权重现在是 0") {
+		t.Fatalf("preview: %d %s", rec.Code, rec.Body.String())
 	}
 }

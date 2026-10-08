@@ -11,6 +11,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/marketplace"
 	"github.com/proxy-app/proxy-api/internal/matching"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 )
 
 // MARKET-INVITE-001：邀谁、不邀谁、按什么顺序。
@@ -134,3 +135,58 @@ func TestInvitesOnlyReachPeopleWhoOptedIntoOrders(t *testing.T) {
 
 // 这两个既有用例测的是排序 / 顺延，不是权限：假设候选人都已开通接单。权限本身在上面那条用例里钉。
 func everyoneOptedIn(context.Context, string) (bool, error) { return true, nil }
+
+// OPS-MATCH-PREVIEW-001：预览与真邀请同一批候选、同一个排序；不发邀约；每个候选带「你们都……」的共同标签。
+func TestMatchPreviewShowsTheSameCandidatesAsInvitingAndTheirSharedTags(t *testing.T) {
+	ctx := context.Background()
+	svc := marketplace.New()
+	opp := publishFast(t, svc, true)
+	marketCmd(svc, "ApplyToMarketOpportunity", "already", map[string]any{"opportunityId": opp, "quote": "800,000₫", "scope": "中文"})
+	now := time.Now().UTC()
+	mem := tagging.NewMemory()
+	live := func(axis, value string, strength float64) tagging.Tag {
+		return tagging.Tag{Axis: axis, Value: value, Strength: strength, Confidence: 1, ExpiresAt: now.Add(time.Hour), ComputedAt: now}
+	}
+	_ = mem.ReplaceUserTags(ctx, "owner", []tagging.Tag{live(tagging.AxisInterestTopic, "摄影", .9), live(tagging.AxisInterestTopic, "徒步", .5)})
+	_ = mem.ReplaceUserTags(ctx, "photo_fan", []tagging.Tag{live(tagging.AxisInterestTopic, "摄影", .8), live(tagging.AxisInterestTopic, "徒步", .6)})
+	inv := nearbyInviter{
+		market:    svc,
+		permitted: func(_ context.Context, id string) (bool, error) { return id != "no_permission", nil },
+		nearby: func(context.Context, float64, float64, float64, int) ([]string, error) {
+			return []string{"owner", "already", "no_permission", "stranger", "photo_fan"}, nil
+		},
+		rank: func(_ context.Context, ids []string, _, _ *float64) ([]matching.Ranked, error) {
+			out := []matching.Ranked{}
+			for _, want := range []string{"photo_fan", "stranger"} { // 引擎的排名：photo_fan 在前
+				for _, id := range ids {
+					if id == want {
+						out = append(out, matching.Ranked{AgentID: id})
+					}
+				}
+			}
+			return out, nil
+		},
+	}
+	res, err := inv.Preview(ctx, opp, 10, &tagging.Service{Store: mem, Now: func() time.Time { return now }}, now)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if len(res.Candidates) != 2 || res.Candidates[0].UserID != "photo_fan" || res.Candidates[1].UserID != "stranger" {
+		t.Fatalf("same pool as inviting (no owner, no applicant, no one without order permission), engine order kept: %+v", res.Candidates)
+	}
+	top := res.Candidates[0]
+	if top.Rank != 1 || len(top.Shared) != 2 || top.Shared[0].Value != "摄影" || top.Affinity <= 0.9 {
+		t.Fatalf("the best fit shares both interests and says so: %+v", top)
+	}
+	if res.Candidates[1].TagCount != 0 || len(res.Candidates[1].Shared) != 0 || res.Candidates[1].Affinity != 0 {
+		t.Fatalf("a person with no tags has nothing shared and is not punished: %+v", res.Candidates[1])
+	}
+	if res.OwnerTagCount != 2 {
+		t.Fatalf("owner tags counted: %d", res.OwnerTagCount)
+	}
+	// 预览不发邀约：没有任何副作用可观察 —— nearby/rank 之外没有写入口（inviter 本身没有 sender）。
+	noLoc := publishFast(t, svc, false)
+	if r, _ := inv.Preview(ctx, noLoc, 10, nil, now); r.Reason != "opportunity_has_no_location" || len(r.Candidates) != 0 {
+		t.Fatalf("no coordinates, no 'nearby', and it says why: %+v", r)
+	}
+}
