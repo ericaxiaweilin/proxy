@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { beginEmailLogin, completeEmailLogin, type OpStatus } from "../lib/api";
 
-// OPS-REAL-001：未登录 / 非运营 → 邮箱验证码登录；未接入 → 说清楚缺的是规格里哪个模块，不给数字。
+// OPS-REAL-001：未登录 / 非运营 → 邮箱验证码登录；未接入 → 说清楚为什么不给数，不给数字。
 export function OpsGate({ status, onLoggedIn }: { status: OpStatus; onLoggedIn: () => void }) {
   if (status.kind === "notConnected") {
     return (
       <div className="content">
         <div className="notice" role="status">
-          <b>未接入</b>：这一页需要 <b>{status.missing}</b>，后端还没有实现，所以这里不显示任何数字。
+          {/* 「后端还没做这件事」那句话以前是准的（那一页确实没实现），现在 NOT_CONNECTED 也承载
+              策略性的拒绝：例如比率型指标在没声明数据环境的库上一律不给（OPS-DATA-ENV-001），
+              那时候模块是有的、查询也跑得动。所以这里不能再替后端断言原因，只把后端给出的那句
+              原样说出来 —— 原因由服务端负责写准确。 */}
+          <b>这一页不给数</b>：{status.missing || "后端没有说明原因。"}
           {status.spec ? <div style={{ marginTop: 6, opacity: 0.75 }}>规格：{status.spec}</div> : null}
         </div>
       </div>

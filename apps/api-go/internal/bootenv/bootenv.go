@@ -51,6 +51,16 @@ func Warnings() []string {
 	if Getenv("PROXY_OPERATOR_PRINCIPALS") == "" {
 		warnings = append(warnings, "PROXY_OPERATOR_PRINCIPALS is unset; privileged commands (capability review, contribution moderation, payout, media readiness override) are all rejected")
 	}
+	// OPS-DATA-ENV-001: which database this process reads is not guessable from the
+	// rows. The operator console publishes counts everywhere but gates rate metrics
+	// (repeat-purchase, return rate) on this declaration, so an unset value on a prod
+	// box means those tiles silently refuse — and a *set* value on a dev box means the
+	// console is presenting scripted traffic as business. Neither is visible any other way.
+	if Getenv("PROXY_OPERATOR_DATA_ENV") == "" {
+		warnings = append(warnings, "PROXY_OPERATOR_DATA_ENV is unset; operator console rate metrics (repeat purchase, return rate) stay suppressed and only raw counts are published — set it to \"production\" only for a database holding real traffic")
+	} else if Getenv("PROXY_OPERATOR_DATA_ENV") != "production" {
+		warnings = append(warnings, "PROXY_OPERATOR_DATA_ENV is set but is not \"production\"; the console will treat this database as non-business data and suppress rate metrics")
+	}
 	// ModelStack: any one missing -> Experience Runtime falls back
 	// to deterministic stubs.
 	if Getenv("MODELSTACK_CONTROL_PLANE_URL") == "" || Getenv("MODELSTACK_GATEWAY_URL") == "" || Getenv("MODELSTACK_GATEWAY_API_KEY") == "" {

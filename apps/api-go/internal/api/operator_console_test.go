@@ -69,7 +69,8 @@ func (stubOpsMetrics) Merchants(_ context.Context, _ time.Time) (opsmetrics.Merc
 func (stubOpsMetrics) Retention(_ context.Context, _ time.Time) (opsmetrics.Retention, error) {
 	return opsmetrics.Retention{
 		WindowDays: 30, Orders: 415, Requesters: 196, RepeatRequests: 117,
-		RepeatRequesterRate: 59.7, SamePairRepeatGroups: 117, AgentsWithOrders: 191,
+		// OPS-DATA-ENV-001：比率是可空字段 —— null 是「这一轮不给比率」，不是 0%。
+		RepeatRequesterRate: ratePtr(59.7), SamePairRepeatGroups: 117, AgentsWithOrders: 191,
 		Completed: 12, Cancelled: 12,
 		Lifecycle: map[string]int64{"CONFIRMED": 336, "OFFERED": 49, "EXECUTING": 6, "COMPLETED": 12, "CANCELLED": 12},
 		ActiveLast14d: 9, ActivePrev14d: 1, ReturnedUsers: 1, PriorWindowRequesters: 0,

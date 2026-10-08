@@ -20,6 +20,8 @@ type Payload = {
   scopes: ScopeInfo[];
   principals: PrincipalInfo[];
   me?: { principalId: string; actorId: string; scopes: string[]; narrowed: boolean };
+  // OPS-DATA-ENV-001：这台进程连的是哪一套数据，是部署声明的，不是从行里推出来的。
+  dataEnv?: { variable: string; declared: string; businessRatesPublished: boolean; note: string };
   audit: {
     connected: boolean; recorded?: number; writeFailed?: number; writeFailedNote?: string;
     recent?: AuditEntry[]; recentError?: string;
@@ -114,8 +116,29 @@ export function Access() {
         ))}
       </div>
 
+      {/* OPS-DATA-ENV-001：这一项跟权限无关，但它决定了别的那些页给不给比率，所以必须在这里看得见。
+          「声明了什么」和「据此发布了什么」要分开摆 —— 只有 production 算声明成生产，
+          prod / Production 这种手误落在「不给比率」那一侧，界面上得说它被当成了什么。 */}
       <div className="section-title">
-        <h2>运营动作审计</h2>
+        <h2>这套读数出自哪套数据</h2>
+        <span>{data.dataEnv ? `${data.dataEnv.variable} · 只读` : "加载中…"}</span>
+      </div>
+      {data.dataEnv ? (
+        <div className="card">
+          <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+            <b>数据环境</b>
+            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
+              {data.dataEnv.declared ? data.dataEnv.declared : "（未声明）"}
+            </span>
+            {data.dataEnv.businessRatesPublished
+              ? <span className="badge" style={{ background: "#e6f4ea", color: "#1e6930" }}>比率型指标已发布</span>
+              : <span className="badge" style={{ background: "#fde7e7", color: "#a32020" }}>比率型指标停用 · 只给原始计数</span>}
+          </div>
+          <div className="notice" style={{ marginTop: 8 }}>{data.dataEnv.note}</div>
+        </div>
+      ) : null}
+
+      <div className="section-title">
         <span>
           {data.audit.connected
             ? `已接 · 本进程记了 ${data.audit.recorded ?? 0} 条${(data.audit.writeFailed ?? 0) > 0 ? ` · 写失败 ${data.audit.writeFailed} 条` : ""}`

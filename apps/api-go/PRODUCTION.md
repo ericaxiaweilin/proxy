@@ -76,6 +76,7 @@ in as any user.
 |------------------------------|----------|-------|
 | `PROXY_OPERATOR_PRINCIPALS`  | no (fail-closed) | comma-separated principal ids allowed to execute privileged commands (capability review, contribution moderation, payout authorization, media readiness override). Unset = every operator command rejected. |
 | `PROXY_OPERATOR_SCOPES`      | no       | per-principal narrowing of the allowlist above. Format: `principal_id:SCOPE,SCOPE;principal_id:*` (`*` = all). Unset = every allowlisted principal holds **all** scopes, i.e. the historical behaviour. See below. |
+| `PROXY_OPERATOR_DATA_ENV`    | yes for rate metrics (fail-closed) | declares which dataset this process reads. Only the exact value `production` unlocks *rate* metrics in the operator console (repeat-purchase rate, return rate); anything else — including `prod`, `Production` and a typo — publishes raw counts and a refusal sentence naming this variable. Counts are statements about rows and hold on any database; a rate is an inference about customers, and on a database holding scripted traffic it is a metric about the test suite. |
 
 ### Narrowing one operator without revoking the others (OPS-SCOPE-WIRED-001)
 
@@ -102,6 +103,26 @@ in as any user.
   migration 161) with the scope that authorised it; `GET /v1/operator/access` shows
   the recent rows. A failed audit write is counted and reported, not swallowed — but
   it does not roll back the action, because the action already happened.
+
+### Declaring which dataset the console reads (OPS-DATA-ENV-001)
+
+`PROXY_OPERATOR_DATA_ENV=production`
+
+* Why this cannot be derived from the data: synthetic traffic that entered through the
+  API is structurally identical to real traffic. On the dev database, `fulfillment.orders`
+  held 860 rows and not one of them was a business — 168 were inserted directly by Go
+  integration tests (orders are never hard-deleted, migration 143), and 692 came from the
+  `scripts/*-e2e.sh` suites, which create genuine `identity.user_accounts` rows and place
+  genuine orders. A referential-integrity filter removes the first group and keeps every
+  row of the second, so switching a rate's denominator to "requesters that match an
+  account" produced a 93.8% repeat-purchase rate over 48 loop variables.
+* Fail-closed direction: unset or misspelled ⇒ treated as non-production ⇒ the metric is
+  refused, and the refusal is printed in the UI with the counts it chose not to divide.
+  A gate that failed the other way (typo ⇒ show rates) would put fabricated business
+  rates in front of operators, which is the failure this variable exists to prevent.
+* Visible at boot: `internal/bootenv` warns when the variable is unset *and* when it is set
+  to something other than `production`; `/v1/operator/access` reports the value the running
+  process actually resolved, so the declaration is checkable without reading the env file.
 
 ### Customer-service number lookup (PUBLIC-NO-LOOKUP-001)
 
@@ -234,6 +255,9 @@ instance behind a load balancer.
    serves public-URL media — every URL is signed at request time.
 7. If `PROXY_TRUST_CLOUDFLARE_IP=true`, block direct origin ingress first.
    Otherwise a client can forge the header and evade per-IP controls.
+8. `PROXY_OPERATOR_DATA_ENV=production` is set only on a process whose `DATABASE_URL`
+   holds real user traffic. Dev and CI boxes leave it unset, so the operator console
+   shows them raw counts plus the refusal instead of rates computed over test rows.
 
 ## Rollback
 

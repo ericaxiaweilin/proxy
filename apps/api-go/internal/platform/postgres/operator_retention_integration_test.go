@@ -42,6 +42,17 @@ func TestOperatorRetentionCountsRealOrdersAcrossTwoWindows(t *testing.T) {
 	// R3：窗口内 1 张 + 窗口前 45 天 1 张 → 前期人群 +1（这一条决定「同期群留存能不能算」）。
 	exec(insert, "ord_ret_c_in_"+run, "req_ret_3_"+run, "agent_ret_2_"+run, "need_ret_3_"+run, now.Add(-3*time.Hour))
 	exec(insert, "ord_ret_c_old_"+run, "req_ret_3_"+run, "agent_ret_2_"+run, "need_ret_3_"+run, now.Add(-45*24*time.Hour))
+	// 一个**真实账号**下的单：可归因性那条判据（请求方在不在 identity.user_accounts）
+	// 只有拿真账号和假 id 各种一张才对撞得出来 —— 全用假 id 的话，这条永远数出 0，
+	// 而 0 看起来跟「库里没有测试行」一模一样。
+	exec(`INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'ACTIVE',now(),now())`,
+		"user_osh_real_"+run)
+	exec(insert, "ord_ret_real_"+run, "user_osh_real_"+run, "agent_ret_1_"+run, "need_ret_real_"+run, now.Add(-4*time.Hour))
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM identity.user_accounts WHERE id = $1`, "user_osh_real_"+run)
+	})
+
 	// 状态机：CANCELLED 与 COMPLETED 都得真的走一遍（守卫不许直接 INSERT 成这些状态）。
 	exec(`UPDATE fulfillment.orders SET lifecycle='CANCELLED', version=version+1, updated_at=now() WHERE id=$1`,
 		"ord_ret_b_"+run)
@@ -86,10 +97,34 @@ func TestOperatorRetentionCountsRealOrdersAcrossTwoWindows(t *testing.T) {
 	if ret.RepeatRequests > ret.Requesters {
 		t.Fatalf("重复下单的人比下单的人还多: %d > %d", ret.RepeatRequests, ret.Requesters)
 	}
-	// 比例必须等于两个原始数之比（口径不许在别处被改）。
-	want := float64(int64(float64(ret.RepeatRequests)/float64(ret.Requesters)*1000+0.5)) / 10
-	if ret.RepeatRequesterRate < want-0.11 || ret.RepeatRequesterRate > want+0.11 {
-		t.Fatalf("复购率 %g 跟 %d/%d 算出来的对不上", ret.RepeatRequesterRate, ret.RepeatRequests, ret.Requesters)
+	// 可归因性：真人下的那一张必须落进 attributable，五张假 id 的落进 unattributed；
+	// 两边相加必须**正好等于**窗口内的总单数 —— 有一条既没算进这边也没算进那边，
+	// 就是分母在偷偷缩水（这台库里一半以上是集成测试留下的行，全靠这条兜住）。
+	if ret.OrdersAttributable < 1 {
+		t.Fatalf("能追溯到账号的单是 %d，我明明种了一张真账号下的单", ret.OrdersAttributable)
+	}
+	if ret.OrdersUnattributed < 5 {
+		t.Fatalf("对不上账号的单 %d，我种了 5 张假 id 的窗口内单", ret.OrdersUnattributed)
+	}
+	if ret.OrdersAttributable+ret.OrdersUnattributed != ret.Orders {
+		t.Fatalf("可归因 %d + 不可归因 %d ≠ 窗口内 %d 张 —— 有单两边都没数到",
+			ret.OrdersAttributable, ret.OrdersUnattributed, ret.Orders)
+	}
+	if ret.RealRequesters < 1 || ret.RealRequesters > ret.Requesters {
+		t.Fatalf("能追溯到账号的下单人 %d，应当在 [1, %d] 内", ret.RealRequesters, ret.Requesters)
+	}
+	if ret.RealRepeatRequesters > ret.RealRequesters {
+		t.Fatalf("重复下单人 %d 比能追溯到账号的下单人 %d 还多", ret.RealRepeatRequesters, ret.RealRequesters)
+	}
+	// 标题那个比例的分母是**能追溯到账号的人**，不是全量 id：这里按同一口径重算一遍对撞。
+	// 它是 nil 也算失败 —— 分母有了就该给数，「没有业务成色声明」是 api 层门的事，不在这层。
+	want := float64(int64(float64(ret.RealRepeatRequesters)/float64(ret.RealRequesters)*1000+0.5)) / 10
+	if ret.RepeatRequesterRate == nil {
+		t.Fatalf("分母是 %d 却不给比例", ret.RealRequesters)
+	}
+	if *ret.RepeatRequesterRate < want-0.11 || *ret.RepeatRequesterRate > want+0.11 {
+		t.Fatalf("复购率 %g 跟 %d/%d 算出来的 %g 对不上",
+			*ret.RepeatRequesterRate, ret.RealRepeatRequesters, ret.RealRequesters, want)
 	}
 }
 
@@ -109,8 +144,8 @@ func TestOperatorRetentionNeverInventsARateFromAnEmptyWindow(t *testing.T) {
 	if ret.Orders != 0 || ret.Requesters != 0 {
 		t.Fatalf("未来的窗口里不该有订单: %+v", ret)
 	}
-	if ret.RepeatRequesterRate != 0 {
-		t.Fatalf("分母是 0 却给出了比例 %g —— 那会被读成「复购率 0%%」，而事实是这个窗口没数据", ret.RepeatRequesterRate)
+	if ret.RepeatRequesterRate != nil {
+		t.Fatalf("分母是 0 却给出了比例 %g —— 那会被读成「复购率 0%%」，而事实是这个窗口没数据", *ret.RepeatRequesterRate)
 	}
 	if len(ret.Lifecycle) != 0 {
 		t.Fatalf("空窗口的生命周期分布不该有内容: %v", ret.Lifecycle)

@@ -29,8 +29,12 @@ type Retention struct {
 	Orders         int64 `json:"orders"`
 	Requesters     int64 `json:"requesters"`
 	RepeatRequests int64 `json:"repeatRequesters"`
-	// RepeatRequesterRate 的分母是「窗口内下过单的人数」，不是全体用户 —— 口径要写在名字里。
-	RepeatRequesterRate  float64 `json:"repeatRequesterRate"`
+	// RepeatRequesterRate 的分母是「窗口内能追溯到账号的下单人数」，不是全体用户 —— 口径要写在名字里。
+	//
+	// 它是指针，而且必须是指针：这一页有两条「不给这个数」的理由（分母是 0；数据环境没声明成生产，
+	// OPS-DATA-ENV-001），而 float64 只能把「没算」印成 0.0 —— 界面上就是「复购率 0%」。
+	// null 才是那句话：这个比率此刻没有事实来源，不是它等于零。
+	RepeatRequesterRate  *float64 `json:"repeatRequesterRate"`
 	SamePairRepeatGroups int64   `json:"samePairRepeatGroups"`
 	AgentsWithOrders     int64   `json:"agentsWithOrders"`
 
@@ -50,6 +54,27 @@ type Retention struct {
 	// 它是同期群留存能不能算的那个开关：为 0 就没有前后两期可比，硬算出来的
 	// 「100% 留存」是假的，所以这一页宁可不给这个指标，也要说明为什么不给。
 	PriorWindowRequesters int64 `json:"priorWindowRequesters"`
+
+	// —— 可归因性（OPS-RETENTION-001 追加，2026-10-08）——
+	// 这台开发库里 fulfillment.orders 有相当一部分是测试留下的行：订单永不硬删
+	// （143 的守卫），而测试跑的时候是连着 DATABASE_URL 跑的，所以行会永久留下。
+	// 判据不靠猜 id 前缀（前缀会变，猜错就把真数据当垃圾）—— 用引用完整性。
+	//
+	// 这个判据只朝一个方向成立：
+	//   · 请求方在 identity.user_accounts 里查不到 → 这张单**一定**不是生意（没有人能下它）；
+	//   · 查得到 → 什么都推不出来。本机实测：291 张单里 150 张连账号都没有（Go 集成测试直接
+	//     INSERT 的），剩下 141 张账号齐全 —— 但它们的 need_id 是 e2e-need-* / e2e-p1e-need*，
+	//     出自 scripts/*-e2e.sh：那批脚本走真 API、建真账号、下真订单。48 个「下单人」是 48 个
+	//     循环变量，不是 48 个客户。
+	// 所以这一组字段只用来排除「不可能是生意」的那部分，别把它当成「剩下的就是业务」——
+	// 后者只有部署知道自己连的是哪套数据（见 api/operator_dataenv.go，OPS-DATA-ENV-001）。
+	OrdersAttributable   int64 `json:"ordersAttributable"`
+	OrdersUnattributed   int64 `json:"ordersUnattributed"`
+	RealRequesters       int64 `json:"realRequesters"`
+	RealRepeatRequesters int64 `json:"realRepeatRequesters"`
+	// RepeatRequesterRate（上面）就是按 RealRequesters 算的那个数。这里不再另开一个
+	// RealRepeatRequesterRate：同一个数挂两个名字，多出来的那个恒为 0.0，会被读成「真实口径
+	// 复购率 0%」—— 那是把「没算」印成「算出来是零」。
 }
 
 // Retention 一条 QueryRow 出全部标量，生命周期分布另走一条 GROUP BY。
@@ -82,17 +107,39 @@ func (p *Postgres) Retention(ctx context.Context, now time.Time) (Retention, err
 			) w WHERE EXISTS (
 				SELECT 1 FROM fulfillment.orders o2
 				WHERE o2.requester_id = w.requester_id AND o2.created_at < $1
-			))`, since, mid).
+			)),
+			-- 可归因性四条。判据是「请求方是不是一个真实账号」，不是 id 前缀 ——
+			-- 前缀会变，猜错就把真数据当垃圾；引用完整性不会骗人：对不上
+			-- identity.user_accounts 的订单，不可能是任何真实的人做的生意。
+			(SELECT COUNT(*) FROM fulfillment.orders o
+			 WHERE o.created_at >= $1
+			   AND EXISTS (SELECT 1 FROM identity.user_accounts u WHERE u.id = o.requester_id)),
+			(SELECT COUNT(*) FROM fulfillment.orders o
+			 WHERE o.created_at >= $1
+			   AND NOT EXISTS (SELECT 1 FROM identity.user_accounts u WHERE u.id = o.requester_id)),
+			(SELECT COUNT(DISTINCT o.requester_id) FROM fulfillment.orders o
+			 WHERE o.created_at >= $1
+			   AND EXISTS (SELECT 1 FROM identity.user_accounts u WHERE u.id = o.requester_id)),
+			(SELECT COUNT(*) FROM (
+				SELECT o.requester_id FROM fulfillment.orders o
+				WHERE o.created_at >= $1
+				  AND EXISTS (SELECT 1 FROM identity.user_accounts u WHERE u.id = o.requester_id)
+				GROUP BY o.requester_id HAVING COUNT(*) >= 2
+			) rr)`, since, mid).
 		Scan(&out.Orders, &out.Requesters, &out.RepeatRequests, &out.SamePairRepeatGroups,
 			&out.AgentsWithOrders, &out.Completed, &out.Cancelled,
-			&out.ActiveLast14d, &out.ActivePrev14d, &out.ReturnedUsers, &out.PriorWindowRequesters)
+			&out.ActiveLast14d, &out.ActivePrev14d, &out.ReturnedUsers, &out.PriorWindowRequesters,
+			&out.OrdersAttributable, &out.OrdersUnattributed, &out.RealRequesters, &out.RealRepeatRequesters)
 	if err != nil {
 		return Retention{}, err
 	}
-	// 分母是 0 时不算比例：0.0 会被读成「复购率 0%」，而事实是「窗口内没人下单，
-	// 这个指标此刻无从谈起」。界面按 requesters==0 显示「—」。
-	if out.Requesters > 0 {
-		out.RepeatRequesterRate = round1(float64(out.RepeatRequests) / float64(out.Requesters) * 100)
+	// 标题那个比例的分母是**能追溯到账号的下单人**（RealRequesters），不是全量 Requesters。
+	// 注意这一步只排除「连账号都没有」的行，排不掉脚本建的账号 —— 剩下的业务成色由
+	// api 层的数据环境门决定（OPS-DATA-ENV-001），不在这里。
+	// 分母是 0 时不算比例：留 nil，界面显示「—」，而不是「复购率 0%」。
+	if out.RealRequesters > 0 {
+		rate := round1(float64(out.RealRepeatRequesters) / float64(out.RealRequesters) * 100)
+		out.RepeatRequesterRate = &rate
 	}
 
 	rows, err := p.pool.Query(ctx, `

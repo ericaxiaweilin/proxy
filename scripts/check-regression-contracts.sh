@@ -714,7 +714,114 @@ if ! grep -q '未接入' apps/market-intelligence-console/src/pages/Retention.ts
   echo "  FAIL [OPS-RETENTION-001]: 留存页不再标「未接入」—— 金额复购这类没来源的东西被填成了看起来真的数。" >&2
   exit 1
 fi
-echo "    OPS-RETENTION-001: PASS (复购用真单算 · 留存/回访率结构上不存在 · SQL 对真库跑过 · 措辞跟着数据变)"
+if ! grep -qF 'round1(float64(out.RealRepeatRequesters) / float64(out.RealRequesters) * 100)' apps/api-go/internal/opsmetrics/retention.go; then
+  echo "  FAIL [OPS-RETENTION-001]: 复购率的分母不再是对得上真账号的下单人 ——" >&2
+  echo "        这台库里 fulfillment.orders 一半以上是集成测试留下的行（订单永不硬删），拿全量 id 当分母就是在给测试数据算指标。" >&2
+  exit 1
+fi
+# 可归因性的判据必须是引用完整性（请求方在不在 user_accounts），不是猜 id 前缀：
+# 前缀会变，猜错就把真数据当垃圾丢掉。
+if ! grep -qF 'EXISTS (SELECT 1 FROM identity.user_accounts u WHERE u.id = o.requester_id)' apps/api-go/internal/opsmetrics/retention.go; then
+  echo "  FAIL [OPS-RETENTION-001]: 可归因性不再按「请求方是不是真实账号」判 —— 换回猜前缀就会把真数据当测试行。" >&2
+  exit 1
+fi
+if grep -qE "need_id ~ '\^|id ~ '\^" apps/api-go/internal/opsmetrics/retention.go; then
+  echo "  FAIL [OPS-RETENTION-001]: 读模型里出现了按 id 前缀分类的写法 —— 那是猜，不是事实。" >&2
+  exit 1
+fi
+# 比率走的是 OPS-DATA-ENV-001 那道门：这台库连的是哪一套数据只有部署知道。
+if ! grep -qF 'ratesPublished := businessRatesPublished()' apps/api-go/internal/api/operator_retention.go ||
+  ! grep -qF 'ret.RepeatRequesterRate = nil' apps/api-go/internal/api/operator_retention.go; then
+  echo "  FAIL [OPS-RETENTION-001]: 留存页不再经过数据环境门就发比率 ——" >&2
+  echo "        把分母换成「能追溯到账号的订单」只排得掉 Go 测试直接 INSERT 的行；e2e 脚本走真 API、建真账号，一条都排不掉。" >&2
+  exit 1
+fi
+# 「有账号行」≠「是真人」：上一版把 48 个脚本账号写成 48 个真实下单人，界面就显示出 93.8% 复购率。
+# 文件名要在这条命令里直接出现 —— 先 assign 给变量再 grep 的话，这一步在 --changed 的索引里
+# 是「不引用任何文件」，于是它永远不参与；只在 --all 才跑的判据等于没有判据。
+if sed 's|//.*$||' apps/api-go/internal/api/operator_retention.go | grep -qE '真实账号|真实下单人'; then
+  echo "  FAIL [OPS-RETENTION-001]: 说明里又把「对得上账号」写成了「真人/真实账号」—— 这一步推不出业务身份，那是上次编出 93.8% 的地方。" >&2
+  exit 1
+fi
+echo "    OPS-RETENTION-001: PASS (比率经过数据环境门 · 可归因只声明「排得掉什么」· 留存/回访率结构上不存在)"
+# OPS-DATA-ENV-001（2026-10-08）：控制台读的是哪一套数据，必须由部署声明，不能由读数推断。
+#
+# 这条钉的是一个我自己造出来的假数。留存页的复购率分母换成「请求方对得上
+# identity.user_accounts 的订单」之后，本机算出 93.8% —— 而这台库里 860 张单没有一张是生意：
+# 168 张是 Go 集成测试直接 INSERT 的（账号不存在，所以这一步确实排掉了），692 张出自
+# scripts/*-e2e.sh（走真 API、建真账号、下真订单，引用完整性全过）。
+# 结论写死在这里：**经过 API 的合成流量在行里没有结构特征**，能区分它们的只有环境声明。
+if ! grep -qE 'DataEnvProduction\s*=\s*"production"' apps/api-go/internal/api/operator_dataenv.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 生产声明不再是那个唯一的字符串 —— 大小写/别名一旦被接受，拼错就变成「打开比率」。" >&2
+  exit 1
+fi
+if ! grep -qF 'os.Getenv(DataEnvVar)' apps/api-go/internal/api/operator_dataenv.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 数据环境不从 env 读了 —— 那意味着又要靠猜 id 形状判断这是谁的数。" >&2
+  exit 1
+fi
+# fail-closed 的方向：未声明 / 拼错都必须落在「不给数」那一侧。
+if ! grep -qE 'unset; operator console rate metrics' apps/api-go/internal/bootenv/bootenv.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 启动日志不再警告数据环境未声明 —— 整个后台静默只出计数，没人知道自己看的是哪套库。" >&2
+  exit 1
+fi
+if ! grep -qE 'but is not \\"production\\"' apps/api-go/internal/bootenv/bootenv.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 「设了但设错」不再被说出来 —— 写 prod/Production 的人会以为门已经开了。" >&2
+  exit 1
+fi
+# 这一条是给运行手册的：bootenv 有测试要求 PRODUCTION.md 提到变量名，但那条测试只查名字在不在，
+# 这里查它是不是真的把「不给比率」这个后果写了出来。
+if ! grep -qE 'PROXY_OPERATOR_DATA_ENV.*rate|rate.*PROXY_OPERATOR_DATA_ENV' apps/api-go/PRODUCTION.md; then
+  echo "  FAIL [OPS-DATA-ENV-001]: PRODUCTION.md 没写清这个变量控制的是比率型指标 —— 只列名字等于下一个运维把它当装饰。" >&2
+  exit 1
+fi
+# 比率拒绝发布时一个指标字段都不许带上：留着 repeatRequesterRate 就是留着那个 93.8%，旁边多一句没人读的解释。
+for t in TestOperatorRetentionRefusesRatesWhenDataEnvUndeclared TestOperatorRetentionPublishesMetricsWhenDataEnvIsProduction TestBusinessRatesPublishedOnlyForDeclaredProduction; do
+  require_test "OPS-DATA-ENV-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_retention_test.go" || exit $?
+done
+for t in TestWarningsFlagNonProductionDataEnv; do
+  require_test "OPS-DATA-ENV-001" "./internal/bootenv" "$t" \
+    "apps/api-go/internal/bootenv/bootenv_test.go" || exit $?
+done
+# 恒为 0.0 的第二个比率字段不许回来：同一个数挂两个名字，多出来那个会被读成「真实口径复购率 0%」。
+if grep -qE 'json:"realRepeatRequesterRate"' apps/api-go/internal/opsmetrics/retention.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 响应里又出现了一个没人算的比率字段（恒 0.0）—— 那是把「没算」印成「算出来是零」。" >&2
+  exit 1
+fi
+# 全局拒绝通道不能再替后端断言原因：NOT_CONNECTED 现在也承载策略性拒绝（模块是有的，就是不给）。
+if grep -qF '后端还没有实现' apps/market-intelligence-console/src/components/OpsGate.tsx; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 界面上仍然写着「后端还没有实现」—— 数据环境拒绝时模块是实现着的，这句就成了假话。" >&2
+  exit 1
+fi
+if ! grep -qF '"dataEnv": dataEnvStatus(),' apps/api-go/internal/api/operator_access.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 运营权限页不再显示数据环境声明 —— 比率为什么不给看，只能靠猜。" >&2
+  exit 1
+fi
+# 比率这个字段必须还是「可空」的。改成 float64 的那一刻，「没算」就会被印成「复购率 0%」。
+if ! grep -qE 'RepeatRequesterRate +\*float64' apps/api-go/internal/opsmetrics/retention.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: repeatRequesterRate 不再是可空字段 —— null 是唯一能被界面分辨的「不给数」。" >&2
+  exit 1
+fi
+# 关掉一个指标，要按**它出现过的每一个渲染点**来关，不是只关我自己正在改的那一页。
+if ! grep -qF 'ret.retention.repeatRequesterRate === null ? "不给数"' apps/market-intelligence-console/src/pages/Overview.tsx; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 平台总览那格不复看 null（或把「加载中」和「不给数」混成同一个词）—— 落地页会把 null% 印给所有人看。" >&2
+  exit 1
+fi
+if ! grep -qF 'r.repeatRequesterRate === null' apps/market-intelligence-console/src/pages/Retention.tsx; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 留存页不复看 null，比率关掉后这一格会显示成别的东西。" >&2
+  exit 1
+fi
+# 声明本身也要有渲染点：只在响应里出现而界面上看不见，等于运营还得去读 env 文件。
+if ! grep -qF 'data.dataEnv.businessRatesPublished' apps/market-intelligence-console/src/pages/Access.tsx; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 运营权限页不再显示数据环境声明 —— 为什么比率不给看，只能靠猜。" >&2
+  exit 1
+fi
+# 整页 NOT_CONNECTED 是试过又改掉的做法：它会把每个引用这一页的地方一起抹掉（平台总览整页被清空）。
+if grep -qF 'notConnected(businessRateRefusal' apps/api-go/internal/api/operator_retention.go; then
+  echo "  FAIL [OPS-DATA-ENV-001]: 比率被关掉的方式又变回整页拒绝 —— 那会连带抹掉所有引用这一页的界面。" >&2
+  exit 1
+fi
+echo "    OPS-DATA-ENV-001: PASS (只有 production 发布比率 · 未声明/拼错都落到不给数 · null 不是 0 · 两个渲染点+权限页都看得见 · 启动日志+运行手册)"
 # OPS-SUPPLY-HEALTH-001（2026-10-05）：供给健康度页。
 # 这一页最容易出的事故是**数错列**：seller_real_name_verifications 的 user_account_id
 # 整列是 NULL（身份记在 agent_id 上），按它数会得到 0 —— 而 0 会被读成「供给方一个都没

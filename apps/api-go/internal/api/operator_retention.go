@@ -33,8 +33,26 @@ func (s *Server) operatorRetention(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "retention_query_failed"})
 		return
 	}
+	// OPS-DATA-ENV-001：这台库连的是哪一套数据，只有部署知道。没声明成 production 就不出比率。
+	//
+	// 但这里刻意不把整页拒掉。两件事要分开：
+	//   · 计数（「窗口内 291 张单、150 张连账号都没有」）是对行的陈述，在哪个库上都成立；
+	//   · 比率（「93.8% 的人会回来」）是对业务的推断，在没有业务成色声明的库上没有来源。
+	// 上一版走的是整页 NOT_CONNECTED，结果把**每一个**引用这一页的地方一起抹掉了 —— 平台总览
+	// 那个复购格子连带整页内容都不显示。只让比率变成 null，界面就只在那一格显示「不给数」，
+	// 别处照常，而这一页最要紧的那段说明（库里装的是什么）仍然看得见。
+	ratesPublished := businessRatesPublished()
+	stats := fmt.Sprintf("近 %d 天 %d 张单（请求方能追溯到账号的 %d 张、追溯不到的 %d 张）、下单人 %d 个（其中能追溯到账号的 %d 个）",
+		ret.WindowDays, ret.Orders, ret.OrdersAttributable, ret.OrdersUnattributed, ret.Requesters, ret.RealRequesters)
 	notes := []string{
 		fmt.Sprintf("复购口径：同一个需求方在近 %d 天里下过 ≥2 张单；这不是金额复购 —— 支付没接，金额没有事实来源。", ret.WindowDays),
+		// 这一条只能说它说得出的那部分：对不上账号的行一定不是业务（没人能拥有它），
+		// 但对得上账号**不等于**是真人 —— 这个库里的 e2e 脚本走真 API、建真账号、下真单。
+		// 上一版把它写成「真实下单人」，于是 48 个脚本账号变成了 48 个客户，复购率 93.8%。
+		fmt.Sprintf("可归因性：窗口内 %d 张单里，请求方在 identity.user_accounts 里查不到的有 %d 张 —— 那些行确定不是生意，"+
+			"没有账号就不可能有人下过单（订单永不硬删，测试连的就是这个库，所以它们一直留着）。分母用的是能追溯到账号的 %d 个下单人，"+
+			"不是全量 %d 个 id。注意这一步只排除「连账号都没有」，排不掉脚本建的账号：业务成色要看 %s=%s。",
+			ret.Orders, ret.OrdersUnattributed, ret.RealRequesters, ret.Requesters, DataEnvVar, dataEnvOrUnset()),
 		fmt.Sprintf("回头找她：同一个（需求方 × 服务者）在近 %d 天里 ≥2 张单，共 %d 组。跟「%d 个重复下单的人」是两个数，几乎相等就说明复购基本发生在同一个人身上。",
 			ret.WindowDays, ret.SamePairRepeatGroups, ret.RepeatRequests),
 	}
@@ -72,10 +90,18 @@ func (s *Server) operatorRetention(w http.ResponseWriter, r *http.Request) {
 			ret.WindowDays/2, ret.ActiveLast14d, ret.ActivePrev14d, ret.ReturnedUsers))
 	}
 
+	// 比率是唯一被关掉的东西，而且关掉它要说得出理由、说得出这一轮查到的是哪些行。
+	if !ratesPublished {
+		ret.RepeatRequesterRate = nil
+		notes = append([]string{businessRateRefusal(stats)}, notes...)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"dataSource": OperatorLiveSource,
-		"windowDays": ret.WindowDays,
-		"retention":  ret,
-		"notes":      notes,
+		"dataSource":     OperatorLiveSource,
+		"dataEnv":        operatorDataEnv(),
+		"ratesPublished": ratesPublished,
+		"windowDays":     ret.WindowDays,
+		"retention":      ret,
+		"notes":          notes,
 	})
 }
