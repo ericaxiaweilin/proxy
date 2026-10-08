@@ -1,0 +1,1008 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/pets/dog",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "狗狗",
+    "vi": "Chó cưng",
+    "en": "Dogs"
+   },
+   "keywords": [
+    "狗狗",
+    "cún",
+    "chó cưng",
+    "dog",
+    "nuôi chó"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/small_dog",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "小型犬",
+    "vi": "Chó nhỏ",
+    "en": "Small Breeds"
+   },
+   "keywords": [
+    "小型犬",
+    "chó nhỏ",
+    "poodle",
+    "phốc sóc",
+    "chihuahua"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/big_dog",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "大型犬",
+    "vi": "Chó lớn",
+    "en": "Large Breeds"
+   },
+   "keywords": [
+    "大型犬",
+    "chó lớn",
+    "golden",
+    "becgie",
+    "husky"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/local_dog",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "本土犬",
+    "vi": "Chó ta",
+    "en": "Local Dogs"
+   },
+   "keywords": [
+    "本土犬",
+    "cẩu ta",
+    "chó trần",
+    "chó nội",
+    "nhận giống ta"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/puppy",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "幼犬",
+    "vi": "Cún con",
+    "en": "Puppy"
+   },
+   "keywords": [
+    "幼犬",
+    "cún con",
+    "mới nhận cún",
+    "sữa cho cún",
+    "răng cún"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/walk",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "遛狗",
+    "vi": "Đưa cún đi dạo",
+    "en": "Dog Walking"
+   },
+   "keywords": [
+    "遛狗",
+    "dẫn chó đi",
+    "dog walking",
+    "dây dắt",
+    "sáng đưa cún"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/train",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "服从训练",
+    "vi": "Dạy chó",
+    "en": "Dog Training"
+   },
+   "keywords": [
+    "训狗",
+    "dạy chó",
+    "lệnh",
+    "ngồi xuống",
+    "phục tùng"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/toilet_train",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "定点如厕",
+    "vi": "Tập vệ sinh đúng chỗ",
+    "en": "Potty Training"
+   },
+   "keywords": [
+    "定点",
+    "tập đi vệ sinh",
+    "thảm tiểu",
+    "chỗ vệ sinh",
+    "đi đúng chỗ"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/tricks",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "技能花样",
+    "vi": "Mẹo vui của cún",
+    "en": "Dog Tricks"
+   },
+   "keywords": [
+    "技能",
+    "bắt tay",
+    "lộn vòng",
+    "trick",
+    "giả chết"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/agility",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "敏捷障碍",
+    "vi": "Agility",
+    "en": "Agility"
+   },
+   "keywords": [
+    "栏架",
+    "vượt rào",
+    "đường hầm",
+    "bảng cân bằng",
+    "thời gian chạy"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/dog_cafe",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "带狗咖啡馆",
+    "vi": "Quán thân thiện với chó",
+    "en": "Dog Friendly Cafe"
+   },
+   "keywords": [
+    "带狗出门",
+    "chỗ cho chó vào",
+    "dog cafe",
+    "mang cún đi",
+    "quán có cún"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/dog_gear",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "狗狗用品",
+    "vi": "Đồ cho chó",
+    "en": "Dog Gear"
+   },
+   "keywords": [
+    "rọ mõm",
+    "dây cương",
+    "vòng cổ",
+    "áo cho chó",
+    "giày chó"
+   ]
+  },
+  {
+   "id": "interest/pets/dog/dog_bath",
+   "parent": "interest/pets/dog",
+   "name": {
+    "zh": "洗澡吹毛",
+    "vi": "Tắm cho chó",
+    "en": "Dog Bathing"
+   },
+   "keywords": [
+    "给狗洗澡",
+    "tắm cho chó",
+    "sấy lông",
+    "mùi chó",
+    "chậu tắm"
+   ]
+  },
+  {
+   "id": "interest/pets/cat",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "猫咪",
+    "vi": "Mèo",
+    "en": "Cats"
+   },
+   "keywords": [
+    "猫咪",
+    "con mèo",
+    "mèo cưng",
+    "cat",
+    "nuôi mèo"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/kitten",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "小猫",
+    "vi": "Mèo con",
+    "en": "Kitten"
+   },
+   "keywords": [
+    "小猫",
+    "mèo con",
+    "kitten",
+    "mèo sơ sinh",
+    "tạm cho bú"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/breed",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "品种猫",
+    "vi": "Mèo giống",
+    "en": "Cat Breeds"
+   },
+   "keywords": [
+    "猫品种",
+    "mèo ta",
+    "mèo anh",
+    "mèo muni",
+    "mèo bun"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/litter",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "猫砂猫厕",
+    "vi": "Cát mèo",
+    "en": "Cat Litter"
+   },
+   "keywords": [
+    "猫砂",
+    "cát mèo",
+    "khay cát",
+    "đổ cát",
+    "khử mùi khay"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/scratcher",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "猫抓板",
+    "vi": "Trụ cào",
+    "en": "Scratching Post"
+   },
+   "keywords": [
+    "猫抓板",
+    "trụ cào",
+    "giấy cào",
+    "tỉa móng",
+    "ban công cào"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/play",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "逗猫",
+    "vi": "Đồ chơi cho mèo",
+    "en": "Cat Play"
+   },
+   "keywords": [
+    "逗猫",
+    "cần câu mèo",
+    "bóng mèo",
+    "thùng giấy",
+    "nơ mèo"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/indoor",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "室内养猫",
+    "vi": "Mèo trong nhà",
+    "en": "Indoor Cat"
+   },
+   "keywords": [
+    "室内猫",
+    "lưới ban công",
+    "ô cửa sổ",
+    "mèo không ra ngoài",
+    "giữ mèo nhà"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/walk",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "遛猫",
+    "vi": "Dẫn mèo đi",
+    "en": "Walking A Cat"
+   },
+   "keywords": [
+    "遛猫",
+    "dẫn mèo đi",
+    "dây cho mèo",
+    "balô mèo",
+    "mèo ra đường"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/cat_cafe",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "猫咖",
+    "vi": "Quán cà phê mèo",
+    "en": "Cat Cafe"
+   },
+   "keywords": [
+    "猫咖",
+    "quán mèo",
+    "cat cafe",
+    "cà phê mèo",
+    "ôm mèo"
+   ]
+  },
+  {
+   "id": "interest/pets/cat/groom",
+   "parent": "interest/pets/cat",
+   "name": {
+    "zh": "猫咪清洁",
+    "vi": "Chải lông mèo",
+    "en": "Cat Grooming"
+   },
+   "keywords": [
+    "清洁猫咪",
+    "lau mắt mèo",
+    "chải lông",
+    "tắm mèo",
+    "cắt lông mèo"
+   ]
+  },
+  {
+   "id": "interest/pets/health",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "宠物健康",
+    "vi": "Sức khỏe thú cưng",
+    "en": "Pet Health"
+   },
+   "keywords": [
+    "宠健康",
+    "thú y dự phòng",
+    "pet health",
+    "phòng bệnh cho chó mèo",
+    "tái khám"
+   ]
+  },
+  {
+   "id": "interest/pets/health/vet",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "就诊",
+    "vi": "Khám thú y",
+    "en": "Vet Visit"
+   },
+   "keywords": [
+    "看医生",
+    "thú y",
+    "phòng khám thú y",
+    "đặt lịch cho cún",
+    "bác sĩ thú y"
+   ]
+  },
+  {
+   "id": "interest/pets/health/vaccine",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "疫苗",
+    "vi": "Tiêm phòng cho thú",
+    "en": "Pet Vaccines"
+   },
+   "keywords": [
+    "宠物疫苗",
+    "vacxin thú",
+    "tiêm phòng cho mèo",
+    "sổ tiêm",
+    "nhắc mũi"
+   ]
+  },
+  {
+   "id": "interest/pets/health/deworm",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "驱虫",
+    "vi": "Tẩy giun",
+    "en": "Deworming"
+   },
+   "keywords": [
+    "驱虫",
+    "tẩy giun",
+    "ve",
+    "nhỏ gáy"
+   ]
+  },
+  {
+   "id": "interest/pets/health/neuter",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "绝育",
+    "vi": "Triệt sản",
+    "en": "Neutering"
+   },
+   "keywords": [
+    "绝育",
+    "triệt sản",
+    "sau triệt sản",
+    "kiêng sau mổ",
+    "động dục"
+   ]
+  },
+  {
+   "id": "interest/pets/health/skin",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "皮肤与毛",
+    "vi": "Bệnh da thú",
+    "en": "Skin & Coat"
+   },
+   "keywords": [
+    "皮肤病",
+    "nấm da",
+    "ghẻ",
+    "rụng lông",
+    "viêm da"
+   ]
+  },
+  {
+   "id": "interest/pets/health/dental",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "口腔护理",
+    "vi": "Vệ sinh răng thú",
+    "en": "Pet Dental"
+   },
+   "keywords": [
+    "口腔",
+    "chải răng chó",
+    "hôi miệng",
+    "vôi răng",
+    "sữa răng thú"
+   ]
+  },
+  {
+   "id": "interest/pets/health/emergency",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "急诊",
+    "vi": "Cấp cứu thú",
+    "en": "Pet Emergency"
+   },
+   "keywords": [
+    "急诊",
+    "cứu nguy",
+    "ngộ độc",
+    "rắn cắn",
+    "co giật"
+   ]
+  },
+  {
+   "id": "interest/pets/health/medicine",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "用药",
+    "vi": "Cho thú uống thuốc",
+    "en": "Pet Medication"
+   },
+   "keywords": [
+    "用药",
+    "thuốc cho mèo",
+    "liều",
+    "nhỏ thuốc",
+    "đơn của thú y"
+   ]
+  },
+  {
+   "id": "interest/pets/health/annual_exam",
+   "parent": "interest/pets/health",
+   "name": {
+    "zh": "年检",
+    "vi": "Khám định kỳ",
+    "en": "Annual Exam"
+   },
+   "keywords": [
+    "年检",
+    "khám định kỳ",
+    "xét nghiệm máu",
+    "cân thú",
+    "soi ký sinh"
+   ]
+  },
+  {
+   "id": "interest/pets/food",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "宠物饮食",
+    "vi": "Ăn của thú",
+    "en": "Pet Food"
+   },
+   "keywords": [
+    "宠食",
+    "khẩu phần thú",
+    "换粮",
+    "ăn bao nhiêu là đủ"
+   ]
+  },
+  {
+   "id": "interest/pets/food/dry",
+   "parent": "interest/pets/food",
+   "name": {
+    "zh": "主粮",
+    "vi": "Hạt khô",
+    "en": "Dry Food"
+   },
+   "keywords": [
+    "主粮",
+    "hạt khô",
+    "kibble",
+    "dòng hạt",
+    "hạt cao cấp"
+   ]
+  },
+  {
+   "id": "interest/pets/food/wet",
+   "parent": "interest/pets/food",
+   "name": {
+    "zh": "湿粮罐头",
+    "vi": "Pate và túi ướt",
+    "en": "Wet Food"
+   },
+   "keywords": [
+    "罐头",
+    "pate",
+    "pouch",
+    "súp cho mèo",
+    "cá hộp thú"
+   ]
+  },
+  {
+   "id": "interest/pets/food/raw",
+   "parent": "interest/pets/food",
+   "name": {
+    "zh": "鲜食",
+    "vi": "Ăn tươi",
+    "en": "Raw Feeding"
+   },
+   "keywords": [
+    "鲜食",
+    "ăn tươi",
+    "raw",
+    "sơ chế",
+    "xương sống"
+   ]
+  },
+  {
+   "id": "interest/pets/food/treats",
+   "parent": "interest/pets/food",
+   "name": {
+    "zh": "零食奖励",
+    "vi": "Bánh thưởng",
+    "en": "Treats"
+   },
+   "keywords": [
+    "零食",
+    "bánh thưởng",
+    "que thưởng",
+    "mèo ăn vặt",
+    "khen lúc học"
+   ]
+  },
+  {
+   "id": "interest/pets/food/fountain",
+   "parent": "interest/pets/food",
+   "name": {
+    "zh": "饮水机食盆",
+    "vi": "Đài uống nước",
+    "en": "Water Fountain"
+   },
+   "keywords": [
+    "饮水机",
+    "đài uống nước",
+    "máy lọc cho thú",
+    "bát ăn",
+    "chậu nước"
+   ]
+  },
+  {
+   "id": "interest/pets/food/diet",
+   "parent": "interest/pets/food",
+   "name": {
+    "zh": "处方粮",
+    "vi": "Chế độ ăn đặc biệt",
+    "en": "Special Diet"
+   },
+   "keywords": [
+    "处方粮",
+    "béo phì thú",
+    "dạ dày nhạy cảm",
+    "dị ứng thức ăn",
+    "men tiêu hóa thú"
+   ]
+  },
+  {
+   "id": "interest/pets/other",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "其他宠物",
+    "vi": "Thú khác",
+    "en": "Other Pets"
+   },
+   "keywords": [
+    "小宠",
+    "thú khác",
+    "other pets",
+    "nuôi thêm",
+    "lồng nhỏ"
+   ]
+  },
+  {
+   "id": "interest/pets/other/rabbit",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "兔子",
+    "vi": "Thỏ",
+    "en": "Rabbits"
+   },
+   "keywords": [
+    "兔子",
+    "thỏ",
+    "cỏ cho thỏ",
+    "rọ thỏ",
+    "nhà thỏ"
+   ]
+  },
+  {
+   "id": "interest/pets/other/hamster",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "仓鼠",
+    "vi": "Chuột hamster",
+    "en": "Hamsters"
+   },
+   "keywords": [
+    "仓鼠",
+    "hamster",
+    "bánh xe chạy",
+    "mùn cưa",
+    "tắm cát"
+   ]
+  },
+  {
+   "id": "interest/pets/other/bird",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "鸟类",
+    "vi": "Chim cảnh",
+    "en": "Birds"
+   },
+   "keywords": [
+    "hót",
+    "vẹt",
+    "hạt chim"
+   ]
+  },
+  {
+   "id": "interest/pets/other/fish",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "观赏鱼",
+    "vi": "Cá cảnh",
+    "en": "Ornamental Fish"
+   },
+   "keywords": [
+    "观赏鱼",
+    "cá cảnh",
+    "bể cá",
+    "cá bảy màu",
+    "cá dĩa"
+   ]
+  },
+  {
+   "id": "interest/pets/other/aquarium",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "水族造景",
+    "vi": "Bể thủy sinh",
+    "en": "Aquarium"
+   },
+   "keywords": [
+    "水草",
+    "thủy sinh",
+    "bơm lọc",
+    "rêu",
+    "đá lót"
+   ]
+  },
+  {
+   "id": "interest/pets/other/turtle",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "龟",
+    "vi": "Rùa",
+    "en": "Turtles"
+   },
+   "keywords": [
+    "rùa",
+    "nắng cho rùa",
+    "bể rùa",
+    "rùa tai đỏ"
+   ]
+  },
+  {
+   "id": "interest/pets/other/reptile",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "爬宠",
+    "vi": "Bò sát cảnh",
+    "en": "Reptiles"
+   },
+   "keywords": [
+    "爬宠",
+    "thằn lằn",
+    "tắc kè",
+    "lồng sưởi",
+    "dế ăn"
+   ]
+  },
+  {
+   "id": "interest/pets/other/chicken",
+   "parent": "interest/pets/other",
+   "name": {
+    "zh": "迷你鸡",
+    "vi": "Gà cảnh",
+    "en": "Pet Chickens"
+   },
+   "keywords": [
+    "迷你鸡",
+    "gà tre",
+    "chuồng gà",
+    "trứng áp",
+    "gà chạy trong sân"
+   ]
+  },
+  {
+   "id": "interest/pets/services",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "养宠服务",
+    "vi": "Dịch vụ cho thú",
+    "en": "Pet Services"
+   },
+   "keywords": [
+    "宠物服务",
+    "dịch vụ thú",
+    "pet service",
+    "nhờ trông",
+    "đặt dịch vụ"
+   ]
+  },
+  {
+   "id": "interest/pets/services/shop",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "宠物店",
+    "vi": "Shop thú cưng",
+    "en": "Pet Shop"
+   },
+   "keywords": [
+    "宠物店",
+    "cửa hàng thú",
+    "shop bán giống",
+    "đi shop mèo",
+    "gian thú"
+   ]
+  },
+  {
+   "id": "interest/pets/services/board",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "寄养",
+    "vi": "Nhận giữ thú",
+    "en": "Pet Boarding"
+   },
+   "keywords": [
+    "寄养",
+    "gửi chó",
+    "giữ qua đêm",
+    "ngày lễ gửi",
+    "camera xem bé"
+   ]
+  },
+  {
+   "id": "interest/pets/services/grooming",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "宠物美容",
+    "vi": "Groom cho thú",
+    "en": "Pet Grooming"
+   },
+   "keywords": [
+    "美容宠物",
+    "groom",
+    "tỉa lông",
+    "kiểu cắt",
+    "uốn đuôi"
+   ]
+  },
+  {
+   "id": "interest/pets/services/adoption",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "领养",
+    "vi": "Nhận nuôi",
+    "en": "Adoption"
+   },
+   "keywords": [
+    "领养",
+    "nhận nuôi",
+    "adoption",
+    "cho nhận bé",
+    "cam kết nuôi"
+   ]
+  },
+  {
+   "id": "interest/pets/services/rescue",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "流浪救助",
+    "vi": "Cứu chó mèo hoang",
+    "en": "Stray Rescue"
+   },
+   "keywords": [
+    "流浪",
+    "chó hoang",
+    "mèo đường",
+    "rescue",
+    "tiền ủng hộ"
+   ]
+  },
+  {
+   "id": "interest/pets/services/transport",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "宠物运送",
+    "vi": "Chở thú đi xa",
+    "en": "Pet Transport"
+   },
+   "keywords": [
+    "运送",
+    "chở thú",
+    "lồng vận chuyển",
+    "giao thú",
+    "đi tàu cùng"
+   ]
+  },
+  {
+   "id": "interest/pets/services/farewell",
+   "parent": "interest/pets/services",
+   "name": {
+    "zh": "宠物告别",
+    "vi": "Tiễn bé",
+    "en": "Pet Farewell"
+   },
+   "keywords": [
+    "告别",
+    "an táng",
+    "chôn bé",
+    "tro cốt",
+    "kỷ niệm bé"
+   ]
+  },
+  {
+   "id": "interest/pets/community",
+   "parent": "interest/pets",
+   "name": {
+    "zh": "养宠社群",
+    "vi": "Cộng đồng nuôi thú",
+    "en": "Pet Community"
+   },
+   "keywords": [
+    "养宠群",
+    "pet community",
+    "buổi hẹn pet",
+    "giao lưu cún",
+    "hội mê mèo"
+   ]
+  },
+  {
+   "id": "interest/pets/community/dog_park",
+   "parent": "interest/pets/community",
+   "name": {
+    "zh": "遛宠地",
+    "vi": "Chỗ cho thú chạy",
+    "en": "Dog Park"
+   },
+   "keywords": [
+    "狗公园",
+    "khu chạy",
+    "sân rộng",
+    "cho thú thả",
+    "hàng rào"
+   ]
+  },
+  {
+   "id": "interest/pets/community/share",
+   "parent": "interest/pets/community",
+   "name": {
+    "zh": "晒宠",
+    "vi": "Khoe bé cưng",
+    "en": "Pet Sharing"
+   },
+   "keywords": [
+    "晒宠",
+    "khoe mèo",
+    "ảnh cún",
+    "clips của bé",
+    "dễ thương quá"
+   ]
+  },
+  {
+   "id": "interest/pets/community/market",
+   "parent": "interest/pets/community",
+   "name": {
+    "zh": "宠物集市",
+    "vi": "Chợ đồ thú",
+    "en": "Pet Market"
+   },
+   "keywords": [
+    "chợ thú cưng",
+    "đồ cũ cho mèo",
+    "thanh lý lồng",
+    "hội bán giống",
+    "chợ cuối tuần"
+   ]
+  },
+  {
+   "id": "interest/pets/community/blogger",
+   "parent": "interest/pets/community",
+   "name": {
+    "zh": "宠物博主",
+    "vi": "Kênh thú cưng",
+    "en": "Pet Blogger"
+   },
+   "keywords": [
+    "博主",
+    "kênh mèo",
+    "pet vlog",
+    "fanpage",
+    "thần tượng cún"
+   ]
+  },
+  {
+   "id": "interest/pets/community/moving",
+   "parent": "interest/pets/community",
+   "name": {
+    "zh": "带宠搬家出行",
+    "vi": "Chuyển nhà cùng thú",
+    "en": "Moving With Pets"
+   },
+   "keywords": [
+    "带宠搬家",
+    "chuyển nhà cùng mèo",
+    "thủ tục bay",
+    "giấy tờ xuất",
+    "hộp mang"
+   ]
+  }
+ ]
+}

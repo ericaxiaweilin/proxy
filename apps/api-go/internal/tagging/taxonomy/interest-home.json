@@ -1,0 +1,1136 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/home/apartment",
+   "parent": "interest/home",
+   "name": {
+    "zh": "租房安家",
+    "vi": "Thuê nhà & an cư",
+    "en": "Renting & Settling"
+   },
+   "keywords": [
+    "租房",
+    "找房子",
+    "thuê nhà",
+    "cho thuê nhà",
+    "house hunting"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/listings",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "房源与价格",
+    "vi": "Giá phòng cho thuê",
+    "en": "Rental Listings"
+   },
+   "keywords": [
+    "房源",
+    "giá phòng",
+    "nhà nguyên căn",
+    "chung cư mini",
+    "rental price"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/roommate",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "合租室友",
+    "vi": "Ở ghép phòng",
+    "en": "Roommates"
+   },
+   "keywords": [
+    "合租",
+    "找室友",
+    "ghép phòng",
+    "ở cùng phòng",
+    "roommate"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/viewing",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "实地看房",
+    "vi": "Đi xem phòng",
+    "en": "Viewings"
+   },
+   "keywords": [
+    "看房",
+    "xem phòng",
+    "phòng thực tế",
+    "đi xem nhà",
+    "xem phòng hộ"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/deposit",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "押金与租约",
+    "vi": "Cọc & hợp đồng thuê",
+    "en": "Deposit & Contract"
+   },
+   "keywords": [
+    "押金",
+    "đặt cọc nhà",
+    "hợp đồng thuê",
+    "cọc phòng",
+    "租约",
+    "coc nha"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/moving_in",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "搬家入住",
+    "vi": "Chuyển nhà",
+    "en": "Moving In"
+   },
+   "keywords": [
+    "搬家",
+    "chuyển đến",
+    "dọn vào ở",
+    "xe tải chở đồ",
+    "moving day"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/worker_housing",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "工人宿舍",
+    "vi": "Nhà ở công nhân",
+    "en": "Worker Housing"
+   },
+   "keywords": [
+    "khu nhà ở công nhân",
+    "nhà trọ khu công nghiệp",
+    "工人宿舍",
+    "dãy trọ",
+    "lưu trú công nhân"
+   ]
+  },
+  {
+   "id": "interest/home/apartment/new_urban_area",
+   "parent": "interest/home/apartment",
+   "name": {
+    "zh": "新城楼盘",
+    "vi": "Khu đô thị mới",
+    "en": "New Urban Area"
+   },
+   "keywords": [
+    "khu đô thị",
+    "đô thị mới",
+    "bàn giao nhà",
+    "nhà xây sẵn",
+    "khu do thi"
+   ]
+  },
+  {
+   "id": "interest/home/furniture",
+   "parent": "interest/home",
+   "name": {
+    "zh": "家具",
+    "vi": "Nội thất",
+    "en": "Furniture"
+   },
+   "keywords": [
+    "家具",
+    "nội thất",
+    "furniture",
+    "đồ gỗ",
+    "mua bàn ghế"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/sofa",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "沙发",
+    "vi": "Ghế sofa",
+    "en": "Sofa"
+   },
+   "keywords": [
+    "沙发",
+    "ghế sofa",
+    "sofa giường",
+    "áo phủ sofa",
+    "phòng khách"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/bed_frame",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "床与床垫",
+    "vi": "Giường & nệm",
+    "en": "Bed & Mattress"
+   },
+   "keywords": [
+    "床垫",
+    "床架",
+    "giường ngủ",
+    "nệm mút",
+    "mattress"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/wardrobe",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "衣柜收纳",
+    "vi": "Tủ quần áo",
+    "en": "Wardrobe & Storage"
+   },
+   "keywords": [
+    "衣柜",
+    "tủ quần áo",
+    "收纳",
+    "hộp đựng đồ",
+    "storage box"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/dining_set",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "餐桌椅",
+    "vi": "Bộ bàn ăn",
+    "en": "Dining Set"
+   },
+   "keywords": [
+    "桌椅",
+    "bàn ăn",
+    "ghế ăn",
+    "bộ bàn ghế",
+    "dining set"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/home_desk",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "书桌角",
+    "vi": "Bàn làm việc tại nhà",
+    "en": "Home Desk"
+   },
+   "keywords": [
+    "书桌",
+    "写字台",
+    "ghế xoay",
+    "bàn tại gia",
+    "home desk"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/bookshelf",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "书架置物架",
+    "vi": "Kệ sách",
+    "en": "Shelves"
+   },
+   "keywords": [
+    "书架",
+    "kệ sách",
+    "giá sách",
+    "kệ treo tường",
+    "bookshelf"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/curtains",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "窗帘",
+    "vi": "Rèm cửa",
+    "en": "Curtains"
+   },
+   "keywords": [
+    "窗帘",
+    "rèm cửa",
+    "rèm cầu vồng",
+    "may rèm",
+    "sáo gỗ"
+   ]
+  },
+  {
+   "id": "interest/home/furniture/secondhand",
+   "parent": "interest/home/furniture",
+   "name": {
+    "zh": "二手家具",
+    "vi": "Nội thất cũ",
+    "en": "Secondhand Furniture"
+   },
+   "keywords": [
+    "二手家具",
+    "thanh lý nội thất",
+    "家具转让",
+    "furniture clearance"
+   ]
+  },
+  {
+   "id": "interest/home/appliance",
+   "parent": "interest/home",
+   "name": {
+    "zh": "家用电器",
+    "vi": "Đồ gia dụng",
+    "en": "Home Appliances"
+   },
+   "keywords": [
+    "电器",
+    "gia dụng",
+    "đồ điện máy",
+    "appliance"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/air_conditioner",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "空调",
+    "vi": "Máy lạnh",
+    "en": "Air Conditioner"
+   },
+   "keywords": [
+    "空调",
+    "điều hòa",
+    "máy lạnh",
+    "lắp điều hòa",
+    "aircon",
+    "dieu hoa"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/washing_machine",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "洗衣机",
+    "vi": "Máy giặt",
+    "en": "Washing Machine"
+   },
+   "keywords": [
+    "洗衣机",
+    "máy giặt",
+    "giặt máy",
+    "sấy quần áo",
+    "washing machine"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/refrigerator",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "冰箱",
+    "vi": "Tủ lạnh",
+    "en": "Refrigerator"
+   },
+   "keywords": [
+    "冰箱",
+    "tủ lạnh",
+    "ngăn đá",
+    "kệ cửa tủ lạnh",
+    "fridge"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/water_heater",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "热水器",
+    "vi": "Bình nóng lạnh",
+    "en": "Water Heater"
+   },
+   "keywords": [
+    "热水器",
+    "bình nóng lạnh",
+    "máy nước nóng",
+    "bơm tăng áp",
+    "water heater"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/small_kitchen_gear",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "厨房小家电",
+    "vi": "Đồ điện nhỏ",
+    "en": "Small Kitchen Gear"
+   },
+   "keywords": [
+    "小家电",
+    "nồi chiên không dầu",
+    "ấm siêu tốc",
+    "nồi hầm"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/vacuum_robot",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "扫地机器人",
+    "vi": "Robot hút bụi",
+    "en": "Robot Vacuum"
+   },
+   "keywords": [
+    "扫地机器人",
+    "máy lau sàn",
+    "máy hút bụi",
+    "cây lau nhà",
+    "vacuum"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/air_purifier",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "净化与除湿",
+    "vi": "Lọc khí & hút ẩm",
+    "en": "Purifier & Dehumidifier"
+   },
+   "keywords": [
+    "空气净化器",
+    "máy lọc không khí",
+    "hút ẩm",
+    "除湿机",
+    "nồm ẩm"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/water_filter",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "净水与滤芯",
+    "vi": "Máy lọc nước",
+    "en": "Water Filter"
+   },
+   "keywords": [
+    "净水器",
+    "máy lọc nước",
+    "滤芯",
+    "thay lõi lọc",
+    "nước tinh khiết"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/fan",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "风扇",
+    "vi": "Quạt điện",
+    "en": "Fans"
+   },
+   "keywords": [
+    "风扇",
+    "quạt trần",
+    "quạt tích điện",
+    "quạt đứng",
+    "electric fan"
+   ]
+  },
+  {
+   "id": "interest/home/appliance/stove",
+   "parent": "interest/home/appliance",
+   "name": {
+    "zh": "灶具",
+    "vi": "Bếp nấu",
+    "en": "Stove & Hob"
+   },
+   "keywords": [
+    "灶具",
+    "bếp từ",
+    "bếp ga",
+    "đánh lửa bếp",
+    "hob stove"
+   ]
+  },
+  {
+   "id": "interest/home/kitchen_bath",
+   "parent": "interest/home",
+   "name": {
+    "zh": "厨卫用品",
+    "vi": "Đồ bếp & tắm",
+    "en": "Kitchen & Bath"
+   },
+   "keywords": [
+    "厨卫",
+    "vật dụng bếp",
+    "đồ làm bếp",
+    "kitchen & bath",
+    "đồ dùng nhà tắm"
+   ]
+  },
+  {
+   "id": "interest/home/kitchen_bath/cookware",
+   "parent": "interest/home/kitchen_bath",
+   "name": {
+    "zh": "锅具",
+    "vi": "Nồi chảo",
+    "en": "Cookware"
+   },
+   "keywords": [
+    "锅具",
+    "nồi chảo",
+    "chảo chống dính",
+    "xoong nồi",
+    "cookware"
+   ]
+  },
+  {
+   "id": "interest/home/kitchen_bath/tableware",
+   "parent": "interest/home/kitchen_bath",
+   "name": {
+    "zh": "碗碟餐具",
+    "vi": "Bát đĩa",
+    "en": "Tableware"
+   },
+   "keywords": [
+    "餐具",
+    "bát đĩa",
+    "bộ thìa đũa",
+    "chén bát",
+    "tableware"
+   ]
+  },
+  {
+   "id": "interest/home/kitchen_bath/food_storage",
+   "parent": "interest/home/kitchen_bath",
+   "name": {
+    "zh": "保鲜收纳",
+    "vi": "Hộp đựng thực phẩm",
+    "en": "Food Storage"
+   },
+   "keywords": [
+    "保鲜盒",
+    "lọ thủy tinh",
+    "túi zip",
+    "đựng đồ ăn",
+    "hũ gia vị"
+   ]
+  },
+  {
+   "id": "interest/home/kitchen_bath/bathroom_fittings",
+   "parent": "interest/home/kitchen_bath",
+   "name": {
+    "zh": "卫浴五金",
+    "vi": "Sen vòi nhà tắm",
+    "en": "Bathroom Fittings"
+   },
+   "keywords": [
+    "卫浴",
+    "sen vòi",
+    "vách kính tắm",
+    "bồn tắm",
+    "kệ nhà tắm"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning",
+   "parent": "interest/home",
+   "name": {
+    "zh": "清洁家务",
+    "vi": "Dọn dẹp nhà",
+    "en": "Cleaning & Chores"
+   },
+   "keywords": [
+    "清洁",
+    "housework",
+    "việc nhà"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning/hourly_help",
+   "parent": "interest/home/cleaning",
+   "name": {
+    "zh": "钟点工",
+    "vi": "Giúp việc theo giờ",
+    "en": "Hourly Housekeeper"
+   },
+   "keywords": [
+    "钟点工",
+    "giúp việc theo giờ",
+    "người giúp việc",
+    "dọn theo giờ",
+    "tìm osin"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning/laundry",
+   "parent": "interest/home/cleaning",
+   "name": {
+    "zh": "洗衣熨烫",
+    "vi": "Giặt ủi",
+    "en": "Laundry"
+   },
+   "keywords": [
+    "洗衣",
+    "giặt ủi",
+    "bàn ủi",
+    "phơi đồ",
+    "laundry"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning/deep_clean",
+   "parent": "interest/home/cleaning",
+   "name": {
+    "zh": "大扫除",
+    "vi": "Tổng vệ sinh",
+    "en": "Deep Cleaning"
+   },
+   "keywords": [
+    "tổng vệ sinh",
+    "lau kính",
+    "dọn nhà cuối năm",
+    "deep clean",
+    "ve sinh nha"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning/stain_mold",
+   "parent": "interest/home/cleaning",
+   "name": {
+    "zh": "去污除霉",
+    "vi": "Tẩy ố & nấm mốc",
+    "en": "Stain & Mold Removal"
+   },
+   "keywords": [
+    "去污",
+    "tẩy ố",
+    "nấm mốc",
+    "vết ố vàng",
+    "tẩy trắng"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning/insect_control",
+   "parent": "interest/home/cleaning",
+   "name": {
+    "zh": "除虫灭蚁",
+    "vi": "Diệt côn trùng",
+    "en": "Pest Control"
+   },
+   "keywords": [
+    "除虫",
+    "diệt mối",
+    "muỗi đốt",
+    "bọ chét",
+    "xịt côn trùng"
+   ]
+  },
+  {
+   "id": "interest/home/cleaning/odor_control",
+   "parent": "interest/home/cleaning",
+   "name": {
+    "zh": "除味芳香",
+    "vi": "Khử mùi phòng",
+    "en": "Odour Control"
+   },
+   "keywords": [
+    "除臭",
+    "khử mùi",
+    "sáp thơm",
+    "thơm phòng",
+    "than hoạt tính"
+   ]
+  },
+  {
+   "id": "interest/home/repair",
+   "parent": "interest/home",
+   "name": {
+    "zh": "上门维修",
+    "vi": "Sửa chữa tại nhà",
+    "en": "Home Repair"
+   },
+   "keywords": [
+    "thợ sửa",
+    "sửa chữa tại nhà",
+    "home repair",
+    "bảo trì"
+   ]
+  },
+  {
+   "id": "interest/home/repair/plumbing",
+   "parent": "interest/home/repair",
+   "name": {
+    "zh": "水管马桶",
+    "vi": "Ống nước & bồn cầu",
+    "en": "Plumbing"
+   },
+   "keywords": [
+    "水管维修",
+    "sửa ống nước",
+    "thông bồn cầu",
+    "chậu rửa mặt",
+    "plumbing"
+   ]
+  },
+  {
+   "id": "interest/home/repair/electrical",
+   "parent": "interest/home/repair",
+   "name": {
+    "zh": "电路照明",
+    "vi": "Sửa điện",
+    "en": "Electrical"
+   },
+   "keywords": [
+    "电路",
+    "跳闸",
+    "thợ điện",
+    "thay bóng đèn",
+    "đi dây"
+   ]
+  },
+  {
+   "id": "interest/home/repair/ac_service",
+   "parent": "interest/home/repair",
+   "name": {
+    "zh": "空调清洗加氟",
+    "vi": "Vệ sinh máy lạnh",
+    "en": "AC Service"
+   },
+   "keywords": [
+    "空调清洗",
+    "vệ sinh máy lạnh",
+    "nạp gas",
+    "thợ lạnh",
+    "rửa điều hòa"
+   ]
+  },
+  {
+   "id": "interest/home/repair/locksmith",
+   "parent": "interest/home/repair",
+   "name": {
+    "zh": "换锁配钥匙",
+    "vi": "Thay khóa",
+    "en": "Locksmith"
+   },
+   "keywords": [
+    "换锁",
+    "thay khóa",
+    "làm chìa",
+    "ổ khóa",
+    "locksmith"
+   ]
+  },
+  {
+   "id": "interest/home/repair/wall_crack",
+   "parent": "interest/home/repair",
+   "name": {
+    "zh": "补墙刷漆",
+    "vi": "Sơn lại tường",
+    "en": "Wall Repainting"
+   },
+   "keywords": [
+    "刷墙",
+    "sơn nhà",
+    "bả matit",
+    "vết nứt tường",
+    "trát tường"
+   ]
+  },
+  {
+   "id": "interest/home/repair/waterproofing",
+   "parent": "interest/home/repair",
+   "name": {
+    "zh": "防水补漏",
+    "vi": "Chống thấm",
+    "en": "Waterproofing"
+   },
+   "keywords": [
+    "防水补漏",
+    "chống thấm",
+    "sửa chống dột",
+    "keo silicon",
+    "rò nước mái"
+   ]
+  },
+  {
+   "id": "interest/home/reno",
+   "parent": "interest/home",
+   "name": {
+    "zh": "装修改造",
+    "vi": "Cải tạo nhà",
+    "en": "Renovation"
+   },
+   "keywords": [
+    "装修",
+    "sửa nhà",
+    "cải tạo nhà",
+    "renovation",
+    "thi công nhà"
+   ]
+  },
+  {
+   "id": "interest/home/reno/interior_design",
+   "parent": "interest/home/reno",
+   "name": {
+    "zh": "室内设计",
+    "vi": "Thiết kế nội thất",
+    "en": "Interior Design"
+   },
+   "keywords": [
+    "室内设计",
+    "thiết kế nội thất",
+    "hình phối cảnh",
+    "bản vẽ 3d",
+    "interior design"
+   ]
+  },
+  {
+   "id": "interest/home/reno/flooring_tiles",
+   "parent": "interest/home/reno",
+   "name": {
+    "zh": "地板瓷砖",
+    "vi": "Sàn gỗ & gạch lát",
+    "en": "Flooring & Tiles"
+   },
+   "keywords": [
+    "地板",
+    "sàn gỗ",
+    "lát gạch",
+    "gạch bóng kính",
+    "ốp lát"
+   ]
+  },
+  {
+   "id": "interest/home/reno/kitchen_cabinet",
+   "parent": "interest/home/reno",
+   "name": {
+    "zh": "橱柜台面",
+    "vi": "Tủ bếp",
+    "en": "Kitchen Cabinets"
+   },
+   "keywords": [
+    "橱柜",
+    "làm tủ bếp",
+    "mặt đá bếp",
+    "kính ốp bếp",
+    "tủ bếp gỗ"
+   ]
+  },
+  {
+   "id": "interest/home/reno/contractor_quote",
+   "parent": "interest/home/reno",
+   "name": {
+    "zh": "施工队报价",
+    "vi": "Đội thi công & báo giá",
+    "en": "Contractor & Quote"
+   },
+   "keywords": [
+    "施工队",
+    "nhà thầu",
+    "đội thi công",
+    "báo giá sửa nhà",
+    "nhận thầu"
+   ]
+  },
+  {
+   "id": "interest/home/reno/balcony_terrace",
+   "parent": "interest/home/reno",
+   "name": {
+    "zh": "阳台露台",
+    "vi": "Ban công & sân thượng",
+    "en": "Balcony & Terrace"
+   },
+   "keywords": [
+    "阳台改造",
+    "ban công",
+    "cải tạo ban công",
+    "sân thượng",
+    "logia"
+   ]
+  },
+  {
+   "id": "interest/home/plants",
+   "parent": "interest/home",
+   "name": {
+    "zh": "家中绿植",
+    "vi": "Cây xanh trong nhà",
+    "en": "Home Greenery"
+   },
+   "keywords": [
+    "阳台绿植",
+    "chậu cây",
+    "cây xanh trong nhà",
+    "home garden",
+    "vườn tại nhà"
+   ]
+  },
+  {
+   "id": "interest/home/plants/indoor_pots",
+   "parent": "interest/home/plants",
+   "name": {
+    "zh": "室内盆栽",
+    "vi": "Cây để trong nhà",
+    "en": "Indoor Pots"
+   },
+   "keywords": [
+    "室内盆栽",
+    "cây để bàn",
+    "lưỡi hổ",
+    "trồng chậu",
+    "houseplant"
+   ]
+  },
+  {
+   "id": "interest/home/plants/balcony_veggies",
+   "parent": "interest/home/plants",
+   "name": {
+    "zh": "阳台种菜",
+    "vi": "Trồng rau trên ban công",
+    "en": "Balcony Vegetables"
+   },
+   "keywords": [
+    "阳台种菜",
+    "trồng rau sạch",
+    "rau thùng xốp",
+    "vườn rau mini",
+    "hái rau tại nhà"
+   ]
+  },
+  {
+   "id": "interest/home/plants/hydroponics",
+   "parent": "interest/home/plants",
+   "name": {
+    "zh": "水培设备",
+    "vi": "Thủy canh",
+    "en": "Hydroponics"
+   },
+   "keywords": [
+    "水培",
+    "thủy canh",
+    "bể thủy canh",
+    "trụ rau",
+    "hydroponic"
+   ]
+  },
+  {
+   "id": "interest/home/plants/plant_care",
+   "parent": "interest/home/plants",
+   "name": {
+    "zh": "浇水施肥",
+    "vi": "Chăm cây",
+    "en": "Plant Care"
+   },
+   "keywords": [
+    "养花",
+    "tưới cây",
+    "phân bón",
+    "cắt tỉa lá",
+    "sâu lá"
+   ]
+  },
+  {
+   "id": "interest/home/smart",
+   "parent": "interest/home",
+   "name": {
+    "zh": "智能家居",
+    "vi": "Nhà thông minh",
+    "en": "Smart Home"
+   },
+   "keywords": [
+    "nhà thông minh",
+    "smart home",
+    "tự động hóa nhà",
+    "điều khiển từ xa"
+   ]
+  },
+  {
+   "id": "interest/home/smart/lighting",
+   "parent": "interest/home/smart",
+   "name": {
+    "zh": "智能灯光",
+    "vi": "Đèn cảm ứng",
+    "en": "Smart Lighting"
+   },
+   "keywords": [
+    "智能灯",
+    "đèn cảm ứng",
+    "bóng đổi màu",
+    "công tắc thông minh",
+    "smart bulb"
+   ]
+  },
+  {
+   "id": "interest/home/smart/door_lock",
+   "parent": "interest/home/smart",
+   "name": {
+    "zh": "智能门锁",
+    "vi": "Khóa cửa thông minh",
+    "en": "Smart Lock"
+   },
+   "keywords": [
+    "智能门锁",
+    "vân tay cửa",
+    "mật khẩu cửa",
+    "chốt điện",
+    "smart lock"
+   ]
+  },
+  {
+   "id": "interest/home/smart/home_camera",
+   "parent": "interest/home/smart",
+   "name": {
+    "zh": "家用监控",
+    "vi": "Camera gia đình",
+    "en": "Home Camera"
+   },
+   "keywords": [
+    "家用监控",
+    "camera gia đình",
+    "mắt thần",
+    "xem nhà từ xa",
+    "home camera"
+   ]
+  },
+  {
+   "id": "interest/home/smart/wifi_coverage",
+   "parent": "interest/home/smart",
+   "name": {
+    "zh": "全屋网络",
+    "vi": "Phóng sóng cả nhà",
+    "en": "Whole-home Wi-Fi"
+   },
+   "keywords": [
+    "全屋网络",
+    "lưới wifi",
+    "sóng yếu trong nhà",
+    "điểm phát",
+    "mesh system"
+   ]
+  },
+  {
+   "id": "interest/home/comfort",
+   "parent": "interest/home",
+   "name": {
+    "zh": "起居细节",
+    "vi": "Tiện nghi sinh hoạt",
+    "en": "Daily Comfort"
+   },
+   "keywords": [
+    "起居",
+    "tiện nghi nhà",
+    "sống gọn",
+    "daily comfort",
+    "sinh hoạt nhà"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/declutter",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "断舍离",
+    "vi": "Bỏ đồ đi",
+    "en": "Decluttering"
+   },
+   "keywords": [
+    "断舍离",
+    "dọn bớt đồ",
+    "cho đồ đi",
+    "tối giản nhà",
+    "declutter"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/closet_order",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "衣橱整理",
+    "vi": "Sắp tủ quần áo",
+    "en": "Closet Order"
+   },
+   "keywords": [
+    "衣橱整理",
+    "gấp quần áo",
+    "móc treo",
+    "hộp đựng giày",
+    "closet organizer"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/blackout_rest",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "遮光午休",
+    "vi": "Che sáng & ngủ trưa",
+    "en": "Blackout & Rest"
+   },
+   "keywords": [
+    "遮光",
+    "rèm cản sáng",
+    "bịt mắt ngủ",
+    "màn chống muỗi",
+    "ngủ trưa tại nhà"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/bed_linen",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "床品布艺",
+    "vi": "Ga giường",
+    "en": "Bed Linen"
+   },
+   "keywords": [
+    "床品",
+    "ga giường",
+    "vỏ gối",
+    "ruột chăn",
+    "chăn hè"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/small_apartment",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "小户型生活",
+    "vi": "Căn hộ nhỏ",
+    "en": "Small Apartment"
+   },
+   "keywords": [
+    "小户型",
+    "căn hộ nhỏ",
+    "studio nhỏ",
+    "nhà hẹp",
+    "căn hộ hẹp"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/utility_bills",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "水电燃气",
+    "vi": "Tiền điện nước",
+    "en": "Utilities"
+   },
+   "keywords": [
+    "水电煤",
+    "tiền điện nước",
+    "công tơ điện",
+    "chỉ số điện",
+    "đóng tiền nước"
+   ]
+  },
+  {
+   "id": "interest/home/comfort/fire_safety",
+   "parent": "interest/home/comfort",
+   "name": {
+    "zh": "居家防火",
+    "vi": "Phòng cháy tại nhà",
+    "en": "Fire Safety"
+   },
+   "keywords": [
+    "居家防火",
+    "bình cứu hỏa",
+    "ổ cắm chịu tải",
+    "cháy nổ",
+    "thoát hiểm"
+   ]
+  }
+ ]
+}

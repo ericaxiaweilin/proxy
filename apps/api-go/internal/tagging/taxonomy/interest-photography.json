@@ -1,0 +1,1172 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/photography/gear",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "摄影器材",
+    "vi": "Đồ nghề nhiếp ảnh",
+    "en": "Camera Gear"
+   },
+   "keywords": [
+    "器材",
+    "đồ chụp ảnh",
+    "gear",
+    "máy ảnh & ống kính",
+    "camera gear"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/mirrorless",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "无反机身",
+    "vi": "Máy ảnh mirrorless",
+    "en": "Mirrorless Bodies"
+   },
+   "keywords": [
+    "微单",
+    "mirrorless",
+    "body máy ảnh",
+    "máy ảnh không gương",
+    "dslr"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/film_camera",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "胶片相机",
+    "vi": "Máy ảnh film",
+    "en": "Film Camera"
+   },
+   "keywords": [
+    "胶片相机",
+    "máy ảnh cơ",
+    "analog camera",
+    "lên cuộn film",
+    "compact cơ"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/ccd_compact",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "卡片机",
+    "vi": "Máy ảnh mini ccd",
+    "en": "Compact Digicam"
+   },
+   "keywords": [
+    "卡片机",
+    "digicam",
+    "máy compact cũ",
+    "ccd",
+    "y2k camera"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/instant",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "拍立得",
+    "vi": "Máy ảnh lấy liền",
+    "en": "Instant Camera"
+   },
+   "keywords": [
+    "拍立得",
+    "polaroid",
+    "instax",
+    "in lấy liền",
+    "bốc ảnh liền"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/lens",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "镜头",
+    "vi": "Ống kính",
+    "en": "Lenses"
+   },
+   "keywords": [
+    "镜头",
+    "ống kính máy ảnh",
+    "tiêu cự",
+    "khẩu độ",
+    "lens fix"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/support",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "脚架稳定器",
+    "vi": "Chân máy & chống rung",
+    "en": "Tripod & Gimbal"
+   },
+   "keywords": [
+    "三脚架",
+    "chân máy",
+    "tripod",
+    "steadicam",
+    "monopod"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/lighting",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "灯与柔光",
+    "vi": "Đèn & softbox",
+    "en": "Lighting Gear"
+   },
+   "keywords": [
+    "补光灯",
+    "đèn flash rời",
+    "softbox",
+    "tấm hắt sáng",
+    "đèn continuous"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/power_storage",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "电池与存储",
+    "vi": "Pin & thẻ nhớ",
+    "en": "Batteries & Cards"
+   },
+   "keywords": [
+    "电池",
+    "thẻ nhớ",
+    "thẻ sd",
+    "pin dự phòng chụp",
+    "sạc đôi"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/care_box",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "摄影包与防潮",
+    "vi": "Túi máy & hộp ẩm",
+    "en": "Bags & Dry Box"
+   },
+   "keywords": [
+    "摄影包",
+    "túi máy ảnh",
+    "hộp chống ẩm",
+    "case máy ảnh",
+    "ba lô chụp ảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/used_market",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "二手器材",
+    "vi": "Thanh lý máy ảnh",
+    "en": "Used Gear Market"
+   },
+   "keywords": [
+    "二手相机",
+    "đồ chụp cũ",
+    "器材转让",
+    "giá body cũ",
+    "may anh cu"
+   ]
+  },
+  {
+   "id": "interest/photography/gear/rental",
+   "parent": "interest/photography/gear",
+   "name": {
+    "zh": "租机",
+    "vi": "Cho thuê máy ảnh",
+    "en": "Gear Rental"
+   },
+   "keywords": [
+    "租相机",
+    "thuê body",
+    "thuê ống kính",
+    "mướn máy chụp",
+    "rent lens"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "拍摄题材",
+    "vi": "Chủ đề chụp",
+    "en": "Shooting Genres"
+   },
+   "keywords": [
+    "拍摄",
+    "thể loại ảnh",
+    "shooting",
+    "bấm máy"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/portrait",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "人像",
+    "vi": "Chụp chân dung",
+    "en": "Portrait"
+   },
+   "keywords": [
+    "人像摄影",
+    "chụp chân dung",
+    "portrait",
+    "ảnh dung nhan",
+    "tư thế tạo dáng"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/street",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "街拍",
+    "vi": "Chụp đường phố",
+    "en": "Street Photography"
+   },
+   "keywords": [
+    "街拍",
+    "chụp đường phố",
+    "street photography",
+    "ảnh đời thường",
+    "chụp ngẫu hứng"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/wedding",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "婚礼跟拍",
+    "vi": "Chụp phóng sự cưới",
+    "en": "Wedding Coverage"
+   },
+   "keywords": [
+    "婚礼跟拍",
+    "chụp cưới",
+    "ảnh cưới",
+    "phóng sự cưới",
+    "wedding photography"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/prewedding",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "婚前写真",
+    "vi": "Chụp pre-wedding",
+    "en": "Pre-wedding Shoot"
+   },
+   "keywords": [
+    "婚前写真",
+    "chụp pre wedding",
+    "ảnh cưới ngoại cảnh",
+    "cặp đôi chụp cưới",
+    "pre wedding"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/maternity_baby",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "孕妈与婴儿",
+    "vi": "Ảnh bầu & em bé",
+    "en": "Maternity & Baby"
+   },
+   "keywords": [
+    "孕妈写真",
+    "chụp ảnh bầu",
+    "em bé sơ sinh chụp",
+    "maternity",
+    "newborn shot"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/graduation",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "毕业相簿",
+    "vi": "Ảnh tốt nghiệp",
+    "en": "Graduation Album"
+   },
+   "keywords": [
+    "毕业照册",
+    "chụp tốt nghiệp",
+    "ảnh tan trường",
+    "áo cử nhân",
+    "graduation photo"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/landscape",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "风光",
+    "vi": "Ảnh phong cảnh",
+    "en": "Landscape"
+   },
+   "keywords": [
+    "风光摄影",
+    "chụp phong cảnh",
+    "landscape",
+    "trời hoàng hôn",
+    "bình minh bấm máy"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/food_shot",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "美食照",
+    "vi": "Chụp món ăn",
+    "en": "Food Photography"
+   },
+   "keywords": [
+    "美食摄影",
+    "food photography",
+    "món lên ảnh",
+    "ánh sáng chụp món",
+    "bát đĩa lên hình"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/product",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "产品与电商图",
+    "vi": "Chụp sản phẩm",
+    "en": "Product Photography"
+   },
+   "keywords": [
+    "产品图",
+    "chụp sản phẩm bán",
+    "ảnh shop online",
+    "e-commerce photo",
+    "nền trắng sản phẩm"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/pet",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "宠物写真",
+    "vi": "Chụp thú cưng",
+    "en": "Pet Photography"
+   },
+   "keywords": [
+    "宠物写真",
+    "chụp bé mèo",
+    "pet photography",
+    "chụp chó cảnh",
+    "ảnh thú nuôi"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/architecture",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "建筑与室内",
+    "vi": "Chụp kiến trúc",
+    "en": "Architecture & Interiors"
+   },
+   "keywords": [
+    "建筑摄影",
+    "chụp kiến trúc",
+    "mặt tiền nhà",
+    "nội thất lên ảnh",
+    "interior shot"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/night_long",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "夜景长曝",
+    "vi": "Chụp đêm phơi sáng",
+    "en": "Night & Long Exposure"
+   },
+   "keywords": [
+    "夜景摄影",
+    "chụp đêm",
+    "long exposure",
+    "phơi sáng",
+    "vệt đèn đêm"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/macro",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "微距",
+    "vi": "Chụp cận cảnh",
+    "en": "Macro"
+   },
+   "keywords": [
+    "微距",
+    "chụp cận cảnh",
+    "macro lens",
+    "giọt sương cận",
+    "cánh hoa cận"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/documentary",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "纪实",
+    "vi": "Phóng sự ảnh",
+    "en": "Documentary"
+   },
+   "keywords": [
+    "纪实摄影",
+    "documentary photo",
+    "ghi lại đời sống",
+    "loạt ảnh đời",
+    "bộ ảnh tư liệu"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/aerial",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "航拍",
+    "vi": "Góc chụp trên cao",
+    "en": "Aerial Photography"
+   },
+   "keywords": [
+    "航拍",
+    "aerial photo",
+    "quay trên không",
+    "góc nhìn từ trên cao",
+    "aerial shot"
+   ]
+  },
+  {
+   "id": "interest/photography/shooting/phone_shot",
+   "parent": "interest/photography/shooting",
+   "name": {
+    "zh": "手机摄影",
+    "vi": "Chụp bằng điện thoại",
+    "en": "Phone Photography"
+   },
+   "keywords": [
+    "手机摄影",
+    "chụp bằng dế yêu",
+    "mobile photography",
+    "ảnh chụp tay không",
+    "phone camera"
+   ]
+  },
+  {
+   "id": "interest/photography/editing",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "后期处理",
+    "vi": "Xử lý hậu kỳ",
+    "en": "Post-processing"
+   },
+   "keywords": [
+    "后期",
+    "hậu kỳ ảnh",
+    "xử lý ảnh",
+    "post production",
+    "làm ảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/raw_workflow",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "RAW 流程",
+    "vi": "Quy trình raw",
+    "en": "RAW Workflow"
+   },
+   "keywords": [
+    "导出raw",
+    "xuất file raw",
+    "raw workflow",
+    "định dạng raw",
+    "chọn ảnh từ raw"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/color_grade",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "调色",
+    "vi": "Phủ màu ảnh",
+    "en": "Color Grading"
+   },
+   "keywords": [
+    "调色",
+    "grade màu",
+    "màu film",
+    "color grading",
+    "ton màu lạnh"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/retouch",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "人像精修",
+    "vi": "Gọt ảnh chân dung",
+    "en": "Retouching"
+   },
+   "keywords": [
+    "精修",
+    "retouch",
+    "tẩy da",
+    "sửa dáng",
+    "xóa nếp nhăn"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/cutout",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "抠图合成",
+    "vi": "Cắt nền & ghép",
+    "en": "Cut-out & Compositing"
+   },
+   "keywords": [
+    "抠图",
+    "cắt nền ảnh",
+    "ghép ảnh",
+    "xóa phông nền",
+    "composite"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/batch",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "批量处理",
+    "vi": "Chỉnh hàng loạt",
+    "en": "Batch Editing"
+   },
+   "keywords": [
+    "批量调色",
+    "preset",
+    "batch edit",
+    "gọn file ảnh",
+    "đồng màu bộ ảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/film_dev",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "冲扫胶片",
+    "vi": "Rửa & quét film",
+    "en": "Film Developing"
+   },
+   "keywords": [
+    "冲扫",
+    "rửa film",
+    "quét âm bản",
+    "film scan",
+    "trạm rửa phim"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/phone_apps",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "手机修图",
+    "vi": "App sửa ảnh",
+    "en": "Phone Editing Apps"
+   },
+   "keywords": [
+    "手机app修图",
+    "app chỉnh màu",
+    "xóa phông bằng máy",
+    "retouch nhanh",
+    "mobile edit"
+   ]
+  },
+  {
+   "id": "interest/photography/editing/layout",
+   "parent": "interest/photography/editing",
+   "name": {
+    "zh": "排版与拼贴",
+    "vi": "Bố cục & ghép trang",
+    "en": "Layout & Collage"
+   },
+   "keywords": [
+    "排版",
+    "layout ảnh",
+    "collage",
+    "grid ảnh",
+    "khổ ảnh vuông"
+   ]
+  },
+  {
+   "id": "interest/photography/services",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "拍摄服务",
+    "vi": "Dịch vụ chụp",
+    "en": "Photo Services"
+   },
+   "keywords": [
+    "约拍",
+    "dịch vụ chụp ảnh",
+    "thuê nhiếp ảnh gia",
+    "photo service",
+    "báo giá chụp"
+   ]
+  },
+  {
+   "id": "interest/photography/services/studio_rental",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "租棚",
+    "vi": "Thuê studio",
+    "en": "Studio Rental"
+   },
+   "keywords": [
+    "租棚",
+    "studio chụp",
+    "theo giờ studio",
+    "phông nền trắng",
+    "studio hà nội"
+   ]
+  },
+  {
+   "id": "interest/photography/services/backdrop_props",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "背景与道具",
+    "vi": "Phông & đạo cụ",
+    "en": "Backdrops & Props"
+   },
+   "keywords": [
+    "背景布",
+    "đạo cụ chụp",
+    "phông studio",
+    "prop chụp ảnh",
+    "giá treo phông"
+   ]
+  },
+  {
+   "id": "interest/photography/services/model_call",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "找模特",
+    "vi": "Tìm mẫu ảnh",
+    "en": "Model Call"
+   },
+   "keywords": [
+    "找模特",
+    "cùng chụp",
+    "mẫu nữ chụp",
+    "model search",
+    "thỏa thuận chụp"
+   ]
+  },
+  {
+   "id": "interest/photography/services/event_coverage",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "活动跟拍",
+    "vi": "Chụp sự kiện",
+    "en": "Event Coverage"
+   },
+   "keywords": [
+    "活动跟拍",
+    "chụp hội thảo",
+    "event coverage",
+    "chụp lễ tổng kết",
+    "báo ảnh nội bộ"
+   ]
+  },
+  {
+   "id": "interest/photography/services/photobooth",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "快拍亭",
+    "vi": "Photobooth",
+    "en": "Photobooth"
+   },
+   "keywords": [
+    "快拍亭",
+    "chụp lấy liền tại tiệc",
+    "in lấy liền tại chỗ",
+    "photobooth cưới",
+    "dải ảnh strip"
+   ]
+  },
+  {
+   "id": "interest/photography/services/print_album",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "冲印与相册",
+    "vi": "In ảnh & album",
+    "en": "Prints & Albums"
+   },
+   "keywords": [
+    "冲印",
+    "in ảnh",
+    "album ảnh",
+    "photobook",
+    "khung ảnh treo"
+   ]
+  },
+  {
+   "id": "interest/photography/services/id_photo",
+   "parent": "interest/photography/services",
+   "name": {
+    "zh": "证件照",
+    "vi": "Ảnh giấy tờ",
+    "en": "Formal ID Photos"
+   },
+   "keywords": [
+    "证件照",
+    "ảnh thẻ",
+    "chụp ảnh xin việc",
+    "ảnh sơ yếu lý lịch",
+    "id photo"
+   ]
+  },
+  {
+   "id": "interest/photography/learn",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "学习交流",
+    "vi": "Học chụp ảnh",
+    "en": "Learning Photography"
+   },
+   "keywords": [
+    "学摄影",
+    "lớp học chụp ảnh",
+    "learn photography",
+    "dạy bấm máy",
+    "cầm máy mới"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/basics",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "入门基础",
+    "vi": "Kiến thức nền",
+    "en": "Photography Basics"
+   },
+   "keywords": [
+    "摄影入门",
+    "khóa học nhiếp ảnh",
+    "beginner photography",
+    "bài học tam giác",
+    "dạy chụp"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/composition_light",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "构图与光线",
+    "vi": "Bố cục & ánh sáng",
+    "en": "Composition & Light"
+   },
+   "keywords": [
+    "构图",
+    "bố cục ảnh",
+    "ánh sáng tự nhiên",
+    "composition",
+    "đường dẫn mắt"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/photo_walk",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "扫街团",
+    "vi": "Đi chụp nhóm",
+    "en": "Photo Walk"
+   },
+   "keywords": [
+    "扫街",
+    "photo walk",
+    "tụm đi chụp",
+    "cùng mang máy",
+    "nhóm dạo phố chụp"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/critique",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "互评照片",
+    "vi": "Nhận xét bộ ảnh",
+    "en": "Photo Critique"
+   },
+   "keywords": [
+    "评片",
+    "chữa ảnh",
+    "photo critique",
+    "góp ý bộ ảnh",
+    "nhóm chơi ảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/contest",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "影赛投稿",
+    "vi": "Thi ảnh",
+    "en": "Photo Contests"
+   },
+   "keywords": [
+    "影赛",
+    "cuộc thi ảnh",
+    "gửi ảnh dự thi",
+    "photo contest",
+    "tác phẩm được chọn"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/gear_talk",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "器材讨论",
+    "vi": "Hỏi về đồ nghề",
+    "en": "Gear Talk"
+   },
+   "keywords": [
+    "器材党",
+    "đánh giá ống kính",
+    "so sánh body",
+    "gear talk",
+    "tư vấn chọn máy"
+   ]
+  },
+  {
+   "id": "interest/photography/learn/stock_sale",
+   "parent": "interest/photography/learn",
+   "name": {
+    "zh": "卖图与版权",
+    "vi": "Bán ảnh & bản quyền",
+    "en": "Stock & Licensing"
+   },
+   "keywords": [
+    "图库",
+    "bán ảnh",
+    "stock photo",
+    "bản quyền ảnh",
+    "agency ảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/locations",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "本地取景",
+    "vi": "Địa điểm chụp",
+    "en": "Shooting Locations"
+   },
+   "keywords": [
+    "取景",
+    "địa điểm lên ảnh",
+    "shooting location",
+    "xin chỗ chụp",
+    "đi tìm bối cảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/old_quarter",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "河内老城区",
+    "vi": "Khu phố cổ Hà Nội",
+    "en": "Hanoi Old Quarter"
+   },
+   "keywords": [
+    "河内老街取景",
+    "chụp trong khu phố cổ",
+    "phố cổ lên ảnh",
+    "old quarter shoot",
+    "chụp tại phố hàng"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/west_lake",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "西湖岸边",
+    "vi": "Bờ hồ Tây",
+    "en": "West Lake"
+   },
+   "keywords": [
+    "chụp ven hồ",
+    "đường hoàng hoa thụy",
+    "sen hồ tây",
+    "west lake shoot",
+    "hoàng hôn bên hồ"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/flower_village",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "花村取景",
+    "vi": "Làng hoa chụp ảnh",
+    "en": "Flower Villages"
+   },
+   "keywords": [
+    "chụp ở làng hoa",
+    "nhật tảo",
+    "vườn hoa lên ảnh",
+    "mùa hoa chụp",
+    "flower village shoot"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/lotus_pond",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "荷塘",
+    "vi": "Đầm sen",
+    "en": "Lotus Pond"
+   },
+   "keywords": [
+    "chụp với hoa sen",
+    "đầm sen hà nội",
+    "sen trắng lên ảnh",
+    "lotus photo",
+    "chụp giữa đầm"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/outskirts_village",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "郊外农村",
+    "vi": "Làng quê ngoại thành",
+    "en": "Outskirts & Villages"
+   },
+   "keywords": [
+    "ngoại thành chụp",
+    "đồng lúa gần hà nội",
+    "làng quê lên ảnh",
+    "village photography",
+    "đi về quê chụp"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/pottery_village",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "陶村符浪",
+    "vi": "Làng gốm Phù Lãng",
+    "en": "Phù Lãng Pottery"
+   },
+   "keywords": [
+    "chụp ở phù lãng",
+    "làng gốm bắc ninh",
+    "bếp nung gốm",
+    "pottery village shoot",
+    "gốm mộc lên ảnh"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/cafe_set",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "咖啡馆布景",
+    "vi": "Bối cảnh quán cà phê",
+    "en": "Café Sets"
+   },
+   "keywords": [
+    "chụp trong quán",
+    "bàn gỗ lên ảnh",
+    "café set chụp",
+    "quán decor để chụp",
+    "cafe shoot"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/homestay_set",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "民宿取景",
+    "vi": "Bối cảnh nhà nghỉ",
+    "en": "Homestay Sets"
+   },
+   "keywords": [
+    "chụp ở nhà nghỉ",
+    "cầu thang lên ảnh",
+    "ban công chụp",
+    "homestay set chụp",
+    "mái bằng chụp"
+   ]
+  },
+  {
+   "id": "interest/photography/locations/industrial_park",
+   "parent": "interest/photography/locations",
+   "name": {
+    "zh": "厂区与工地",
+    "vi": "Khu nhà máy & công trường",
+    "en": "Industrial Sets"
+   },
+   "keywords": [
+    "khu công nghiệp chụp",
+    "nhà xưởng lên ảnh",
+    "hồ sơ công trường",
+    "industrial photography",
+    "công trường xây dựng"
+   ]
+  },
+  {
+   "id": "interest/photography/video",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "影像拍摄",
+    "vi": "Quay phim hiện trường",
+    "en": "Moving Image"
+   },
+   "keywords": [
+    "拍摄视频",
+    "quay hiện trường",
+    "moviemaking",
+    "bộ phim ngắn tay máy",
+    "video tại chỗ"
+   ]
+  },
+  {
+   "id": "interest/photography/video/vlogging",
+   "parent": "interest/photography/video",
+   "name": {
+    "zh": "个人影像日志",
+    "vi": "Làm vlog",
+    "en": "Vlogging"
+   },
+   "keywords": [
+    "影像日志",
+    "kênh cá nhân quay",
+    "vlogging",
+    "mic cài áo",
+    "setup quay bàn"
+   ]
+  },
+  {
+   "id": "interest/photography/video/timelapse",
+   "parent": "interest/photography/video",
+   "name": {
+    "zh": "延时摄影",
+    "vi": "Quay tua nhanh",
+    "en": "Time-lapse"
+   },
+   "keywords": [
+    "延时摄影",
+    "quay tua nhanh",
+    "time lapse",
+    "mây trôi tua",
+    "star timelapse"
+   ]
+  },
+  {
+   "id": "interest/photography/video/moving_shot",
+   "parent": "interest/photography/video",
+   "name": {
+    "zh": "运动镜头",
+    "vi": "Cảnh quay di chuyển",
+    "en": "Moving Shots"
+   },
+   "keywords": [
+    "运动镜头",
+    "trượt ống kính",
+    "steady shot",
+    "quay đi bộ",
+    "slider nhỏ"
+   ]
+  },
+  {
+   "id": "interest/photography/video/live_event_film",
+   "parent": "interest/photography/video",
+   "name": {
+    "zh": "现场记录片",
+    "vi": "Phóng sự hiện trường",
+    "en": "Event Film"
+   },
+   "keywords": [
+    "现场纪实片",
+    "phóng sự ngắn",
+    "highlight sự kiện",
+    "event film",
+    "cắt ngắn sau quay"
+   ]
+  },
+  {
+   "id": "interest/photography/culture_side",
+   "parent": "interest/photography",
+   "name": {
+    "zh": "摄影社群",
+    "vi": "Cộng đồng máy ảnh",
+    "en": "Photo Community"
+   },
+   "keywords": [
+    "摄影社群",
+    "hội mê máy ảnh",
+    "photo club",
+    "giao lưu tay máy",
+    "nhóm ảnh hà nội"
+   ]
+  },
+  {
+   "id": "interest/photography/culture_side/gear_swap",
+   "parent": "interest/photography/culture_side",
+   "name": {
+    "zh": "交换与出借",
+    "vi": "Đổi & cho mượn đồ",
+    "en": "Gear Swap"
+   },
+   "keywords": [
+    "换着拍",
+    "mượn ống kính",
+    "trao đổi đồ nghề",
+    "gear swap",
+    "gửi máy giúp"
+   ]
+  },
+  {
+   "id": "interest/photography/culture_side/photo_book",
+   "parent": "interest/photography/culture_side",
+   "name": {
+    "zh": "摄影书与杂志",
+    "vi": "Sách ảnh",
+    "en": "Photo Books"
+   },
+   "keywords": [
+    "摄影书",
+    "sách ảnh",
+    "magazine ảnh",
+    "photo book collection",
+    "tuyển tập tác phẩm"
+   ]
+  },
+  {
+   "id": "interest/photography/culture_side/collect_prints",
+   "parent": "interest/photography/culture_side",
+   "name": {
+    "zh": "收藏与展览片",
+    "vi": "Bộ sưu tập ảnh",
+    "en": "Print Collecting"
+   },
+   "keywords": [
+    "收藏照片",
+    "bản in giới hạn",
+    "ảnh tư liệu cũ",
+    "print collecting",
+    "gìn giữ ảnh xưa"
+   ]
+  }
+ ]
+}

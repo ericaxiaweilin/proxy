@@ -54,7 +54,6 @@
     "en": "Train trips"
    },
    "keywords": [
-    "tàu hỏa",
     "火车旅行",
     "toa mềm",
     "giường nằm tàu"
@@ -217,8 +216,7 @@
    },
    "keywords": [
     "跟谁去",
-    "đi cùng bạn",
-    "bạn đồng hành"
+    "đi cùng bạn"
    ]
   },
   {
@@ -245,10 +243,10 @@
     "en": "Class reunions"
    },
    "keywords": [
-    "họp lớp",
-    "同学聚会",
     "class trip",
-    "kỷ yếu"
+    "同学聚会游",
+    "họp lớp đi chơi",
+    "class reunions"
    ]
   },
   {
@@ -260,7 +258,6 @@
     "en": "Company trips"
    },
    "keywords": [
-    "team building",
     "公司团建",
     "đi chơi công ty"
    ]
@@ -423,8 +420,7 @@
    "keywords": [
     "thị thực",
     "签证材料",
-    "visa",
-    "hộ chiếu"
+    "visa"
    ]
   },
   {
@@ -465,7 +461,6 @@
     "en": "Weekend getaways"
    },
    "keywords": [
-    "cuối tuần",
     "周末短途",
     "weekend trip",
     "đi gần hà nội"
@@ -497,8 +492,7 @@
    "keywords": [
     "tết này đi đâu",
     "春节假期",
-    "tet holiday",
-    "nghỉ dài ngày"
+    "tet holiday"
    ]
   },
   {
@@ -552,7 +546,6 @@
     "en": "Photo check-ins"
    },
    "keywords": [
-    "sống ảo",
     "打卡拍照",
     "chụp ảnh đẹp",
     "view đẹp"
@@ -625,7 +618,6 @@
    "keywords": [
     "vãn cảnh chùa",
     "访寺",
-    "chùa hương",
     "đền vua hùng"
    ]
   },
@@ -817,7 +809,6 @@
     "en": "Bac Ninh"
    },
    "keywords": [
-    "bắc ninh",
     "北宁",
     "đồi tam giang",
     "chùa phật tích",
@@ -945,7 +936,6 @@
     "en": "Northwest loop"
    },
    "keywords": [
-    "tây bắc",
     "西北环线",
     "đèo pha đin",
     "mù căng chải"
@@ -1151,10 +1141,8 @@
     "en": "Saigon"
    },
    "keywords": [
-    "sài gòn",
     "西贡",
-    "đi sài gòn",
-    "nhà thờ đức bà"
+    "đi sài gòn"
    ]
   },
   {

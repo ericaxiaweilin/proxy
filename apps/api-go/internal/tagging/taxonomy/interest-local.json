@@ -1,0 +1,1114 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/local/city",
+   "parent": "interest/local",
+   "name": {
+    "zh": "城市片区",
+    "vi": "Khu vực thành phố",
+    "en": "City Areas"
+   },
+   "keywords": [
+    "片区",
+    "khu vực",
+    "thành phố",
+    "vùng ven",
+    "vành đai",
+    "cư dân"
+   ]
+  },
+  {
+   "id": "interest/local/city/new_urban_area",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "新城区",
+    "vi": "Đô thị mới",
+    "en": "New Urban Areas"
+   },
+   "keywords": [
+    "mở rộng",
+    "khu nhà ở",
+    "dân cư"
+   ]
+  },
+  {
+   "id": "interest/local/city/hanoi_old_quarter",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "河内老城区",
+    "vi": "Khu Phố Cổ Hà Nội",
+    "en": "Hanoi Old Quarter"
+   },
+   "keywords": [
+    "三十六行街",
+    "hàng ngang",
+    "hàng đào",
+    "old quarter",
+    "khu phố cũ"
+   ]
+  },
+  {
+   "id": "interest/local/city/west_lake",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "西湖片区",
+    "vi": "Khu Hồ Tây",
+    "en": "West Lake Area"
+   },
+   "keywords": [
+    "hồ tây",
+    "西湖",
+    "tây hồ",
+    "mặt hồ",
+    "expat area",
+    "khu người nước ngoài"
+   ]
+  },
+  {
+   "id": "interest/local/city/ho_kiem",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "还剑湖周边",
+    "vi": "Vòng quanh Hồ Gươm",
+    "en": "Hoan Kiem Lake Area"
+   },
+   "keywords": [
+    "hồ gươm",
+    "还剑湖",
+    "cầu thê húc",
+    "đài nghiên",
+    "tượng vua",
+    "đi vòng hồ"
+   ]
+  },
+  {
+   "id": "interest/local/city/cau_giay",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "纸桥郡",
+    "vi": "Quận Cầu Giấy",
+    "en": "Cau Giay District"
+   },
+   "keywords": [
+    "cầu giấy",
+    "quận cầu giấy",
+    "đông dân cư",
+    "trường học quanh",
+    "văn phòng cho thuê",
+    "khu công sở"
+   ]
+  },
+  {
+   "id": "interest/local/city/linh_dam",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "灵潭半岛",
+    "vi": "Bán Đảo Linh Đàm",
+    "en": "Linh Dam Peninsula"
+   },
+   "keywords": [
+    "linh đàm",
+    "bán đảo",
+    "chung cư cũ",
+    "hồ linh đàm",
+    "đi bộ quanh hồ",
+    "tòa nhà"
+   ]
+  },
+  {
+   "id": "interest/local/city/bac_ninh",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "北宁省",
+    "vi": "Tỉnh Bắc Ninh",
+    "en": "Bac Ninh Province"
+   },
+   "keywords": [
+    "bắc ninh",
+    "đình làng",
+    "làng nghề",
+    "nhà máy",
+    "khu công nghiệp"
+   ]
+  },
+  {
+   "id": "interest/local/city/tu_son",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "慈山市",
+    "vi": "Thành Phố Từ Sơn",
+    "en": "Tu Son City"
+   },
+   "keywords": [
+    "từ sơn",
+    "nghề mộc",
+    "thợ mộc",
+    "họ từ",
+    "làng thủ công",
+    "mỹ nghệ"
+   ]
+  },
+  {
+   "id": "interest/local/city/vsip",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "VSIP 工业区",
+    "vi": "VSIP Khu Công Nghiệp",
+    "en": "VSIP Industrial Zone"
+   },
+   "keywords": [
+    "vsip",
+    "kcn",
+    "khu vsip",
+    "tuyển dụng",
+    "canteen",
+    "xưởng"
+   ]
+  },
+  {
+   "id": "interest/local/city/que_vo",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "桂武工业区",
+    "vi": "Quế Võ Khu Chế Xuất",
+    "en": "Que Vo Industrial Park"
+   },
+   "keywords": [
+    "quế võ",
+    "cụm quế võ",
+    "khu chế xuất",
+    "xe đưa đón ca",
+    "làm ca"
+   ]
+  },
+  {
+   "id": "interest/local/city/cho_lon",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "堤岸华人区",
+    "vi": "Khu Chợ Lớn",
+    "en": "Cho Lon Chinatown"
+   },
+   "keywords": [
+    "chợ lớn",
+    "堤岸",
+    "bà triệu",
+    "khu phố hoa",
+    "chợ quán"
+   ]
+  },
+  {
+   "id": "interest/local/city/district_1",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "胡志明第一郡",
+    "vi": "Quận 1 Sài Gòn",
+    "en": "District 1 Saigon"
+   },
+   "keywords": [
+    "quận 1",
+    "sài gòn",
+    "ngã sáu",
+    "phố đi bộ nguyễn huệ"
+   ]
+  },
+  {
+   "id": "interest/local/city/saigon_riverbank",
+   "parent": "interest/local/city",
+   "name": {
+    "zh": "西贡河岸",
+    "vi": "Bờ Sông Sài Gòn",
+    "en": "Saigon Riverbank"
+   },
+   "keywords": [
+    "bến bạch đăng",
+    "sông sài gòn",
+    "cảng",
+    "nhà thờ đức bà",
+    "thủ ngữ",
+    "bờ sông"
+   ]
+  },
+  {
+   "id": "interest/local/market",
+   "parent": "interest/local",
+   "name": {
+    "zh": "本地集市",
+    "vi": "Chợ búa",
+    "en": "Local Markets"
+   },
+   "keywords": [
+    "集市",
+    "chợ búa",
+    "đi chợ",
+    "hàng hóa"
+   ]
+  },
+  {
+   "id": "interest/local/market/fresh_morning",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "早市",
+    "vi": "Chợ Sáng",
+    "en": "Morning Markets"
+   },
+   "keywords": [
+    "早市",
+    "chợ sớm",
+    "ra chợ",
+    "buổi sớm",
+    "mớ hàng"
+   ]
+  },
+  {
+   "id": "interest/local/market/wet_market",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "菜市场",
+    "vi": "Chợ Truyền Thống",
+    "en": "Traditional Wet Markets"
+   },
+   "keywords": [
+    "菜市场",
+    "chợ truyền thống",
+    "hàng tươi",
+    "sạp",
+    "tạ"
+   ]
+  },
+  {
+   "id": "interest/local/market/street_market",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "路边摆摊市场",
+    "vi": "Chợ Đường",
+    "en": "Street Markets"
+   },
+   "keywords": [
+    "chợ đường",
+    "lề đường",
+    "bày ra đường",
+    "dẹp lòng đường",
+    "hàng quà"
+   ]
+  },
+  {
+   "id": "interest/local/market/wholesale_hub",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "批发市场",
+    "vi": "Chợ Đầu Mối",
+    "en": "Wholesale Markets"
+   },
+   "keywords": [
+    "批发",
+    "chợ đầu mối",
+    "同春",
+    "đổ sỉ",
+    "buôn",
+    "nguồn hàng"
+   ]
+  },
+  {
+   "id": "interest/local/market/pedestrian_street",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "周末步行街",
+    "vi": "Phố Đi Bộ",
+    "en": "Weekend Walking Street"
+   },
+   "keywords": [
+    "步行街",
+    "bích họa",
+    "cuối tuần",
+    "hát rong"
+   ]
+  },
+  {
+   "id": "interest/local/market/night_market",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "夜市",
+    "vi": "Chợ Đêm",
+    "en": "Night Markets"
+   },
+   "keywords": [
+    "夜市",
+    "chợ đêm",
+    "lên đèn",
+    "đồ lưu niệm"
+   ]
+  },
+  {
+   "id": "interest/local/market/flea_market",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "旧货集市",
+    "vi": "Chợ Ve Chai",
+    "en": "Flea Markets"
+   },
+   "keywords": [
+    "旧货",
+    "ve chai",
+    "đồ cũ",
+    "phế liệu",
+    "lượm",
+    "hàng cũ"
+   ]
+  },
+  {
+   "id": "interest/local/market/highland_fair",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "山区赶集",
+    "vi": "Chợ Phiên",
+    "en": "Highland Market Fairs"
+   },
+   "keywords": [
+    "chợ phiên",
+    "赶集",
+    "lên nương",
+    "đổi hàng",
+    "h'mông",
+    "tây bắc"
+   ]
+  },
+  {
+   "id": "interest/local/market/garden_harvest",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "菜园采摘",
+    "vi": "Vườn Nhà",
+    "en": "Garden Harvest"
+   },
+   "keywords": [
+    "菜园",
+    "vườn nhà",
+    "hái rau",
+    "thu hoạch",
+    "rau sạch",
+    "đến mùa"
+   ]
+  },
+  {
+   "id": "interest/local/market/seafood_landing",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "渔港买海鲜",
+    "vi": "Bến Cá",
+    "en": "Seafood Landing Sites"
+   },
+   "keywords": [
+    "bến cá",
+    "tươi sống",
+    "về sớm",
+    "kéo lưới",
+    "ghe"
+   ]
+  },
+  {
+   "id": "interest/local/market/fruit_stall",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "水果摊",
+    "vi": "Hàng Trái Cây",
+    "en": "Fruit Stalls"
+   },
+   "keywords": [
+    "vải",
+    "xoài",
+    "dưa hấu",
+    "cam",
+    "mía"
+   ]
+  },
+  {
+   "id": "interest/local/market/stall_rental",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "摊位租用",
+    "vi": "Thuê Ki-ốt",
+    "en": "Market Stall Rental"
+   },
+   "keywords": [
+    "摊位",
+    "ki-ốt",
+    "thuê điểm",
+    "chỗ bán",
+    "khu vực trong chợ"
+   ]
+  },
+  {
+   "id": "interest/local/market/secondhand_swap",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "二手转让",
+    "vi": "Nhượng Lại Đồ",
+    "en": "Second-hand Swaps"
+   },
+   "keywords": [
+    "二手",
+    "bán lại",
+    "pass",
+    "thanh lý",
+    "sang tên"
+   ]
+  },
+  {
+   "id": "interest/local/market/mall_promo",
+   "parent": "interest/local/market",
+   "name": {
+    "zh": "商场超市促销",
+    "vi": "Khuyến Mãi Siêu Thị",
+    "en": "Mall and Supermarket Deals"
+   },
+   "keywords": [
+    "促销",
+    "khuyến mãi",
+    "winmart",
+    "co.opmart",
+    "big c",
+    "siêu thị",
+    "chạy sale"
+   ]
+  },
+  {
+   "id": "interest/local/errands",
+   "parent": "interest/local",
+   "name": {
+    "zh": "日常办事",
+    "vi": "Lo Thủ Tục",
+    "en": "Everyday Errands"
+   },
+   "keywords": [
+    "办事",
+    "giấy tờ",
+    "thủ tục",
+    "chờ số",
+    "nộp hồ sơ",
+    "vướng mắc"
+   ]
+  },
+  {
+   "id": "interest/local/errands/residence_paper",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "居留证件",
+    "vi": "Thẻ Tạm Trú",
+    "en": "Residence Papers"
+   },
+   "keywords": [
+    "居留",
+    "thẻ tạm trú",
+    "căn cước",
+    "gia hạn",
+    "hộ chiếu",
+    "cư trú"
+   ]
+  },
+  {
+   "id": "interest/local/errands/address_declare",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "临时住宿登记",
+    "vi": "Khai Báo Tạm Trú",
+    "en": "Temporary Address Declaration"
+   },
+   "keywords": [
+    "暂住",
+    "khai báo",
+    "tạm vắng",
+    "xác nhận",
+    "tổ dân phố",
+    "đi khai"
+   ]
+  },
+  {
+   "id": "interest/local/errands/notary_translate",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "公证与翻译",
+    "vi": "Công Chứng Dịch Thuật",
+    "en": "Notary and Translation"
+   },
+   "keywords": [
+    "公证",
+    "dịch thuật",
+    "bản sao",
+    "chứng thực",
+    "tư pháp",
+    "sao y"
+   ]
+  },
+  {
+   "id": "interest/local/errands/bank_queue",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "银行开户与排队",
+    "vi": "Mở Tài Khoản Ngân Hàng",
+    "en": "Bank Visits"
+   },
+   "keywords": [
+    "开户",
+    "ngân hàng",
+    "dư nợ",
+    "vay",
+    "hạn mức",
+    "xếp số"
+   ]
+  },
+  {
+   "id": "interest/local/errands/phone_contract",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "办电话卡",
+    "vi": "Đăng Ký Sim",
+    "en": "Phone SIM Setup"
+   },
+   "keywords": [
+    "电话卡",
+    "đăng ký sim",
+    "chính chủ",
+    "thuê bao",
+    "trả sau",
+    "nhà mạng",
+    "nạp thẻ"
+   ]
+  },
+  {
+   "id": "interest/local/errands/parcel_pickup",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "快递代收取件",
+    "vi": "Nhận Hàng Bưu Cục",
+    "en": "Parcel Pickup"
+   },
+   "keywords": [
+    "快递",
+    "bưu cục",
+    "giao hàng",
+    "nhận hộ",
+    "chuyển hoàn",
+    "lấy hàng",
+    "phát hàng"
+   ]
+  },
+  {
+   "id": "interest/local/errands/utility_bill",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "水电缴费",
+    "vi": "Trả Hóa Đơn Điện Nước",
+    "en": "Utility Bills"
+   },
+   "keywords": [
+    "缴费",
+    "hóa đơn",
+    "tiền điện",
+    "công tơ",
+    "kỳ thu",
+    "trả tiền"
+   ]
+  },
+  {
+   "id": "interest/local/errands/water_delivery",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "桶装水配送",
+    "vi": "Giao Nước Bình",
+    "en": "Water Bottle Delivery"
+   },
+   "keywords": [
+    "桶装水",
+    "nước bình",
+    "giao nước",
+    "bồn chứa",
+    "nước máy",
+    "đại lý"
+   ]
+  },
+  {
+   "id": "interest/local/errands/bike_repair",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "修车换胎",
+    "vi": "Sửa Xe",
+    "en": "Bike Repair Stops"
+   },
+   "keywords": [
+    "修车",
+    "lốp",
+    "thay dầu",
+    "phanh",
+    "vá",
+    "nhông sên dĩa",
+    "sửa xe"
+   ]
+  },
+  {
+   "id": "interest/local/errands/aircon_service",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "空调清洗加氟",
+    "vi": "Vệ Sinh Máy Lạnh",
+    "en": "Air-Con Servicing"
+   },
+   "keywords": [
+    "gas",
+    "sửa máy lạnh",
+    "hút bụi",
+    "đo nhiệt",
+    "bảo hành"
+   ]
+  },
+  {
+   "id": "interest/local/errands/school_enroll",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "入学报名",
+    "vi": "Hồ Sơ Xin Học",
+    "en": "School Enrollment"
+   },
+   "keywords": [
+    "nộp đơn",
+    "khai giảng",
+    "học phí",
+    "trường con học"
+   ]
+  },
+  {
+   "id": "interest/local/errands/rental_deposit",
+   "parent": "interest/local/errands",
+   "name": {
+    "zh": "租房押金合同",
+    "vi": "Đặt Cọc Cho Thuê",
+    "en": "Rental Deposit Papers"
+   },
+   "keywords": [
+    "hợp đồng",
+    "tiền nhà",
+    "chủ nhà",
+    "tăng giá",
+    "cho thuê"
+   ]
+  },
+  {
+   "id": "interest/local/streets",
+   "parent": "interest/local",
+   "name": {
+    "zh": "街头日常",
+    "vi": "Đời Sống Ngoài Đường",
+    "en": "Street Life"
+   },
+   "keywords": [
+    "街头",
+    "ngoài đường",
+    "phố phường",
+    "đời sống ven đường",
+    "lề phố"
+   ]
+  },
+  {
+   "id": "interest/local/streets/sidewalk_sit",
+   "parent": "interest/local/streets",
+   "name": {
+    "zh": "街边小坐",
+    "vi": "Ngồi Vỉa Hè",
+    "en": "Sidewalk Sitting"
+   },
+   "keywords": [
+    "ghế nhựa",
+    "ngồi lề",
+    "bình trà"
+   ]
+  },
+  {
+   "id": "interest/local/streets/street_cart",
+   "parent": "interest/local/streets",
+   "name": {
+    "zh": "流动摊车",
+    "vi": "Hàng Rong Xe Đẩy",
+    "en": "Street Pushcarts"
+   },
+   "keywords": [
+    "摊车",
+    "hàng rong",
+    "gánh",
+    "qua cầu"
+   ]
+  },
+  {
+   "id": "interest/local/streets/alley_walk",
+   "parent": "interest/local/streets",
+   "name": {
+    "zh": "串小巷",
+    "vi": "Đi Vào Ngõ",
+    "en": "Alley Wandering"
+   },
+   "keywords": [
+    "小巷",
+    "ngõ",
+    "hẻm",
+    "ngách nhỏ",
+    "lối",
+    "sâu hun hút"
+   ]
+  },
+  {
+   "id": "interest/local/streets/morning_pulse",
+   "parent": "interest/local/streets",
+   "name": {
+    "zh": "清晨街景",
+    "vi": "Phố Buổi Sáng",
+    "en": "Morning Streets"
+   },
+   "keywords": [
+    "清晨",
+    "bình minh",
+    "sương sớm",
+    "nắng sớm",
+    "yên tĩnh",
+    "phố buổi sáng"
+   ]
+  },
+  {
+   "id": "interest/local/streets/night_stroll",
+   "parent": "interest/local/streets",
+   "name": {
+    "zh": "夜间散步",
+    "vi": "Đi Dạo Buổi Tối",
+    "en": "Night Strolls"
+   },
+   "keywords": [
+    "晚上",
+    "dạo buổi tối",
+    "hóng gió",
+    "phố đêm",
+    "mát mẻ",
+    "đi hóng"
+   ]
+  },
+  {
+   "id": "interest/local/weather",
+   "parent": "interest/local",
+   "name": {
+    "zh": "本地季节天气",
+    "vi": "Thời Tiết Ở Đây",
+    "en": "Local Weather and Seasons"
+   },
+   "keywords": [
+    "季节",
+    "khí hậu",
+    "nắng mưa",
+    "dự báo",
+    "trời"
+   ]
+  },
+  {
+   "id": "interest/local/weather/rainy_day",
+   "parent": "interest/local/weather",
+   "name": {
+    "zh": "雨天出行",
+    "vi": "Ngày Mưa",
+    "en": "Rainy Days"
+   },
+   "keywords": [
+    "下雨",
+    "mưa",
+    "ngập",
+    "áo mưa",
+    "dầm",
+    "bão",
+    "trơn"
+   ]
+  },
+  {
+   "id": "interest/local/weather/humid_days",
+   "parent": "interest/local/weather",
+   "name": {
+    "zh": "回南天受潮",
+    "vi": "Nồm Ẩm Ướt",
+    "en": "Humid Spell Days"
+   },
+   "keywords": [
+    "回南天",
+    "nồm",
+    "ẩm ướt",
+    "sưởi",
+    "linh tinh",
+    "khử ẩm",
+    "tường nhà"
+   ]
+  },
+  {
+   "id": "interest/local/weather/cold_spell",
+   "parent": "interest/local/weather",
+   "name": {
+    "zh": "寒潮降温",
+    "vi": "Trời Trở Lạnh",
+    "en": "Cold Spell Days"
+   },
+   "keywords": [
+    "降温",
+    "rét",
+    "gió mùa",
+    "áo ấm",
+    "đắp chăn",
+    "nhiệt độ",
+    "sương muối"
+   ]
+  },
+  {
+   "id": "interest/local/weather/heat_wave",
+   "parent": "interest/local/weather",
+   "name": {
+    "zh": "高温天气",
+    "vi": "Nóng Gắt",
+    "en": "Heat Waves"
+   },
+   "keywords": [
+    "高温",
+    "nóng",
+    "hè",
+    "giải nhiệt",
+    "tưới",
+    "nắng gắt"
+   ]
+  },
+  {
+   "id": "interest/local/citylife",
+   "parent": "interest/local",
+   "name": {
+    "zh": "城市公共生活",
+    "vi": "Đô Thị Sống",
+    "en": "City Public Life"
+   },
+   "keywords": [
+    "公共场所",
+    "nơi công cộng",
+    "hoạt động chung",
+    "dịch vụ đô thị",
+    "cây xanh"
+   ]
+  },
+  {
+   "id": "interest/local/citylife/park_life",
+   "parent": "interest/local/citylife",
+   "name": {
+    "zh": "公园晨练",
+    "vi": "Công Viên Buổi Sáng",
+    "en": "Park Mornings"
+   },
+   "keywords": [
+    "公园",
+    "vườn hoa",
+    "ghế đá",
+    "dưỡng sinh",
+    "thể dục sáng"
+   ]
+  },
+  {
+   "id": "interest/local/citylife/city_square",
+   "parent": "interest/local/citylife",
+   "name": {
+    "zh": "广场活动",
+    "vi": "Quảng Trường",
+    "en": "City Squares"
+   },
+   "keywords": [
+    "广场",
+    "quảng trường",
+    "sân",
+    "biểu diễn",
+    "tập thể",
+    "đông vui"
+   ]
+  },
+  {
+   "id": "interest/local/citylife/mall_hangout",
+   "parent": "interest/local/citylife",
+   "name": {
+    "zh": "逛商场",
+    "vi": "Đi Trung Tâm Mua Sắm",
+    "en": "Mall Hangouts"
+   },
+   "keywords": [
+    "商场",
+    "trung tâm thương mại",
+    "đi bộ tự do",
+    "vincom",
+    "đông người",
+    "tự do"
+   ]
+  },
+  {
+   "id": "interest/local/citylife/old_building",
+   "parent": "interest/local/citylife",
+   "name": {
+    "zh": "老城建筑漫步",
+    "vi": "Nhà Cổ",
+    "en": "Old Buildings"
+   },
+   "keywords": [
+    "老建筑",
+    "nhà cổ",
+    "kiến trúc",
+    "tường vàng",
+    "cửa gỗ",
+    "phố cũ"
+   ]
+  },
+  {
+   "id": "interest/local/citylife/city_photo_spot",
+   "parent": "interest/local/citylife",
+   "name": {
+    "zh": "城市取景",
+    "vi": "Góc Phố Đẹp",
+    "en": "City Photo Spots"
+   },
+   "keywords": [
+    "拍照",
+    "chụp ảnh",
+    "săn ảnh",
+    "view phố",
+    "triều xuống",
+    "hoàng hôn"
+   ]
+  },
+  {
+   "id": "interest/local/transit",
+   "parent": "interest/local",
+   "name": {
+    "zh": "市内通勤",
+    "vi": "Đi Lại Trong Thành Phố",
+    "en": "Getting Around Town"
+   },
+   "keywords": [
+    "đi lại",
+    "lộ trình",
+    "tuyến",
+    "trong phố",
+    "đi hằng ngày"
+   ]
+  },
+  {
+   "id": "interest/local/transit/bus_pass",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "公交月票",
+    "vi": "Vé Xe Buýt",
+    "en": "Bus Passes"
+   },
+   "keywords": [
+    "公交",
+    "xe buýt",
+    "vé tháng",
+    "đợi",
+    "chuyến đầu",
+    "trễ"
+   ]
+  },
+  {
+   "id": "interest/local/transit/ride_hailing_bike",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "打摩的",
+    "vi": "Gọi Xe Ôm",
+    "en": "Motorbike Ride-Hailing"
+   },
+   "keywords": [
+    "摩的",
+    "xe ôm",
+    "grab",
+    "bắt xe",
+    "đi ghép",
+    "ghé"
+   ]
+  },
+  {
+   "id": "interest/local/transit/ferry_crossing",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "轮渡过河",
+    "vi": "Đò Ngang",
+    "en": "Ferry Crossings"
+   },
+   "keywords": [
+    "轮渡",
+    "phà",
+    "sang sông",
+    "bến đò",
+    "chờ đò",
+    "cập bến"
+   ]
+  },
+  {
+   "id": "interest/local/transit/worker_shuttle",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "班车通勤",
+    "vi": "Xe Đưa Đón",
+    "en": "Worker Shuttle Buses"
+   },
+   "keywords": [
+    "班车",
+    "xe đưa đón",
+    "đón ở cổng",
+    "đưa ca",
+    "chờ xe"
+   ]
+  },
+  {
+   "id": "interest/local/transit/rush_hour",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "高峰堵车",
+    "vi": "Giờ Cao Điểm",
+    "en": "Rush Hour Traffic"
+   },
+   "keywords": [
+    "堵车",
+    "tắc đường",
+    "còi",
+    "nhích",
+    "dòng xe",
+    "tan làm"
+   ]
+  },
+  {
+   "id": "interest/local/transit/evening_walk_route",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "步行回家路",
+    "vi": "Đi Bộ Về Nhà",
+    "en": "Walking Routes"
+   },
+   "keywords": [
+    "步行",
+    "đi bộ",
+    "quãng",
+    "băng",
+    "ngõ nhỏ",
+    "đi làm về"
+   ]
+  },
+  {
+   "id": "interest/local/transit/motor_parking",
+   "parent": "interest/local/transit",
+   "name": {
+    "zh": "停车寄存",
+    "vi": "Gửi Xe",
+    "en": "Parking and Lockups"
+   },
+   "keywords": [
+    "停车",
+    "gửi xe",
+    "giữ xe",
+    "hầm xe",
+    "bãi",
+    "quanh tòa nhà"
+   ]
+  }
+ ]
+}

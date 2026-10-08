@@ -1,0 +1,941 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/festival/tet",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "春节",
+    "vi": "Tết Nguyên Đán",
+    "en": "Lunar New Year"
+   },
+   "keywords": [
+    "过年",
+    "ăn tết",
+    "lunar new year"
+   ]
+  },
+  {
+   "id": "interest/festival/tet/homeward",
+   "parent": "interest/festival/tet",
+   "name": {
+    "zh": "返乡过年",
+    "vi": "Về quê ăn tết",
+    "en": "Homeward for Tet"
+   },
+   "keywords": [
+    "返乡",
+    "về quê",
+    "return home",
+    "vé xe về quê"
+   ]
+  },
+  {
+   "id": "interest/festival/tet/flowers",
+   "parent": "interest/festival/tet",
+   "name": {
+    "zh": "年宵花",
+    "vi": "Hoa tết",
+    "en": "New Year blossoms"
+   },
+   "keywords": [
+    "年花",
+    "cành đào",
+    "cây quất",
+    "mai vàng"
+   ]
+  },
+  {
+   "id": "interest/festival/tet/luckymoney",
+   "parent": "interest/festival/tet",
+   "name": {
+    "zh": "红包",
+    "vi": "Lì xì",
+    "en": "Lucky money"
+   },
+   "keywords": [
+    "红包",
+    "mừng tuổi",
+    "phong bao lì xì"
+   ]
+  },
+  {
+   "id": "interest/festival/tet/sweeping",
+   "parent": "interest/festival/tet",
+   "name": {
+    "zh": "岁末大扫除",
+    "vi": "Dọn nhà đón tết",
+    "en": "Year-end cleaning"
+   },
+   "keywords": [
+    "大扫除",
+    "dọn nhà",
+    "lau cửa kính",
+    "spring cleaning"
+   ]
+  },
+  {
+   "id": "interest/festival/tet/ancestor",
+   "parent": "interest/festival/tet",
+   "name": {
+    "zh": "祭祖",
+    "vi": "Cúng gia tiên",
+    "en": "Ancestor rites"
+   },
+   "keywords": [
+    "祭祖",
+    "hương khói gia tiên",
+    "bàn thờ",
+    "ancestor rites"
+   ]
+  },
+  {
+   "id": "interest/festival/tet/firstouting",
+   "parent": "interest/festival/tet",
+   "name": {
+    "zh": "新春头香",
+    "vi": "Đi lễ đầu xuân",
+    "en": "First outing"
+   },
+   "keywords": [
+    "头香",
+    "đầu xuân",
+    "lấy may",
+    "first outing"
+   ]
+  },
+  {
+   "id": "interest/festival/midautumn",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "中秋",
+    "vi": "Trung thu",
+    "en": "Mid-autumn"
+   },
+   "keywords": [
+    "中秋",
+    "rằm tháng tám",
+    "mid autumn"
+   ]
+  },
+  {
+   "id": "interest/festival/midautumn/mooncake",
+   "parent": "interest/festival/midautumn",
+   "name": {
+    "zh": "月饼",
+    "vi": "Bánh trung thu",
+    "en": "Mooncake"
+   },
+   "keywords": [
+    "月饼",
+    "bánh nướng",
+    "bánh dẻo",
+    "mooncake"
+   ]
+  },
+  {
+   "id": "interest/festival/midautumn/lantern",
+   "parent": "interest/festival/midautumn",
+   "name": {
+    "zh": "灯笼",
+    "vi": "Đèn ông sao",
+    "en": "Star lantern"
+   },
+   "keywords": [
+    "灯笼",
+    "rước đèn",
+    "đèn kéo quân",
+    "lantern"
+   ]
+  },
+  {
+   "id": "interest/festival/midautumn/moongazing",
+   "parent": "interest/festival/midautumn",
+   "name": {
+    "zh": "赏月",
+    "vi": "Đêm phá cỗ",
+    "en": "Moon gazing"
+   },
+   "keywords": [
+    "赏月",
+    "phá cỗ",
+    "mâm cỗ đêm rằm",
+    "moon gazing"
+   ]
+  },
+  {
+   "id": "interest/festival/midautumn/liondance",
+   "parent": "interest/festival/midautumn",
+   "name": {
+    "zh": "舞狮",
+    "vi": "Múa lân",
+    "en": "Lion dance"
+   },
+   "keywords": [
+    "舞狮",
+    "trống lân",
+    "lion dance"
+   ]
+  },
+  {
+   "id": "interest/festival/folk",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "民俗庙会",
+    "vi": "Lễ hội dân gian",
+    "en": "Folk festivals"
+   },
+   "keywords": [
+    "庙会",
+    "lễ hội làng",
+    "folk festival"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/pagoda",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "拜庙祈福",
+    "vi": "Đi lễ chùa",
+    "en": "Pagoda visits"
+   },
+   "keywords": [
+    "拜佛",
+    "chùa hương",
+    "trấn quốc",
+    "cầu an",
+    "đi chùa lễ phật"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/villagefair",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "村庄庙会",
+    "vi": "Hội làng",
+    "en": "Village festival"
+   },
+   "keywords": [
+    "逛庙会",
+    "hội làng",
+    "khai ấn",
+    "village festival"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/incense",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "上香",
+    "vi": "Hương trầm",
+    "en": "Incense"
+   },
+   "keywords": [
+    "上香",
+    "nhang trầm",
+    "incense"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/hungking",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "雄王忌日",
+    "vi": "Giỗ tổ Hùng Vương",
+    "en": "Kings' anniversary"
+   },
+   "keywords": [
+    "雄王",
+    "giỗ tổ",
+    "đền hùng",
+    "kings anniversary"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/lim",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "Lim节",
+    "vi": "Hội Lim",
+    "en": "Lim festival"
+   },
+   "keywords": [
+    "lim festival",
+    "hội lim",
+    "hạn nhường"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/quantho",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "官贺民歌",
+    "vi": "Dân ca quan họ",
+    "en": "Quan họ singing"
+   },
+   "keywords": [
+    "官贺",
+    "kinh bắc"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/puppet",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "水上木偶",
+    "vi": "Múa rối nước",
+    "en": "Water puppets"
+   },
+   "keywords": [
+    "water puppet",
+    "water puppets"
+   ]
+  },
+  {
+   "id": "interest/festival/folk/shaman",
+   "parent": "interest/festival/folk",
+   "name": {
+    "zh": "同文登坛",
+    "vi": "Hầu đồng",
+    "en": "Medium rites"
+   },
+   "keywords": [
+    "同庙",
+    "lên đồng",
+    "đền phủ"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "农历节令",
+    "vi": "Ngày rằm mùng một",
+    "en": "Lunar dates"
+   },
+   "keywords": [
+    "农历",
+    "ngày rằm",
+    "lunar date"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar/firstfull",
+   "parent": "interest/festival/lunar",
+   "name": {
+    "zh": "元宵节",
+    "vi": "Rằm tháng giêng",
+    "en": "First full moon"
+   },
+   "keywords": [
+    "元宵节",
+    "cầu đèn",
+    "tháng giêng",
+    "first full moon"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar/vulan",
+   "parent": "interest/festival/lunar",
+   "name": {
+    "zh": "盂兰节",
+    "vi": "Lễ Vu Lan",
+    "en": "Filial piety rite"
+   },
+   "keywords": [
+    "盂兰",
+    "vu lan",
+    "báo hiếu",
+    "xá tội vong nhân"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar/kitchengod",
+   "parent": "interest/festival/lunar",
+   "name": {
+    "zh": "灶君日",
+    "vi": "Ông Công Ông Táo",
+    "en": "Kitchen god day"
+   },
+   "keywords": [
+    "灶君",
+    "ông táo",
+    "23 tháng chạp",
+    "kitchen god"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar/carprelease",
+   "parent": "interest/festival/lunar",
+   "name": {
+    "zh": "放生鲤鱼",
+    "vi": "Thả cá chép",
+    "en": "Fish release"
+   },
+   "keywords": [
+    "放生",
+    "cá chép",
+    "thả cá ông công",
+    "fish release"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar/eve",
+   "parent": "interest/festival/lunar",
+   "name": {
+    "zh": "守岁",
+    "vi": "Đêm giao thừa",
+    "en": "New Year eve"
+   },
+   "keywords": [
+    "守岁",
+    "giao thừa",
+    "new year eve"
+   ]
+  },
+  {
+   "id": "interest/festival/lunar/doanngo",
+   "parent": "interest/festival/lunar",
+   "name": {
+    "zh": "端午节令",
+    "vi": "Tết Đoan Ngọ",
+    "en": "Fifth-month feast"
+   },
+   "keywords": [
+    "端午",
+    "đoan ngọ",
+    "giết sâu bọ",
+    "hoa quả mùa"
+   ]
+  },
+  {
+   "id": "interest/festival/public",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "公共假日",
+    "vi": "Ngày lễ nhà nước",
+    "en": "Public holidays"
+   },
+   "keywords": [
+    "假日",
+    "ngày lễ lớn",
+    "public holiday"
+   ]
+  },
+  {
+   "id": "interest/festival/public/reunification",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "统一日",
+    "vi": "Ngày 30 tháng 4",
+    "en": "Reunification day"
+   },
+   "keywords": [
+    "统一日",
+    "30 tháng 4",
+    "ngày thống nhất",
+    "reunification"
+   ]
+  },
+  {
+   "id": "interest/festival/public/mayday",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "劳动节",
+    "vi": "Quốc tế lao động",
+    "en": "Labour day"
+   },
+   "keywords": [
+    "劳动节",
+    "1 tháng 5",
+    "labour day",
+    "nghỉ lễ lao động"
+   ]
+  },
+  {
+   "id": "interest/festival/public/independenceday",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "国庆节",
+    "vi": "Quốc khánh",
+    "en": "Independence day"
+   },
+   "keywords": [
+    "国庆",
+    "2 tháng 9",
+    "independence day",
+    "lễ quốc khánh"
+   ]
+  },
+  {
+   "id": "interest/festival/public/womensday",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "妇女节",
+    "vi": "Ngày phụ nữ Việt Nam",
+    "en": "Women's day"
+   },
+   "keywords": [
+    "妇女节",
+    "20 tháng 10",
+    "phụ nữ việt nam",
+    "hoa tặng mẹ"
+   ]
+  },
+  {
+   "id": "interest/festival/public/teachersday",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "教师节",
+    "vi": "Ngày nhà giáo",
+    "en": "Teachers' day"
+   },
+   "keywords": [
+    "教师节",
+    "20 tháng 11",
+    "nhà giáo việt nam",
+    "tặng cô hoa"
+   ]
+  },
+  {
+   "id": "interest/festival/public/newyear",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "元旦",
+    "vi": "Tết dương lịch",
+    "en": "New Year day"
+   },
+   "keywords": [
+    "元旦",
+    "dương lịch",
+    "new year day",
+    "nghỉ tết dương"
+   ]
+  },
+  {
+   "id": "interest/festival/public/christmas",
+   "parent": "interest/festival/public",
+   "name": {
+    "zh": "圣诞节",
+    "vi": "Giáng sinh",
+    "en": "Christmas"
+   },
+   "keywords": [
+    "圣诞",
+    "noel",
+    "christmas",
+    "cây thông"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "人生礼俗",
+    "vi": "Việc hỉ",
+    "en": "Life ceremonies"
+   },
+   "keywords": [
+    "红白喜事",
+    "việc hỉ",
+    "life ceremony"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/wedding",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "婚礼",
+    "vi": "Đám cưới",
+    "en": "Wedding"
+   },
+   "keywords": [
+    "婚礼",
+    "đám cưới",
+    "rước dâu",
+    "wedding"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/banquet",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "喜宴",
+    "vi": "Tiệc cưới",
+    "en": "Wedding banquet"
+   },
+   "keywords": [
+    "喜宴",
+    "mở tiệc",
+    "dự đám cưới",
+    "wedding banquet"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/anniv",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "结婚纪念",
+    "vi": "Mừng kỷ niệm",
+    "en": "Anniversary"
+   },
+   "keywords": [
+    "纪念日",
+    "kỷ niệm ngày cưới",
+    "anniversary",
+    "cưới bao lâu"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/fullmoonbaby",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "弥月礼",
+    "vi": "Đầy tháng",
+    "en": "Baby month blessing"
+   },
+   "keywords": [
+    "弥月",
+    "đầy tháng bé",
+    "làm tiệc đầy cữ",
+    "baby month"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/firstbirthday",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "周岁礼",
+    "vi": "Thôi nôi",
+    "en": "First birthday"
+   },
+   "keywords": [
+    "抓周",
+    "tròn một tuổi",
+    "first birthday"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/stars",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "顺星礼",
+    "vi": "Cúng sao",
+    "en": "Star offering"
+   },
+   "keywords": [
+    "顺星",
+    "đản phàm",
+    "dâng sao",
+    "star offering"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/longevity",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "寿宴",
+    "vi": "Mừng thọ",
+    "en": "Longevity feast"
+   },
+   "keywords": [
+    "寿宴",
+    "lễ thượng thọ",
+    "chúc tuổi ông bà",
+    "longevity feast"
+   ]
+  },
+  {
+   "id": "interest/festival/ritual/graves",
+   "parent": "interest/festival/ritual",
+   "name": {
+    "zh": "扫墓",
+    "vi": "Tảo mộ",
+    "en": "Grave visiting"
+   },
+   "keywords": [
+    "扫墓",
+    "tảo mộ",
+    "dọn mộ",
+    "grave visiting"
+   ]
+  },
+  {
+   "id": "interest/festival/celebrate",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "节庆活动",
+    "vi": "Mừng lễ",
+    "en": "Celebrations"
+   },
+   "keywords": [
+    "庆祝",
+    "chúc mừng",
+    "celebration"
+   ]
+  },
+  {
+   "id": "interest/festival/celebrate/fireworks",
+   "parent": "interest/festival/celebrate",
+   "name": {
+    "zh": "烟花",
+    "vi": "Pháo hoa",
+    "en": "Fireworks"
+   },
+   "keywords": [
+    "烟花",
+    "pháo hoa",
+    "xem pháo hoa",
+    "fireworks"
+   ]
+  },
+  {
+   "id": "interest/festival/celebrate/countdown",
+   "parent": "interest/festival/celebrate",
+   "name": {
+    "zh": "跨年倒数",
+    "vi": "Đếm ngược năm mới",
+    "en": "Countdown"
+   },
+   "keywords": [
+    "跨年",
+    "đếm ngược",
+    "chào năm mới",
+    "countdown"
+   ]
+  },
+  {
+   "id": "interest/festival/celebrate/decor",
+   "parent": "interest/festival/celebrate",
+   "name": {
+    "zh": "节日布置",
+    "vi": "Trang trí lễ",
+    "en": "Holiday decor"
+   },
+   "keywords": [
+    "布置",
+    "trang trí nhà",
+    "dây kim tuyến",
+    "holiday decor"
+   ]
+  },
+  {
+   "id": "interest/festival/celebrate/photospot",
+   "parent": "interest/festival/celebrate",
+   "name": {
+    "zh": "节日打卡",
+    "vi": "Check-in mùa lễ",
+    "en": "Festive check-in"
+   },
+   "keywords": [
+    "打卡",
+    "sống ảo",
+    "photo spot",
+    "mùa lễ lên ảnh"
+   ]
+  },
+  {
+   "id": "interest/festival/celebrate/holidaybreak",
+   "parent": "interest/festival/celebrate",
+   "name": {
+    "zh": "假期",
+    "vi": "Kỳ nghỉ lễ",
+    "en": "Holiday break"
+   },
+   "keywords": [
+    "放假",
+    "kỳ nghỉ",
+    "nghỉ dài ngày",
+    "holiday break"
+   ]
+  },
+  {
+   "id": "interest/festival/food",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "节令食品",
+    "vi": "Món theo mùa lễ",
+    "en": "Festival dishes"
+   },
+   "keywords": [
+    "应节食品",
+    "món lễ",
+    "festival dish"
+   ]
+  },
+  {
+   "id": "interest/festival/food/sticky",
+   "parent": "interest/festival/food",
+   "name": {
+    "zh": "年粽",
+    "vi": "Bánh chưng",
+    "en": "Tet sticky cake"
+   },
+   "keywords": [
+    "包粽子",
+    "bánh tét",
+    "gói bánh",
+    "sticky rice cake"
+   ]
+  },
+  {
+   "id": "interest/festival/food/springroll",
+   "parent": "interest/festival/food",
+   "name": {
+    "zh": "炸春卷",
+    "vi": "Nem rán",
+    "en": "Fried spring rolls"
+   },
+   "keywords": [
+    "春卷",
+    "nem rán",
+    "chả giò",
+    "spring roll"
+   ]
+  },
+  {
+   "id": "interest/festival/food/pickled",
+   "parent": "interest/festival/food",
+   "name": {
+    "zh": "腌渍年菜",
+    "vi": "Dưa hành",
+    "en": "New Year pickles"
+   },
+   "keywords": [
+    "腌菜",
+    "dưa món",
+    "hành muối",
+    "pickled veg"
+   ]
+  },
+  {
+   "id": "interest/festival/food/candied",
+   "parent": "interest/festival/food",
+   "name": {
+    "zh": "蜜饯",
+    "vi": "Mứt tết",
+    "en": "Candied treats"
+   },
+   "keywords": [
+    "蜜饯",
+    "mứt",
+    "candied"
+   ]
+  },
+  {
+   "id": "interest/festival/food/feasting",
+   "parent": "interest/festival/food",
+   "name": {
+    "zh": "节日聚餐",
+    "vi": "Liên hoan",
+    "en": "Festive feast"
+   },
+   "keywords": [
+    "聚餐",
+    "cỗ bàn",
+    "liên hoan cuối năm",
+    "feast"
+   ]
+  },
+  {
+   "id": "interest/festival/food/free",
+   "parent": "interest/festival/food",
+   "name": {
+    "zh": "零元餐",
+    "vi": "Cơm 0 đồng",
+    "en": "Free meals"
+   },
+   "keywords": [
+    "零元",
+    "0 đồng",
+    "bếp từ thiện",
+    "free meals"
+   ]
+  },
+  {
+   "id": "interest/festival/games",
+   "parent": "interest/festival",
+   "name": {
+    "zh": "民俗游戏",
+    "vi": "Trò chơi dân gian",
+    "en": "Folk games"
+   },
+   "keywords": [
+    "民间游戏",
+    "folk game"
+   ]
+  },
+  {
+   "id": "interest/festival/games/humanchess",
+   "parent": "interest/festival/games",
+   "name": {
+    "zh": "人棋",
+    "vi": "Cờ người",
+    "en": "Human chess"
+   },
+   "keywords": [
+    "人棋",
+    "cờ người",
+    "kỳ đài",
+    "human chess"
+   ]
+  },
+  {
+   "id": "interest/festival/games/boatrace",
+   "parent": "interest/festival/games",
+   "name": {
+    "zh": "龙舟赛",
+    "vi": "Thi bơi chải",
+    "en": "Boat racing"
+   },
+   "keywords": [
+    "赛龙舟",
+    "bơi chải",
+    "chèo thuyền thi",
+    "boat race"
+   ]
+  },
+  {
+   "id": "interest/festival/games/tugwar",
+   "parent": "interest/festival/games",
+   "name": {
+    "zh": "拔河",
+    "vi": "Kéo co",
+    "en": "Tug of war"
+   },
+   "keywords": [
+    "拔河",
+    "thi kéo co",
+    "tug of war"
+   ]
+  },
+  {
+   "id": "interest/festival/games/stiltwalk",
+   "parent": "interest/festival/games",
+   "name": {
+    "zh": "踩高跷",
+    "vi": "Đi cà kheo",
+    "en": "Stilt walking"
+   },
+   "keywords": [
+    "高跷",
+    "cà kheo",
+    "chạy cà kheo",
+    "stilt walking"
+   ]
+  },
+  {
+   "id": "interest/festival/games/folkarts",
+   "parent": "interest/festival/games",
+   "name": {
+    "zh": "村民技艺展演",
+    "vi": "Sinh hoạt đình",
+    "en": "Folk performance"
+   },
+   "keywords": [
+    "民俗表演",
+    "folk show"
+   ]
+  }
+ ]
+}

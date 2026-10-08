@@ -1,0 +1,710 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/transport/twowheel",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "两轮出行",
+    "vi": "Xe hai bánh",
+    "en": "Two wheels"
+   },
+   "keywords": [
+    "骑车",
+    "xe hai bánh",
+    "two wheel"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/motorbike",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "骑摩托",
+    "vi": "Đi xe máy",
+    "en": "Motorbiking"
+   },
+   "keywords": [
+    "骑摩托",
+    "xe máy",
+    "đi làm bằng xe máy",
+    "motorbike"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/bicycle",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "自行车通勤",
+    "vi": "Đi xe đạp",
+    "en": "Bicycle commute"
+   },
+   "keywords": [
+    "骑自行车",
+    "xe đạp",
+    "đạp xe đi làm",
+    "bicycle"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/elebike",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "电动自行车",
+    "vi": "Xe máy điện",
+    "en": "Electric bike"
+   },
+   "keywords": [
+    "电动自行车",
+    "xe đạp điện",
+    "đi học bằng xe điện",
+    "elebike"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/helmet",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "头盔",
+    "vi": "Mũ bảo hiểm",
+    "en": "Helmet"
+   },
+   "keywords": [
+    "头盔",
+    "đội mũ",
+    "helmet",
+    "mũ 3/4"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/refuel",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "加油",
+    "vi": "Đổ xăng",
+    "en": "Refuelling"
+   },
+   "keywords": [
+    "加油",
+    "cây xăng",
+    "refuel",
+    "xăng a95"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/oilchange",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "换机油",
+    "vi": "Thay nhớt",
+    "en": "Oil change"
+   },
+   "keywords": [
+    "换机油",
+    "thay nhớt",
+    "oil change",
+    "nhớt máy"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/bikerepair",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "修车",
+    "vi": "Sửa xe",
+    "en": "Bike repair"
+   },
+   "keywords": [
+    "sửa xe máy",
+    "vá lốp",
+    "thay lốp"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/parking",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "停车",
+    "vi": "Gửi xe",
+    "en": "Parking"
+   },
+   "keywords": [
+    "bãi xe",
+    "parking",
+    "trông giữ xe"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/licence",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "驾照",
+    "vi": "Bằng lái xe",
+    "en": "Driving licence"
+   },
+   "keywords": [
+    "驾照",
+    "bằng a1",
+    "driving licence",
+    "bằng lái"
+   ]
+  },
+  {
+   "id": "interest/transport/twowheel/bikewash",
+   "parent": "interest/transport/twowheel",
+   "name": {
+    "zh": "洗摩托",
+    "vi": "Rửa xe máy",
+    "en": "Motorbike wash"
+   },
+   "keywords": [
+    "洗车",
+    "rửa xe",
+    "tiệm rửa xe",
+    "motorbike wash"
+   ]
+  },
+  {
+   "id": "interest/transport/car",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "开车",
+    "vi": "Xe hơi",
+    "en": "Driving a car"
+   },
+   "keywords": [
+    "开车",
+    "xe hơi",
+    "by car"
+   ]
+  },
+  {
+   "id": "interest/transport/car/commute",
+   "parent": "interest/transport/car",
+   "name": {
+    "zh": "开车通勤",
+    "vi": "Lái xe đi làm",
+    "en": "Drive to work"
+   },
+   "keywords": [
+    "开车上班",
+    "lái xe đi làm",
+    "own car",
+    "đưa con đi học"
+   ]
+  },
+  {
+   "id": "interest/transport/car/drivinglesson",
+   "parent": "interest/transport/car",
+   "name": {
+    "zh": "学车",
+    "vi": "Học lái xe",
+    "en": "Driving lesson"
+   },
+   "keywords": [
+    "学车",
+    "học lái xe",
+    "driving school",
+    "sát hạch"
+   ]
+  },
+  {
+   "id": "interest/transport/car/evcar",
+   "parent": "interest/transport/car",
+   "name": {
+    "zh": "电动汽车",
+    "vi": "Xe ô tô điện",
+    "en": "Electric car"
+   },
+   "keywords": [
+    "新能源汽车",
+    "vinfast",
+    "electric vehicle",
+    "xe điện"
+   ]
+  },
+  {
+   "id": "interest/transport/car/charging",
+   "parent": "interest/transport/car",
+   "name": {
+    "zh": "充电",
+    "vi": "Trạm sạc",
+    "en": "Charging"
+   },
+   "keywords": [
+    "充电桩",
+    "sạc xe",
+    "charging station",
+    "tặng lượt sạc"
+   ]
+  },
+  {
+   "id": "interest/transport/car/carwash",
+   "parent": "interest/transport/car",
+   "name": {
+    "zh": "汽车美容",
+    "vi": "Rửa xe ô tô",
+    "en": "Car wash"
+   },
+   "keywords": [
+    "打蜡",
+    "rửa xe ô tô",
+    "car wash",
+    "hút bụi xe"
+   ]
+  },
+  {
+   "id": "interest/transport/car/owncost",
+   "parent": "interest/transport/car",
+   "name": {
+    "zh": "养车成本",
+    "vi": "Nuôi xe",
+    "en": "Car upkeep"
+   },
+   "keywords": [
+    "养车",
+    "nuôi xe",
+    "bảo hiểm xe",
+    "đăng kiểm"
+   ]
+  },
+  {
+   "id": "interest/transport/ride",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "叫车包车",
+    "vi": "Gọi xe",
+    "en": "Hired rides"
+   },
+   "keywords": [
+    "叫车",
+    "đặt xe",
+    "ride service"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/bikehail",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "网约车摩托",
+    "vi": "Grab bike",
+    "en": "App bike ride"
+   },
+   "keywords": [
+    "打摩的",
+    "grab bike",
+    "xe ôm công nghệ",
+    "app đi lại"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/mototaxi",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "摩的",
+    "vi": "Xe ôm",
+    "en": "Motorbike taxi"
+   },
+   "keywords": [
+    "xe thồ",
+    "motorbike taxi",
+    "ngồi sau xe ôm"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/carhail",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "打车",
+    "vi": "Grab car",
+    "en": "Car hailing"
+   },
+   "keywords": [
+    "打车",
+    "grab car",
+    "be car",
+    "taxi truyền thống"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/carpool",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "拼车",
+    "vi": "Đi chung xe",
+    "en": "Carpooling"
+   },
+   "keywords": [
+    "拼车",
+    "đi chung xe",
+    "carpool",
+    "ghé đường"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/airporttransfer",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "接机送机",
+    "vi": "Xe sân bay",
+    "en": "Airport transfer"
+   },
+   "keywords": [
+    "airport pickup",
+    "nội bài",
+    "bắt xe sân bay"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/motorbikerent",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "租摩托",
+    "vi": "Thuê xe máy",
+    "en": "Motorbike rental"
+   },
+   "keywords": [
+    "租摩托车",
+    "thuê xe máy theo tháng",
+    "motorbike rental",
+    "thuê xe máy"
+   ]
+  },
+  {
+   "id": "interest/transport/ride/carrent",
+   "parent": "interest/transport/ride",
+   "name": {
+    "zh": "租车自驾",
+    "vi": "Thuê xe ô tô",
+    "en": "Car rental"
+   },
+   "keywords": [
+    "租车",
+    "thuê xe tự lái",
+    "car rental",
+    "thuê xe có tài xế"
+   ]
+  },
+  {
+   "id": "interest/transport/public",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "公共交通",
+    "vi": "Phương tiện công cộng",
+    "en": "Public transit"
+   },
+   "keywords": [
+    "公共交通",
+    "phương tiện công cộng",
+    "transit"
+   ]
+  },
+  {
+   "id": "interest/transport/public/citybus",
+   "parent": "interest/transport/public",
+   "name": {
+    "zh": "公交车",
+    "vi": "Xe buýt",
+    "en": "City bus"
+   },
+   "keywords": [
+    "坐公交",
+    "bến xe buýt",
+    "bus route",
+    "tuyến buýt"
+   ]
+  },
+  {
+   "id": "interest/transport/public/buspass",
+   "parent": "interest/transport/public",
+   "name": {
+    "zh": "公交卡",
+    "vi": "Vé tháng",
+    "en": "Bus pass"
+   },
+   "keywords": [
+    "公交月卡",
+    "vé xe buýt tháng",
+    "bus pass",
+    "mua vé"
+   ]
+  },
+  {
+   "id": "interest/transport/public/intercitybus",
+   "parent": "interest/transport/public",
+   "name": {
+    "zh": "长途客车",
+    "vi": "Xe khách",
+    "en": "Intercity bus"
+   },
+   "keywords": [
+    "长途客车",
+    "giáp bát",
+    "mỹ đình",
+    "xe khách liên tỉnh"
+   ]
+  },
+  {
+   "id": "interest/transport/public/limousinevan",
+   "parent": "interest/transport/public",
+   "name": {
+    "zh": "城际商务车",
+    "vi": "Xe limousine",
+    "en": "Limousine van"
+   },
+   "keywords": [
+    "商务车",
+    "xe cabin",
+    "limousine van",
+    "xe bắc ninh hà nội"
+   ]
+  },
+  {
+   "id": "interest/transport/public/schoolvan",
+   "parent": "interest/transport/public",
+   "name": {
+    "zh": "校车接送",
+    "vi": "Xe đưa đón",
+    "en": "School van"
+   },
+   "keywords": [
+    "校车",
+    "school bus",
+    "xe đón trẻ",
+    "đưa đón con"
+   ]
+  },
+  {
+   "id": "interest/transport/public/ferry",
+   "parent": "interest/transport/public",
+   "name": {
+    "zh": "轮渡",
+    "vi": "Phà",
+    "en": "Ferry"
+   },
+   "keywords": [
+    "bến phà",
+    "ferry"
+   ]
+  },
+  {
+   "id": "interest/transport/rail",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "轨道交通",
+    "vi": "Đường sắt",
+    "en": "Rail"
+   },
+   "keywords": [
+    "铁路",
+    "đường sắt",
+    "rail"
+   ]
+  },
+  {
+   "id": "interest/transport/rail/train",
+   "parent": "interest/transport/rail",
+   "name": {
+    "zh": "坐火车",
+    "vi": "Tàu hỏa",
+    "en": "Train travel"
+   },
+   "keywords": [
+    "坐火车",
+    "đi tàu lửa",
+    "tàu hỏa",
+    "train"
+   ]
+  },
+  {
+   "id": "interest/transport/rail/metro",
+   "parent": "interest/transport/rail",
+   "name": {
+    "zh": "城市轻轨",
+    "vi": "Đường sắt đô thị",
+    "en": "City metro"
+   },
+   "keywords": [
+    "轻轨",
+    "metro",
+    "cát linh",
+    "nhổn"
+   ]
+  },
+  {
+   "id": "interest/transport/rail/sleeper",
+   "parent": "interest/transport/rail",
+   "name": {
+    "zh": "卧铺夜车",
+    "vi": "Giường nằm tàu",
+    "en": "Sleeper train"
+   },
+   "keywords": [
+    "卧铺",
+    "toa giường nằm",
+    "sleeper",
+    "vé giường"
+   ]
+  },
+  {
+   "id": "interest/transport/rail/trainbooking",
+   "parent": "interest/transport/rail",
+   "name": {
+    "zh": "订火车票",
+    "vi": "Đặt vé tàu",
+    "en": "Train tickets"
+   },
+   "keywords": [
+    "订火车票",
+    "dsvn",
+    "đặt vé tàu hỏa",
+    "ga hà nội"
+   ]
+  },
+  {
+   "id": "interest/transport/air",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "航空出行",
+    "vi": "Đường bay",
+    "en": "Flying"
+   },
+   "keywords": [
+    "乘机",
+    "đường bay",
+    "flight"
+   ]
+  },
+  {
+   "id": "interest/transport/air/airticket",
+   "parent": "interest/transport/air",
+   "name": {
+    "zh": "订机票",
+    "vi": "Vé máy bay",
+    "en": "Flight tickets"
+   },
+   "keywords": [
+    "订机票",
+    "vé bay",
+    "flight ticket",
+    "săn vé máy bay"
+   ]
+  },
+  {
+   "id": "interest/transport/air/checkin",
+   "parent": "interest/transport/air",
+   "name": {
+    "zh": "值机",
+    "vi": "Thủ tục bay",
+    "en": "Airport check-in"
+   },
+   "keywords": [
+    "值机",
+    "check in sân bay",
+    "boarding pass",
+    "phòng chờ"
+   ]
+  },
+  {
+   "id": "interest/transport/air/luggage",
+   "parent": "interest/transport/air",
+   "name": {
+    "zh": "行李托运",
+    "vi": "Hành lý",
+    "en": "Luggage"
+   },
+   "keywords": [
+    "托运行李",
+    "kéo vali",
+    "hành lý ký gửi",
+    "carry on"
+   ]
+  },
+  {
+   "id": "interest/transport/air/lowcost",
+   "parent": "interest/transport/air",
+   "name": {
+    "zh": "廉价航空",
+    "vi": "Bay giá rẻ",
+    "en": "Budget airline"
+   },
+   "keywords": [
+    "廉航",
+    "vietjet",
+    "bay phổ thông",
+    "budget airline"
+   ]
+  },
+  {
+   "id": "interest/transport/traffic",
+   "parent": "interest/transport",
+   "name": {
+    "zh": "路况",
+    "vi": "Tình hình giao thông",
+    "en": "Road conditions"
+   },
+   "keywords": [
+    "路况",
+    "giao thông đô thị",
+    "road conditions"
+   ]
+  },
+  {
+   "id": "interest/transport/traffic/jam",
+   "parent": "interest/transport/traffic",
+   "name": {
+    "zh": "堵车",
+    "vi": "Tắc đường",
+    "en": "Traffic jam"
+   },
+   "keywords": [
+    "kẹt xe",
+    "traffic jam",
+    "chôn chân"
+   ]
+  },
+  {
+   "id": "interest/transport/traffic/flood",
+   "parent": "interest/transport/traffic",
+   "name": {
+    "zh": "积水路段",
+    "vi": "Đường ngập",
+    "en": "Flooded road"
+   },
+   "keywords": [
+    "积水",
+    "ngập úng",
+    "flooded road",
+    "tránh đoạn ngập"
+   ]
+  },
+  {
+   "id": "interest/transport/traffic/peakavoid",
+   "parent": "interest/transport/traffic",
+   "name": {
+    "zh": "错峰出行",
+    "vi": "Né giờ cao điểm",
+    "en": "Avoid rush hour"
+   },
+   "keywords": [
+    "错峰",
+    "né tắc",
+    "rush hour"
+   ]
+  },
+  {
+   "id": "interest/transport/traffic/rules",
+   "parent": "interest/transport/traffic",
+   "name": {
+    "zh": "交规罚单",
+    "vi": "Phạt giao thông",
+    "en": "Traffic rules"
+   },
+   "keywords": [
+    "违章",
+    "vi phạm giao thông",
+    "biên bản",
+    "vạch kẻ"
+   ]
+  }
+ ]
+}

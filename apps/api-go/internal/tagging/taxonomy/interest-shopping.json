@@ -1,0 +1,697 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/shopping/market",
+   "parent": "interest/shopping",
+   "name": {
+    "zh": "线下市集",
+    "vi": "Chợ búa",
+    "en": "Markets"
+   },
+   "keywords": [
+    "逛市集",
+    "wet market"
+   ]
+  },
+  {
+   "id": "interest/shopping/market/traditional",
+   "parent": "interest/shopping/market",
+   "name": {
+    "zh": "传统市场",
+    "vi": "Chợ truyền thống",
+    "en": "Traditional market"
+   },
+   "keywords": [
+    "传统市场",
+    "cho truyen thong",
+    "chợ gần nhà"
+   ]
+  },
+  {
+   "id": "interest/shopping/market/nightmarket",
+   "parent": "interest/shopping/market",
+   "name": {
+    "zh": "夜市街",
+    "vi": "Chợ đêm",
+    "en": "Night market"
+   },
+   "keywords": [
+    "night market",
+    "夜市街"
+   ]
+  },
+  {
+   "id": "interest/shopping/market/wholesale",
+   "parent": "interest/shopping/market",
+   "name": {
+    "zh": "批发市场",
+    "vi": "Chợ đầu mối",
+    "en": "Wholesale market"
+   },
+   "keywords": [
+    "批发市场",
+    "buôn sỉ",
+    "đồng xuân"
+   ]
+  },
+  {
+   "id": "interest/shopping/market/organic",
+   "parent": "interest/shopping/market",
+   "name": {
+    "zh": "有机食品",
+    "vi": "Thực phẩm hữu cơ",
+    "en": "Organic food"
+   },
+   "keywords": [
+    "有机菜",
+    "thực phẩm hữu cơ",
+    "thuc pham sach",
+    "organic"
+   ]
+  },
+  {
+   "id": "interest/shopping/market/highland",
+   "parent": "interest/shopping/market",
+   "name": {
+    "zh": "山区集市",
+    "vi": "Chợ phiên",
+    "en": "Highland market"
+   },
+   "keywords": [
+    "chợ vùng cao",
+    "highland market",
+    "phiên chợ"
+   ]
+  },
+  {
+   "id": "interest/shopping/market/grocery",
+   "parent": "interest/shopping/market",
+   "name": {
+    "zh": "买菜",
+    "vi": "Đi chợ",
+    "en": "Grocery run"
+   },
+   "keywords": [
+    "买菜",
+    "mua rau",
+    "thịt cá hằng ngày"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail",
+   "parent": "interest/shopping",
+   "name": {
+    "zh": "商场门店",
+    "vi": "Cửa hàng",
+    "en": "Stores & malls"
+   },
+   "keywords": [
+    "逛街",
+    "đi cửa hàng",
+    "in-store"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/mall",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "逛商场",
+    "vi": "Trung tâm thương mại",
+    "en": "Shopping mall"
+   },
+   "keywords": [
+    "逛商场",
+    "mall"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/minimart",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "便利店",
+    "vi": "Cửa hàng tiện lợi",
+    "en": "Convenience store"
+   },
+   "keywords": [
+    "便利店",
+    "cửa hàng tiện lợi",
+    "circle k"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/outlet",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "折扣店",
+    "vi": "Cửa hàng outlet",
+    "en": "Outlet store"
+   },
+   "keywords": [
+    "折扣店",
+    "giảm giá sâu"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/appliance",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "家电卖场",
+    "vi": "Điện máy",
+    "en": "Appliance store"
+   },
+   "keywords": [
+    "家电",
+    "điện máy xanh",
+    "nồi cơm điện"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/mobilestore",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "手机店",
+    "vi": "Cửa hàng điện thoại",
+    "en": "Phone store"
+   },
+   "keywords": [
+    "手机店",
+    "thế giới di động",
+    "cửa hàng điện thoại",
+    "phụ kiện phone"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/pharmacy",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "药店",
+    "vi": "Nhà thuốc",
+    "en": "Pharmacy"
+   },
+   "keywords": [
+    "买药",
+    "nhà thuốc",
+    "pharmacy",
+    "thuốc tây"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/stationery",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "文具",
+    "vi": "Văn phòng phẩm",
+    "en": "Stationery"
+   },
+   "keywords": [
+    "vở viết",
+    "stationery"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/babygoods",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "母婴用品",
+    "vi": "Đồ mẹ và bé",
+    "en": "Baby products"
+   },
+   "keywords": [
+    "母婴",
+    "đồ mẹ và bé",
+    "baby products",
+    "sữa cho bé"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/cosmetics",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "美妆店",
+    "vi": "Mỹ phẩm",
+    "en": "Cosmetics store"
+   },
+   "keywords": [
+    "化妆品",
+    "mỹ phẩm chính hãng",
+    "son môi",
+    "skincare"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/bookstore",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "书店",
+    "vi": "Hiệu sách",
+    "en": "Bookstore"
+   },
+   "keywords": [
+    "hiệu sách",
+    "bookstore",
+    "sách giấy"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/buildingmaterials",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "建材",
+    "vi": "Vật liệu xây dựng",
+    "en": "Building materials"
+   },
+   "keywords": [
+    "建材",
+    "gạch ốp",
+    "xi măng",
+    "cát xây"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/eyewear",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "配眼镜",
+    "vi": "Tiệm mắt kính",
+    "en": "Optician"
+   },
+   "keywords": [
+    "配眼镜",
+    "kính thuốc",
+    "glasses",
+    "cắt tròng"
+   ]
+  },
+  {
+   "id": "interest/shopping/retail/motorbikestore",
+   "parent": "interest/shopping/retail",
+   "name": {
+    "zh": "摩托专卖店",
+    "vi": "Cửa hàng xe máy",
+    "en": "Motorbike dealer"
+   },
+   "keywords": [
+    "买摩托",
+    "head shop",
+    "xe máy mới",
+    "cửa hàng xe máy"
+   ]
+  },
+  {
+   "id": "interest/shopping/online",
+   "parent": "interest/shopping",
+   "name": {
+    "zh": "线上购物",
+    "vi": "Mua sắm trực tuyến",
+    "en": "Online shopping"
+   },
+   "keywords": [
+    "网购",
+    "mua online",
+    "online shopping"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/livecommerce",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "直播带货",
+    "vi": "Livestream bán hàng",
+    "en": "Live selling"
+   },
+   "keywords": [
+    "直播带货",
+    "livestream bán hàng",
+    "mua qua live",
+    "phiên livestream"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/groupbuy",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "拼单团购",
+    "vi": "Mua chung",
+    "en": "Group buying"
+   },
+   "keywords": [
+    "拼单",
+    "团购",
+    "mua chung",
+    "group buy"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/flashsale",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "秒杀抢购",
+    "vi": "Săn sale",
+    "en": "Flash deals"
+   },
+   "keywords": [
+    "秒杀",
+    "săn sale",
+    "flash deal",
+    "đổ sale"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/crossborder",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "海淘",
+    "vi": "Hàng ngoại đặt về",
+    "en": "Cross-border orders"
+   },
+   "keywords": [
+    "海淘",
+    "order taobao",
+    "cross border"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/xachtay",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "代购带货",
+    "vi": "Hàng xách tay",
+    "en": "Hand-carry goods"
+   },
+   "keywords": [
+    "xách tay",
+    "hand carry"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/vouchers",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "优惠券",
+    "vi": "Mã giảm giá",
+    "en": "Vouchers"
+   },
+   "keywords": [
+    "优惠券",
+    "mã giảm giá",
+    "voucher",
+    "săn voucher"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/returns",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "退换货",
+    "vi": "Đổi trả hàng",
+    "en": "Returns"
+   },
+   "keywords": [
+    "退货",
+    "đổi trả",
+    "returns"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/paylater",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "消费分期",
+    "vi": "Mua trả chậm",
+    "en": "Pay later"
+   },
+   "keywords": [
+    "分期",
+    "trả chậm",
+    "trả góp",
+    "installment"
+   ]
+  },
+  {
+   "id": "interest/shopping/online/appmarket",
+   "parent": "interest/shopping/online",
+   "name": {
+    "zh": "平台购物",
+    "vi": "Sàn thương mại",
+    "en": "Marketplace apps"
+   },
+   "keywords": [
+    "电商平台",
+    "app mua sắm",
+    "shopee",
+    "lazada"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand",
+   "parent": "interest/shopping",
+   "name": {
+    "zh": "二手闲置",
+    "vi": "Đồ cũ",
+    "en": "Secondhand"
+   },
+   "keywords": [
+    "second hand",
+    "二手闲置",
+    "secondhand"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedphone",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手手机",
+    "vi": "Điện thoại cũ",
+    "en": "Used phones"
+   },
+   "keywords": [
+    "二手手机",
+    "dien thoai cu",
+    "điện thoại cũ",
+    "bán điện thoại"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedlaptop",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手电脑",
+    "vi": "Laptop cũ",
+    "en": "Used laptops"
+   },
+   "keywords": [
+    "二手电脑",
+    "laptop cũ",
+    "máy tính cũ",
+    "used laptop"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedbike",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手摩托车",
+    "vi": "Xe máy cũ",
+    "en": "Used motorbikes"
+   },
+   "keywords": [
+    "二手摩托",
+    "xe máy cũ",
+    "bán xe máy",
+    "used motorbike"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedfurniture",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手家具",
+    "vi": "Nội thất cũ",
+    "en": "Used furniture"
+   },
+   "keywords": [
+    "nội thất cũ",
+    "used furniture",
+    "giường cũ"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedkids",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手童车童装",
+    "vi": "Đồ trẻ em cũ",
+    "en": "Used kids items"
+   },
+   "keywords": [
+    "二手童车",
+    "xe đẩy cũ",
+    "quần áo trẻ em cũ",
+    "used kids items"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedclothes",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "旧衣淘货",
+    "vi": "Đồ si",
+    "en": "Thrift clothing"
+   },
+   "keywords": [
+    "旧衣",
+    "thrift clothes",
+    "áo thun cũ"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/thriftstore",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手店",
+    "vi": "Cửa hàng đồ si",
+    "en": "Thrift shop"
+   },
+   "keywords": [
+    "二手店",
+    "cửa hàng đồ si",
+    "thrift shop",
+    "chợ cũ"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/resellgroup",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "闲置转卖",
+    "vi": "Nhóm thanh lý",
+    "en": "Resale group"
+   },
+   "keywords": [
+    "闲置",
+    "nhóm bán đồ",
+    "resale group"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/tradein",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "以旧换新",
+    "vi": "Thu cũ đổi mới",
+    "en": "Trade in"
+   },
+   "keywords": [
+    "以旧换新",
+    "thu cũ đổi mới",
+    "trade in",
+    "đổi đồ cũ"
+   ]
+  },
+  {
+   "id": "interest/shopping/secondhand/usedmachinery",
+   "parent": "interest/shopping/secondhand",
+   "name": {
+    "zh": "二手设备",
+    "vi": "Máy móc cũ",
+    "en": "Used machinery"
+   },
+   "keywords": [
+    "二手设备",
+    "máy móc cũ",
+    "thanh lý máy",
+    "used machine"
+   ]
+  },
+  {
+   "id": "interest/shopping/specialty",
+   "parent": "interest/shopping",
+   "name": {
+    "zh": "专项采购",
+    "vi": "Hàng chuyên dùng",
+    "en": "Specialty goods"
+   },
+   "keywords": [
+    "专项采购",
+    "hàng đặc chủng",
+    "specialty goods"
+   ]
+  },
+  {
+   "id": "interest/shopping/specialty/gift",
+   "parent": "interest/shopping/specialty",
+   "name": {
+    "zh": "送礼选品",
+    "vi": "Quà tặng",
+    "en": "Gifts"
+   },
+   "keywords": [
+    "送礼",
+    "hộp quà",
+    "gift ideas",
+    "món quà"
+   ]
+  },
+  {
+   "id": "interest/shopping/specialty/wedding",
+   "parent": "interest/shopping/specialty",
+   "name": {
+    "zh": "婚庆用品",
+    "vi": "Đồ cưới",
+    "en": "Wedding supplies"
+   },
+   "keywords": [
+    "婚庆",
+    "đồ cưới",
+    "wedding supplies",
+    "phụ kiện cưới"
+   ]
+  },
+  {
+   "id": "interest/shopping/specialty/hardwaretools",
+   "parent": "interest/shopping/specialty",
+   "name": {
+    "zh": "五金工具",
+    "vi": "Dụng cụ cầm tay",
+    "en": "Hardware tools"
+   },
+   "keywords": [
+    "五金",
+    "dụng cụ cầm tay",
+    "hardware store",
+    "khoan tay"
+   ]
+  },
+  {
+   "id": "interest/shopping/specialty/petfood",
+   "parent": "interest/shopping/specialty",
+   "name": {
+    "zh": "宠物口粮",
+    "vi": "Thức ăn chó mèo",
+    "en": "Pet food"
+   },
+   "keywords": [
+    "狗粮",
+    "猫粮",
+    "thức ăn cho chó",
+    "pet food"
+   ]
+  },
+  {
+   "id": "interest/shopping/specialty/flowers",
+   "parent": "interest/shopping/specialty",
+   "name": {
+    "zh": "买鲜花",
+    "vi": "Hoa tươi",
+    "en": "Fresh flowers"
+   },
+   "keywords": [
+    "鲜花",
+    "hoa tươi",
+    "bó hoa",
+    "flower shop"
+   ]
+  }
+ ]
+}

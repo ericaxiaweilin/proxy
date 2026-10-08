@@ -1,0 +1,886 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/wellness/nutrition",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "营养管理",
+    "vi": "Dinh dưỡng",
+    "en": "Nutrition"
+   },
+   "keywords": [
+    "营养",
+    "dinh dưỡng",
+    "nutrition",
+    "ăn uống khoa học"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/balanced_diet",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "均衡膳食",
+    "vi": "Ăn đủ chất",
+    "en": "Balanced Diet"
+   },
+   "keywords": [
+    "均衡饮食",
+    "ăn đủ chất",
+    "balanced diet",
+    "đa dạng món",
+    "bữa đủ nhóm"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/protein",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "蛋白质摄入",
+    "vi": "Nạp đạm",
+    "en": "Protein Intake"
+   },
+   "keywords": [
+    "蛋白",
+    "đạm",
+    "whey",
+    "thịt nạc",
+    "đủ đạm"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/sugar_cut",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "控糖",
+    "vi": "Cắt đường",
+    "en": "Less Sugar"
+   },
+   "keywords": [
+    "cắt đường",
+    "low sugar",
+    "đường huyết"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/salt_cut",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "减盐",
+    "vi": "Giảm mặn",
+    "en": "Less Salt"
+   },
+   "keywords": [
+    "减盐",
+    "giảm mặn",
+    "low sodium",
+    "mặn vừa",
+    "natri"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/fiber",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "膳食纤维",
+    "vi": "Chất xơ",
+    "en": "Fiber"
+   },
+   "keywords": [
+    "纤维",
+    "chất xơ",
+    "fiber",
+    "ăn nhiều rau",
+    "rau lá"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/vitamin",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "维生素",
+    "vi": "Vitamin",
+    "en": "Vitamins"
+   },
+   "keywords": [
+    "维生素",
+    "viên sủi",
+    "multivitamin",
+    "bổ sung vi chất"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/supplement",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "膳食补充剂",
+    "vi": "Thực phẩm bổ",
+    "en": "Supplements"
+   },
+   "keywords": [
+    "supplement",
+    "thực phẩm chức năng",
+    "tpcn",
+    "collagen",
+    "omega 3"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/probiotic",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "益生菌",
+    "vi": "Men vi sinh",
+    "en": "Probiotics"
+   },
+   "keywords": [
+    "益生菌",
+    "men vi sinh",
+    "probiotics",
+    "khuẩn có lợi",
+    "tiêu hóa tốt"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/fasting",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "轻断食",
+    "vi": "Nhịn gián đoạn",
+    "en": "Intermittent Fasting"
+   },
+   "keywords": [
+    "断食",
+    "intermittent fasting",
+    "nhịn ăn",
+    "16:8",
+    "kiêng bữa tối"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/weight_log",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "体重管理",
+    "vi": "Quản lý cân nặng",
+    "en": "Weight Tracking"
+   },
+   "keywords": [
+    "体重",
+    "cân nặng",
+    "giảm cân",
+    "tăng cân",
+    "calo"
+   ]
+  },
+  {
+   "id": "interest/wellness/nutrition/portion",
+   "parent": "interest/wellness/nutrition",
+   "name": {
+    "zh": "份量控制",
+    "vi": "Khẩu phần",
+    "en": "Portion Control"
+   },
+   "keywords": [
+    "份量",
+    "khẩu phần",
+    "portion",
+    "ăn vừa",
+    "bát cân bằng"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "睡眠作息",
+    "vi": "Giấc ngủ",
+    "en": "Sleep"
+   },
+   "keywords": [
+    "睡眠",
+    "ngủ ngon",
+    "sleep",
+    "chất lượng ngủ",
+    "giấc ngủ đủ"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep/routine",
+   "parent": "interest/wellness/sleep",
+   "name": {
+    "zh": "作息规律",
+    "vi": "Nền nếp ngủ",
+    "en": "Sleep Routine"
+   },
+   "keywords": [
+    "作息",
+    "ngủ đúng giờ",
+    "đi ngủ sớm",
+    "sleep routine",
+    "dậy sớm"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep/insomnia",
+   "parent": "interest/wellness/sleep",
+   "name": {
+    "zh": "失眠改善",
+    "vi": "Mất ngủ",
+    "en": "Insomnia Help"
+   },
+   "keywords": [
+    "失眠",
+    "mất ngủ",
+    "insomnia",
+    "khó ngủ",
+    "trằn trọc"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep/nap",
+   "parent": "interest/wellness/sleep",
+   "name": {
+    "zh": "午睡",
+    "vi": "Ngủ trưa",
+    "en": "Nap"
+   },
+   "keywords": [
+    "午睡",
+    "ngủ trưa",
+    "chợp",
+    "hồi lực buổi trưa"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep/deep",
+   "parent": "interest/wellness/sleep",
+   "name": {
+    "zh": "深睡提升",
+    "vi": "Ngủ sâu",
+    "en": "Deep Sleep"
+   },
+   "keywords": [
+    "深睡",
+    "ngủ sâu",
+    "deep sleep",
+    "melatonin",
+    "giấc rem"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep/environment",
+   "parent": "interest/wellness/sleep",
+   "name": {
+    "zh": "睡眠环境",
+    "vi": "Không gian ngủ",
+    "en": "Sleep Environment"
+   },
+   "keywords": [
+    "rèm chắn sáng",
+    "đèn ngủ"
+   ]
+  },
+  {
+   "id": "interest/wellness/sleep/snore",
+   "parent": "interest/wellness/sleep",
+   "name": {
+    "zh": "打鼾",
+    "vi": "Ngáy",
+    "en": "Snoring"
+   },
+   "keywords": [
+    "打鼾",
+    "ngáy",
+    "snoring",
+    "ngủ ngáy",
+    "hơi thở khi ngủ"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "心理情绪",
+    "vi": "Tinh thần",
+    "en": "Mental Wellbeing"
+   },
+   "keywords": [
+    "情绪",
+    "áp lực",
+    "tâm lý",
+    "mental health",
+    "giữ tinh thần"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/meditation",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "冥想",
+    "vi": "Thiền",
+    "en": "Meditation"
+   },
+   "keywords": [
+    "冥想",
+    "thiền",
+    "ngồi thiền",
+    "quán tưởng",
+    "meditation"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/breathing",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "呼吸练习",
+    "vi": "Hít thở",
+    "en": "Breathing"
+   },
+   "keywords": [
+    "呼吸",
+    "hít thở",
+    "breathing",
+    "thở 4 7 8",
+    "pranayama"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/mindfulness",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "正念",
+    "vi": "Chánh niệm",
+    "en": "Mindfulness"
+   },
+   "keywords": [
+    "正念",
+    "chánh niệm",
+    "tỉnh thức",
+    "mindfulness",
+    "giữ hiện tại"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/stress",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "减压放松",
+    "vi": "Giảm căng thẳng",
+    "en": "Stress Relief"
+   },
+   "keywords": [
+    "减压",
+    "căng thẳng",
+    "stress",
+    "thư giãn",
+    "xả áp lực"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/healing",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "疗愈",
+    "vi": "Chữa lành",
+    "en": "Inner Healing"
+   },
+   "keywords": [
+    "疗愈",
+    "chữa lành",
+    "self care",
+    "tự chữa lành",
+    "vết thương lòng"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/journal",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "情绪手账",
+    "vi": "Viết cảm xúc",
+    "en": "Journaling"
+   },
+   "keywords": [
+    "手账",
+    "journaling",
+    "viết cảm xúc",
+    "mood log",
+    "ghi cảm xúc"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/counselling",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "心理咨询",
+    "vi": "Tư vấn tâm lý",
+    "en": "Counselling"
+   },
+   "keywords": [
+    "心理咨询",
+    "tư vấn tâm lý",
+    "counselling",
+    "tham vấn",
+    "tư vấn học đường"
+   ]
+  },
+  {
+   "id": "interest/wellness/mind/burnout",
+   "parent": "interest/wellness/mind",
+   "name": {
+    "zh": "倦怠修复",
+    "vi": "Kiệt sức",
+    "en": "Burnout"
+   },
+   "keywords": [
+    "倦怠",
+    "kiệt sức",
+    "burnout",
+    "mất động lực",
+    "quá tải"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "就医协助",
+    "vi": "Đi khám",
+    "en": "Medical Visits"
+   },
+   "keywords": [
+    "就医",
+    "đi khám",
+    "khám bệnh",
+    "看病",
+    "clinic"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/appointment",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "预约挂号",
+    "vi": "Đặt lịch khám",
+    "en": "Appointment"
+   },
+   "keywords": [
+    "预约",
+    "booking khám",
+    "số thứ tự",
+    "đăng ký khám"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/visit_help",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "陪诊带路",
+    "vi": "Đi cùng khám",
+    "en": "Visit Help"
+   },
+   "keywords": [
+    "theo khám",
+    "người nhà đi cùng",
+    "hướng dẫn phòng khám",
+    "phiên dịch y tế"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/checkup",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "健康体检",
+    "vi": "Khám tổng quát",
+    "en": "Checkup"
+   },
+   "keywords": [
+    "体检",
+    "khám tổng quát",
+    "checkup",
+    "xét nghiệm",
+    "sàng lọc"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/dental",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "牙科护齿",
+    "vi": "Nha khoa",
+    "en": "Dental Care"
+   },
+   "keywords": [
+    "牙科",
+    "chải răng",
+    "đánh răng",
+    "sâu răng",
+    "lấy cao răng"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/vision",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "视力护眼",
+    "vi": "Mắt và kính",
+    "en": "Eye Care"
+   },
+   "keywords": [
+    "护眼",
+    "kính mắt",
+    "cận thị",
+    "đo mắt",
+    "eye care"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/vaccine",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "疫苗接种",
+    "vi": "Tiêm chủng",
+    "en": "Vaccines"
+   },
+   "keywords": [
+    "疫苗",
+    "tiêm chủng",
+    "vaccine",
+    "mũi tiêm",
+    "tiêm nhắc"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/pharmacy",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "药房取药",
+    "vi": "Nhà thuốc",
+    "en": "Pharmacy"
+   },
+   "keywords": [
+    "药房",
+    "quầy thuốc",
+    "kê đơn",
+    "uống thuốc đúng giờ",
+    "thuốc theo đơn"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/eastern",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "中医东医",
+    "vi": "Đông y",
+    "en": "Eastern Medicine"
+   },
+   "keywords": [
+    "中医",
+    "đông y",
+    "bắt mạch",
+    "thuốc bắc",
+    "châm cứu"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/first_aid",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "急救常识",
+    "vi": "Sơ cấp cứu",
+    "en": "First Aid"
+   },
+   "keywords": [
+    "急救",
+    "sơ cấp cứu",
+    "first aid",
+    "cpr",
+    "băng bó"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/chronic",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "慢病管理",
+    "vi": "Bệnh mạn tính",
+    "en": "Chronic Care"
+   },
+   "keywords": [
+    "慢病",
+    "bệnh mạn tính",
+    "huyết áp",
+    "tiểu đường",
+    "mỡ máu"
+   ]
+  },
+  {
+   "id": "interest/wellness/clinic/rehab",
+   "parent": "interest/wellness/clinic",
+   "name": {
+    "zh": "术后康复",
+    "vi": "Phục hồi sau mổ",
+    "en": "Recovery Care"
+   },
+   "keywords": [
+    "康复",
+    "phục hồi",
+    "hồi sức",
+    "sau mổ",
+    "vật lý trị liệu"
+   ]
+  },
+  {
+   "id": "interest/wellness/body",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "身体养护",
+    "vi": "Chăm sóc cơ thể",
+    "en": "Body Care"
+   },
+   "keywords": [
+    "养护",
+    "giữ ấm",
+    "khỏe người",
+    "body care",
+    "chăm sóc bản thân"
+   ]
+  },
+  {
+   "id": "interest/wellness/body/posture",
+   "parent": "interest/wellness/body",
+   "name": {
+    "zh": "体态矫正",
+    "vi": "Chỉnh tư thế",
+    "en": "Posture"
+   },
+   "keywords": [
+    "体态",
+    "tư thế",
+    "gù lưng",
+    "ngồi đúng",
+    "võng lưng"
+   ]
+  },
+  {
+   "id": "interest/wellness/body/sore",
+   "parent": "interest/wellness/body",
+   "name": {
+    "zh": "酸痛缓解",
+    "vi": "Đau mỏi",
+    "en": "Sore Relief"
+   },
+   "keywords": [
+    "酸痛",
+    "đau mỏi",
+    "cổ vai gáy",
+    "vai gáy",
+    "đau lưng"
+   ]
+  },
+  {
+   "id": "interest/wellness/body/cold_shower",
+   "parent": "interest/wellness/body",
+   "name": {
+    "zh": "冷水浴",
+    "vi": "Tắm nước lạnh",
+    "en": "Cold Shower"
+   },
+   "keywords": [
+    "冷水澡",
+    "tắm lạnh",
+    "cold shower",
+    "ngâm chân",
+    "nước lạnh"
+   ]
+  },
+  {
+   "id": "interest/wellness/body/sunscreen",
+   "parent": "interest/wellness/body",
+   "name": {
+    "zh": "防晒",
+    "vi": "Chống nắng",
+    "en": "Sunscreen"
+   },
+   "keywords": [
+    "uv",
+    "che nắng"
+   ]
+  },
+  {
+   "id": "interest/wellness/body/hygiene",
+   "parent": "interest/wellness/body",
+   "name": {
+    "zh": "清洁习惯",
+    "vi": "Vệ sinh cá nhân",
+    "en": "Hygiene"
+   },
+   "keywords": [
+    "卫生",
+    "rửa tay",
+    "sạch sẽ",
+    "hygiene",
+    "khử khuẩn"
+   ]
+  },
+  {
+   "id": "interest/wellness/habit",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "打卡习惯",
+    "vi": "Thói quen tốt",
+    "en": "Good Habits"
+   },
+   "keywords": [
+    "thói quen",
+    "habit",
+    "21 ngày",
+    "duy trì"
+   ]
+  },
+  {
+   "id": "interest/wellness/habit/water",
+   "parent": "interest/wellness/habit",
+   "name": {
+    "zh": "喝水提醒",
+    "vi": "Uống đủ nước",
+    "en": "Water Intake"
+   },
+   "keywords": [
+    "喝水",
+    "uống nước",
+    "uống nước mỗi ngày",
+    "đủ nước",
+    "chai nước"
+   ]
+  },
+  {
+   "id": "interest/wellness/habit/steps",
+   "parent": "interest/wellness/habit",
+   "name": {
+    "zh": "步数打卡",
+    "vi": "Đếm bước",
+    "en": "Step Count"
+   },
+   "keywords": [
+    "步数",
+    "step count",
+    "10000 bước",
+    "đi bộ đều"
+   ]
+  },
+  {
+   "id": "interest/wellness/habit/screen_cut",
+   "parent": "interest/wellness/habit",
+   "name": {
+    "zh": "屏幕节制",
+    "vi": "Giảm màn hình",
+    "en": "Screen Detox"
+   },
+   "keywords": [
+    "屏幕",
+    "screen time",
+    "tắt điện thoại",
+    "digital balance",
+    "bỏ lướt"
+   ]
+  },
+  {
+   "id": "interest/wellness/habit/quit_smoke",
+   "parent": "interest/wellness/habit",
+   "name": {
+    "zh": "戒烟",
+    "vi": "Bỏ thuốc lá",
+    "en": "Quit Smoking"
+   },
+   "keywords": [
+    "戒烟",
+    "quit smoking",
+    "bỏ thuốc",
+    "nicotine",
+    "cai thuốc"
+   ]
+  },
+  {
+   "id": "interest/wellness/habit/less_alcohol",
+   "parent": "interest/wellness/habit",
+   "name": {
+    "zh": "限酒",
+    "vi": "Bớt rượu bia",
+    "en": "Less Alcohol"
+   },
+   "keywords": [
+    "限酒",
+    "bỏ nhậu",
+    "ít rượu bia",
+    "không cồn",
+    "cai rượu"
+   ]
+  },
+  {
+   "id": "interest/wellness/women",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "女性健康",
+    "vi": "Sức khỏe phụ nữ",
+    "en": "Womens Health"
+   },
+   "keywords": [
+    "经期",
+    "kinh nguyệt",
+    "bổ sắt",
+    "women health",
+    "khám phụ khoa"
+   ]
+  },
+  {
+   "id": "interest/wellness/prenatal",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "孕期保健",
+    "vi": "Chăm sóc thai sản",
+    "en": "Prenatal Care"
+   },
+   "keywords": [
+    "孕期",
+    "thai kỳ",
+    "khám thai",
+    "bầu bí",
+    "prenatal"
+   ]
+  },
+  {
+   "id": "interest/wellness/elder",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "长者健康",
+    "vi": "Sức khỏe người già",
+    "en": "Senior Health"
+   },
+   "keywords": [
+    "长者",
+    "người cao tuổi",
+    "chống té",
+    "sức khỏe ông bà",
+    "uống thuốc nhắc"
+   ]
+  },
+  {
+   "id": "interest/wellness/community",
+   "parent": "interest/wellness",
+   "name": {
+    "zh": "健康社群",
+    "vi": "Cộng đồng khỏe",
+    "en": "Wellness Community"
+   },
+   "keywords": [
+    "健康群",
+    "thử thách 21 ngày",
+    "wellness club",
+    "cùng khỏe",
+    "nhóm sống khỏe"
+   ]
+  }
+ ]
+}

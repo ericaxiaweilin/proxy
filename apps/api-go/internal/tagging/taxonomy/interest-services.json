@@ -1,0 +1,1330 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/services/home_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "家政日常",
+    "vi": "Việc nhà",
+    "en": "Home Help"
+   },
+   "keywords": [
+    "上门家政",
+    "dịch vụ nhà cửa",
+    "home help",
+    "người làm"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/cleaning",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "日常保洁",
+    "vi": "Dọn dẹp nhà",
+    "en": "Home Cleaning"
+   },
+   "keywords": [
+    "日常保洁",
+    "dọn dẹp",
+    "home cleaning",
+    "lau nhà"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/deep_clean",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "深度清洁",
+    "vi": "Tổng vệ sinh",
+    "en": "Deep Cleaning"
+   },
+   "keywords": [
+    "深度清洁",
+    "deep cleaning",
+    "dọn nhà lớn",
+    "vệ sinh kỹ"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/sofa_carpet",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "沙发地毯清洗",
+    "vi": "Giặt sofa",
+    "en": "Upholstery Wash"
+   },
+   "keywords": [
+    "洗沙发",
+    "giặt sofa",
+    "upholstery cleaning",
+    "giặt thảm"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/laundry",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "洗衣送洗",
+    "vi": "Dịch vụ giặt ủi",
+    "en": "Laundry Service"
+   },
+   "keywords": [
+    "dịch vụ giặt ủi",
+    "laundry service",
+    "giặt sấy",
+    "đồ cần giặt"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/ironing",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "代熨烫",
+    "vi": "Ủi quần áo",
+    "en": "Ironing Help"
+   },
+   "keywords": [
+    "熨烫",
+    "ủi đồ",
+    "ironing service",
+    "đồ ủi thẳng",
+    "gấp đồ"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/window_clean",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "擦窗",
+    "vi": "Lau kính",
+    "en": "Window Cleaning"
+   },
+   "keywords": [
+    "擦玻璃",
+    "window cleaning",
+    "lau cửa sổ",
+    "sàn kính lau"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/housekeeper",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "长期家政",
+    "vi": "Người chăm nhà",
+    "en": "Housekeeper"
+   },
+   "keywords": [
+    "长期保姆",
+    "housekeeper",
+    "trông nhà hộ",
+    "làm nhà hằng ngày",
+    "ở lại qua đêm"
+   ]
+  },
+  {
+   "id": "interest/services/home_help/pest_control",
+   "parent": "interest/services/home_help",
+   "name": {
+    "zh": "除虫灭鼠",
+    "vi": "Diệt mối",
+    "en": "Pest Control"
+   },
+   "keywords": [
+    "pest control",
+    "muỗi xông",
+    "bẫy chuột",
+    "diệt gián"
+   ]
+  },
+  {
+   "id": "interest/services/repairs",
+   "parent": "interest/services",
+   "name": {
+    "zh": "上门维修",
+    "vi": "Thợ sửa tận nơi",
+    "en": "Home Repairs"
+   },
+   "keywords": [
+    "叫师傅",
+    "gọi thợ",
+    "repair visit",
+    "sửa tại chỗ",
+    "hư đồ dùng"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/plumbing",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "修水管",
+    "vi": "Sửa đường nước",
+    "en": "Plumbing"
+   },
+   "keywords": [
+    "修水管",
+    "vòi nước vỡ",
+    "bể ống nước",
+    "sen tắm hỏng"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/drain",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "疏通下水道",
+    "vi": "Thông cống",
+    "en": "Drain Unclogging"
+   },
+   "keywords": [
+    "疏通",
+    "drain unclogging",
+    "hầm cầu",
+    "tắc bồn rửa",
+    "thoát sàn"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/electrical",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "电路维修",
+    "vi": "Sửa điện tại nhà",
+    "en": "Electrical Fix"
+   },
+   "keywords": [
+    "电路维修",
+    "electrical fix",
+    "chập điện",
+    "đi dây lại",
+    "atom nhảy"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/ac_service",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "空调保养",
+    "vi": "Bảo dưỡng điều hòa",
+    "en": "AC Servicing"
+   },
+   "keywords": [
+    "bảo dưỡng điều hòa",
+    "ac servicing",
+    "gas lạnh"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/appliance",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "家电维修",
+    "vi": "Sửa đồ gia dụng",
+    "en": "Appliance Repair"
+   },
+   "keywords": [
+    "家电维修",
+    "appliance repair",
+    "tủ lạnh hỏng",
+    "máy giặt lỗi",
+    "bếp từ hỏng"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/lock",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "换锁配钥匙",
+    "vi": "Đổi khóa",
+    "en": "Locksmith"
+   },
+   "keywords": [
+    "phôi chìa",
+    "mở khóa kẹt",
+    "chìa bị gãy"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/furniture_assemble",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "安装家具",
+    "vi": "Lắp ráp tủ",
+    "en": "Furniture Assembly"
+   },
+   "keywords": [
+    "组装家具",
+    "furniture assembly",
+    "ghế bàn lắp",
+    "tủ sách dựng"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/wall_paint",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "墙面修补",
+    "vi": "Trét tường",
+    "en": "Wall Patching"
+   },
+   "keywords": [
+    "补墙",
+    "wall patching",
+    "sơn vá tường",
+    "lỗ tường bịt",
+    "bột trét"
+   ]
+  },
+  {
+   "id": "interest/services/repairs/leak_seal",
+   "parent": "interest/services/repairs",
+   "name": {
+    "zh": "防水补漏",
+    "vi": "Chống thấm",
+    "en": "Waterproofing"
+   },
+   "keywords": [
+    "防水",
+    "waterproofing",
+    "trần nhà rỉ nước",
+    "tường thấm",
+    "sơn chống dột"
+   ]
+  },
+  {
+   "id": "interest/services/moving",
+   "parent": "interest/services",
+   "name": {
+    "zh": "搬家与仓储",
+    "vi": "Chuyển nhà",
+    "en": "Moving & Storage"
+   },
+   "keywords": [
+    "搬家服务",
+    "moving service",
+    "chuyển đồ đi",
+    "dọn chỗ ở",
+    "thuê xe tải"
+   ]
+  },
+  {
+   "id": "interest/services/moving/movers",
+   "parent": "interest/services/moving",
+   "name": {
+    "zh": "小型搬运",
+    "vi": "Xe ba gác chở",
+    "en": "Small Movers"
+   },
+   "keywords": [
+    "搬运工",
+    "thợ khuân vác",
+    "movers hire",
+    "chở đồ thuê",
+    "搬东西"
+   ]
+  },
+  {
+   "id": "interest/services/moving/packing",
+   "parent": "interest/services/moving",
+   "name": {
+    "zh": "打包纸箱",
+    "vi": "Đóng gói đồ",
+    "en": "Packing Help"
+   },
+   "keywords": [
+    "打包",
+    "packing help",
+    "gói đồ dễ vỡ",
+    "thùng carton",
+    "màng co"
+   ]
+  },
+  {
+   "id": "interest/services/moving/moveout_clean",
+   "parent": "interest/services/moving",
+   "name": {
+    "zh": "退租清洁",
+    "vi": "Dọn nhà trả mặt bằng",
+    "en": "Move-out Clean"
+   },
+   "keywords": [
+    "退租打扫",
+    "move out cleaning",
+    "trả nhà dọn",
+    "dọn phòng trọ",
+    "cọc nhà lấy"
+   ]
+  },
+  {
+   "id": "interest/services/moving/storage",
+   "parent": "interest/services/moving",
+   "name": {
+    "zh": "短期仓储",
+    "vi": "Kho gửi đồ",
+    "en": "Storage Unit"
+   },
+   "keywords": [
+    "仓储",
+    "storage unit",
+    "thuê kho",
+    "thùng giữ đồ",
+    "gửi vali"
+   ]
+  },
+  {
+   "id": "interest/services/moving/office_move",
+   "parent": "interest/services/moving",
+   "name": {
+    "zh": "公司搬迁",
+    "vi": "Chuyển văn phòng",
+    "en": "Office Relocation"
+   },
+   "keywords": [
+    "公司搬迁",
+    "office relocation",
+    "dọn phòng làm việc",
+    "máy móc chuyển",
+    "thiết bị văn phòng"
+   ]
+  },
+  {
+   "id": "interest/services/errands",
+   "parent": "interest/services",
+   "name": {
+    "zh": "跑腿代办",
+    "vi": "Đi hộ",
+    "en": "Errands & Favors"
+   },
+   "keywords": [
+    "跑腿",
+    "errand service",
+    "làm hộ",
+    "chạy việc hộ",
+    "nhờ đi"
+   ]
+  },
+  {
+   "id": "interest/services/errands/pickup_drop",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "代取代送",
+    "vi": "Nhận đồ hộ",
+    "en": "Pickup & Drop"
+   },
+   "keywords": [
+    "代取",
+    "pickup errand",
+    "đưa đi gấp",
+    "giao hộ giấy",
+    "nhận hàng giùm"
+   ]
+  },
+  {
+   "id": "interest/services/errands/queue_help",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "排队占位",
+    "vi": "Xếp hàng hộ",
+    "en": "Queue Standing"
+   },
+   "keywords": [
+    "排队",
+    "queue standing",
+    "đứng chờ",
+    "lấy số hộ",
+    "giữ chỗ hàng"
+   ]
+  },
+  {
+   "id": "interest/services/errands/parcel_receive",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "代收快递",
+    "vi": "Giữ kiện hộ",
+    "en": "Parcel Receiving"
+   },
+   "keywords": [
+    "代收快递",
+    "parcel receiving",
+    "nhà giữ đơn",
+    "nhận hộ hàng",
+    "chành giữ"
+   ]
+  },
+  {
+   "id": "interest/services/errands/grocery",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "代买菜",
+    "vi": "Đi chợ hộ",
+    "en": "Grocery Run"
+   },
+   "keywords": [
+    "代买菜",
+    "grocery run",
+    "thực phẩm mua giúp",
+    "chợ sáng nhờ",
+    "sổ đồ cần mua"
+   ]
+  },
+  {
+   "id": "interest/services/errands/document_submit",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "递材料",
+    "vi": "Nộp giấy tờ",
+    "en": "Document Filing"
+   },
+   "keywords": [
+    "递材料",
+    "document filing",
+    "đi nộp hộ",
+    "ủy quyền nộp",
+    "bổ sung hồ sơ"
+   ]
+  },
+  {
+   "id": "interest/services/errands/notarize",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "公证认证",
+    "vi": "Công chứng giấy tờ",
+    "en": "Notarization Help"
+   },
+   "keywords": [
+    "notarization help",
+    "đóng dấu sao",
+    "sao y bản",
+    "chứng thực chữ"
+   ]
+  },
+  {
+   "id": "interest/services/errands/bill_pay",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "代缴账单",
+    "vi": "Thanh toán hóa đơn",
+    "en": "Bill Paying"
+   },
+   "keywords": [
+    "代缴",
+    "bill paying",
+    "trả tiền điện nước",
+    "nộp thuế hộ",
+    "biên lai"
+   ]
+  },
+  {
+   "id": "interest/services/errands/pet_boarding",
+   "parent": "interest/services/errands",
+   "name": {
+    "zh": "宠物寄养",
+    "vi": "Gửi thú cưng",
+    "en": "Pet Boarding"
+   },
+   "keywords": [
+    "pet boarding",
+    "cho mèo ăn hộ",
+    "đưa cún đi dạo",
+    "nhà nhận giữ mèo"
+   ]
+  },
+  {
+   "id": "interest/services/health_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "就医协助",
+    "vi": "Hỗ trợ đi khám",
+    "en": "Medical Help"
+   },
+   "keywords": [
+    "就医协助",
+    "medical help",
+    "bệnh viện đi cùng",
+    "khám dịch vụ",
+    "phòng khám tư"
+   ]
+  },
+  {
+   "id": "interest/services/health_help/appointment",
+   "parent": "interest/services/health_help",
+   "name": {
+    "zh": "预约挂号",
+    "vi": "Đặt lịch khám",
+    "en": "Appointment Booking"
+   },
+   "keywords": [
+    "挂号",
+    "appointment booking",
+    "lấy số khám",
+    "đặt phòng khám",
+    "khám giờ trống"
+   ]
+  },
+  {
+   "id": "interest/services/health_help/accompany",
+   "parent": "interest/services/health_help",
+   "name": {
+    "zh": "陪同就诊",
+    "vi": "Người đưa đi khám",
+    "en": "Clinic Accompany"
+   },
+   "keywords": [
+    "陪诊",
+    "clinic accompany",
+    "đón đi viện",
+    "ngồi chờ khám",
+    "ghi lời bác sĩ"
+   ]
+  },
+  {
+   "id": "interest/services/health_help/medical_translate",
+   "parent": "interest/services/health_help",
+   "name": {
+    "zh": "就医翻译",
+    "vi": "Phiên dịch y tế",
+    "en": "Medical Interpreting"
+   },
+   "keywords": [
+    "就医翻译",
+    "medical interpreting",
+    "giải nghĩa thuốc",
+    "bác sĩ giải thích",
+    "phiên dịch phòng khám"
+   ]
+  },
+  {
+   "id": "interest/services/health_help/pharmacy_pick",
+   "parent": "interest/services/health_help",
+   "name": {
+    "zh": "代取药",
+    "vi": "Mua thuốc hộ",
+    "en": "Pharmacy Pickup"
+   },
+   "keywords": [
+    "取药",
+    "pharmacy pickup",
+    "toa thuốc nhận",
+    "nhà thuốc gần",
+    "đơn thuốc mua"
+   ]
+  },
+  {
+   "id": "interest/services/health_help/elder_check",
+   "parent": "interest/services/health_help",
+   "name": {
+    "zh": "老人探视",
+    "vi": "Thăm ông bà",
+    "en": "Elder Visit"
+   },
+   "keywords": [
+    "探视老人",
+    "elder visit help",
+    "đo huyết áp hộ",
+    "nhắc uống thuốc",
+    "con cái gửi gắm"
+   ]
+  },
+  {
+   "id": "interest/services/kid_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "接送看顾",
+    "vi": "Đón trẻ hộ",
+    "en": "Pickup & Sitting"
+   },
+   "keywords": [
+    "接送看顾",
+    "pickup help",
+    "trông hộ",
+    "chờ cổng trường",
+    "gia đình nhờ"
+   ]
+  },
+  {
+   "id": "interest/services/kid_help/school_pickup",
+   "parent": "interest/services/kid_help",
+   "name": {
+    "zh": "接送孩子",
+    "vi": "Đón con tan trường",
+    "en": "School Pickup"
+   },
+   "keywords": [
+    "接送孩子",
+    "school pickup",
+    "đón bé",
+    "tan học chở"
+   ]
+  },
+  {
+   "id": "interest/services/kid_help/babysit",
+   "parent": "interest/services/kid_help",
+   "name": {
+    "zh": "临时看小孩",
+    "vi": "Giữ trẻ hộ",
+    "en": "Babysitting"
+   },
+   "keywords": [
+    "临时看护",
+    "babysitting",
+    "trông bé buổi tối",
+    "chơi cùng bé",
+    "nấu cháo hộ"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "上门数码协助",
+    "vi": "Thợ máy tính",
+    "en": "Tech Help Visit"
+   },
+   "keywords": [
+    "上门技术支持",
+    "tech help visit",
+    "kỹ thuật viên tới",
+    "cài đặt tại nhà",
+    "máy hư nhờ"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/os_install",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "重装系统",
+    "vi": "Cài win",
+    "en": "OS Reinstall"
+   },
+   "keywords": [
+    "重装系统",
+    "os reinstall",
+    "setup máy tính",
+    "sao lưu dữ liệu",
+    "laptop chậm"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/data_rescue",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "数据恢复",
+    "vi": "Cứu dữ liệu",
+    "en": "Data Recovery"
+   },
+   "keywords": [
+    "数据恢复",
+    "data recovery",
+    "ổ cứng đọc lại",
+    "file xóa lấy",
+    "usb lỗi"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/printer",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "打印机安装",
+    "vi": "Máy in để bàn",
+    "en": "Printer Setup"
+   },
+   "keywords": [
+    "打印机安装",
+    "printer setup",
+    "nạp mực máy in",
+    "kết nối in",
+    "máy in kẹt giấy"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/home_network",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "装家庭网络",
+    "vi": "Lắp internet gia đình",
+    "en": "Home Network Setup"
+   },
+   "keywords": [
+    "装宽带",
+    "home network setup",
+    "wifi yếu sửa",
+    "kéo dây mạng",
+    "mesh lắp"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/camera_install",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "安装摄像头",
+    "vi": "Lắp camera nhà",
+    "en": "CCTV Installation"
+   },
+   "keywords": [
+    "装监控",
+    "cctv installation",
+    "đầu ghi hình",
+    "xem từ xa",
+    "camera an ninh"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/phone_screen",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "换屏服务",
+    "vi": "Thay mặt kính",
+    "en": "Screen Replacement"
+   },
+   "keywords": [
+    "换屏幕",
+    "screen replacement",
+    "điện thoại nứt",
+    "kính lưng đổi",
+    "mặt kính ép"
+   ]
+  },
+  {
+   "id": "interest/services/tech_help/smart_home",
+   "parent": "interest/services/tech_help",
+   "name": {
+    "zh": "智能家居安装",
+    "vi": "Nhà thông minh",
+    "en": "Smart Home Setup"
+   },
+   "keywords": [
+    "智能家居",
+    "smart home setup",
+    "công tắc cảm ứng",
+    "đèn tự động",
+    "khóa cửa vân tay"
+   ]
+  },
+  {
+   "id": "interest/services/tailor_sew",
+   "parent": "interest/services",
+   "name": {
+    "zh": "缝补改衣",
+    "vi": "Vá sửa đồ",
+    "en": "Mending Service"
+   },
+   "keywords": [
+    "缝补",
+    "mending service",
+    "tiệm sửa đồ",
+    "đồ cần vá",
+    "chỗ sửa gọn"
+   ]
+  },
+  {
+   "id": "interest/services/tailor_sew/tailor",
+   "parent": "interest/services/tailor_sew",
+   "name": {
+    "zh": "改衣",
+    "vi": "Sửa số quần áo",
+    "en": "Clothes Tailoring"
+   },
+   "keywords": [
+    "改衣",
+    "clothes tailoring",
+    "nới áo",
+    "gấu quần cắt",
+    "eo váy thu"
+   ]
+  },
+  {
+   "id": "interest/services/tailor_sew/zipper",
+   "parent": "interest/services/tailor_sew",
+   "name": {
+    "zh": "换拉链",
+    "vi": "Thay khóa kéo",
+    "en": "Zipper Fix"
+   },
+   "keywords": [
+    "换拉链",
+    "zipper fix",
+    "dây kéo hỏng",
+    "khóa quần thay",
+    "rách túi áo"
+   ]
+  },
+  {
+   "id": "interest/services/tailor_sew/shoe_repair",
+   "parent": "interest/services/tailor_sew",
+   "name": {
+    "zh": "修鞋",
+    "vi": "Sửa giày",
+    "en": "Shoe Repair"
+   },
+   "keywords": [
+    "修鞋",
+    "shoe repair",
+    "đế giày dán",
+    "keo dán đế",
+    "mũi giày bong"
+   ]
+  },
+  {
+   "id": "interest/services/tailor_sew/dress_rent",
+   "parent": "interest/services/tailor_sew",
+   "name": {
+    "zh": "礼服租借",
+    "vi": "Cho thuê váy tiệc",
+    "en": "Dress Rental"
+   },
+   "keywords": [
+    "礼服租借",
+    "dress rental",
+    "vest chú rể thuê",
+    "váy mượn",
+    "đồ cử nhân thuê"
+   ]
+  },
+  {
+   "id": "interest/services/tailor_sew/curtain_service",
+   "parent": "interest/services/tailor_sew",
+   "name": {
+    "zh": "窗帘安装",
+    "vi": "Lắp rèm cửa",
+    "en": "Curtain Install"
+   },
+   "keywords": [
+    "装窗帘",
+    "curtain install",
+    "treo thanh rèm",
+    "rèm ngắn sửa",
+    "móc rèm rơi"
+   ]
+  },
+  {
+   "id": "interest/services/print_admin",
+   "parent": "interest/services",
+   "name": {
+    "zh": "打印与证件",
+    "vi": "Quán in",
+    "en": "Print & Docs"
+   },
+   "keywords": [
+    "打印店",
+    "print shop help",
+    "in ấn giấy tờ",
+    "photo hồ sơ",
+    "quán photocopy"
+   ]
+  },
+  {
+   "id": "interest/services/print_admin/print_copy",
+   "parent": "interest/services/print_admin",
+   "name": {
+    "zh": "打印复印",
+    "vi": "In tài liệu",
+    "en": "Printing & Copies"
+   },
+   "keywords": [
+    "打印复印",
+    "printing service",
+    "sao chụp giấy",
+    "in hai mặt",
+    "file in gấp"
+   ]
+  },
+  {
+   "id": "interest/services/print_admin/id_photo",
+   "parent": "interest/services/print_admin",
+   "name": {
+    "zh": "证件照",
+    "vi": "Chụp ảnh thẻ",
+    "en": "ID Photos"
+   },
+   "keywords": [
+    "id photo service",
+    "lấy ảnh ngay",
+    "nền trắng đổi",
+    "kích thước ảnh thẻ"
+   ]
+  },
+  {
+   "id": "interest/services/print_admin/laminate",
+   "parent": "interest/services/print_admin",
+   "name": {
+    "zh": "塑封卡证",
+    "vi": "Ép plastic",
+    "en": "Lamination"
+   },
+   "keywords": [
+    "塑封",
+    "lamination",
+    "bìa ép",
+    "tem ép",
+    "card cán"
+   ]
+  },
+  {
+   "id": "interest/services/print_admin/thesis_bind",
+   "parent": "interest/services/print_admin",
+   "name": {
+    "zh": "论文装订",
+    "vi": "In luận văn",
+    "en": "Thesis Printing"
+   },
+   "keywords": [
+    "论文打印",
+    "thesis printing",
+    "đóng bìa luận văn",
+    "slide nộp",
+    "báo cáo in"
+   ]
+  },
+  {
+   "id": "interest/services/print_admin/doc_translate",
+   "parent": "interest/services/print_admin",
+   "name": {
+    "zh": "文件翻译",
+    "vi": "Dịch hồ sơ",
+    "en": "Document Translation"
+   },
+   "keywords": [
+    "文件翻译",
+    "document translation",
+    "bản dịch nộp",
+    "dịch có dấu",
+    "song ngữ giấy"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer",
+   "parent": "interest/services",
+   "name": {
+    "zh": "新到城市协助",
+    "vi": "Hỗ trợ người mới",
+    "en": "Settling In"
+   },
+   "keywords": [
+    "新到城市",
+    "settling help",
+    "định cư phố",
+    "hòa nhập khu",
+    "người mới đến"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer/airport_pickup",
+   "parent": "interest/services/newcomer",
+   "name": {
+    "zh": "接站接机",
+    "vi": "Đón sân bay",
+    "en": "Station Pickup"
+   },
+   "keywords": [
+    "接机",
+    "station pickup",
+    "xe đón ga",
+    "chở về nhà",
+    "bảng tên đón"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer/flat_view",
+   "parent": "interest/services/newcomer",
+   "name": {
+    "zh": "陪看房",
+    "vi": "Xem nhà cho thuê",
+    "en": "Rental Viewing"
+   },
+   "keywords": [
+    "陪看房",
+    "rental viewing",
+    "nhà trống xem",
+    "chủ nhà gặp",
+    "giá thuê hỏi"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer/sim_setup",
+   "parent": "interest/services/newcomer",
+   "name": {
+    "zh": "办电话卡",
+    "vi": "Mở sim chính chủ",
+    "en": "SIM Activation"
+   },
+   "keywords": [
+    "办电话卡",
+    "sim activation",
+    "chụp giấy tờ sim",
+    "định danh thuê bao"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer/bank_open",
+   "parent": "interest/services/newcomer",
+   "name": {
+    "zh": "开银行账户",
+    "vi": "Mở tài khoản ngân hàng",
+    "en": "Bank Account Help"
+   },
+   "keywords": [
+    "开银行账户",
+    "bank account help",
+    "kyc làm",
+    "thẻ atm nhận",
+    "quầy ngân hàng"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer/utility_open",
+   "parent": "interest/services/newcomer",
+   "name": {
+    "zh": "水电开户",
+    "vi": "Mở đồng hồ điện nước",
+    "en": "Utility Signup"
+   },
+   "keywords": [
+    "水电开户",
+    "utility signup",
+    "đồng hồ điện đứng tên",
+    "nước sạch mở",
+    "sang tên đồng hồ"
+   ]
+  },
+  {
+   "id": "interest/services/newcomer/city_orientation",
+   "parent": "interest/services/newcomer",
+   "name": {
+    "zh": "带熟悉街区",
+    "vi": "Dẫn đi quanh khu",
+    "en": "Neighborhood Orientation"
+   },
+   "keywords": [
+    "熟悉街区",
+    "neighborhood orientation",
+    "chỉ quán gần",
+    "đi bộ quanh phố",
+    "siêu thị gần"
+   ]
+  },
+  {
+   "id": "interest/services/vehicle_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "道路车辆协助",
+    "vi": "Trợ giúp đường",
+    "en": "Roadside Help"
+   },
+   "keywords": [
+    "道路救援",
+    "roadside help",
+    "xe hỏng giữa đường",
+    "gọi cứu hộ",
+    "hỗ trợ lái"
+   ]
+  },
+  {
+   "id": "interest/services/vehicle_help/flat_tyre",
+   "parent": "interest/services/vehicle_help",
+   "name": {
+    "zh": "补胎",
+    "vi": "Vá lốp lưu động",
+    "en": "Flat Tyre Fix"
+   },
+   "keywords": [
+    "补胎",
+    "flat tyre fix",
+    "ruột xe thay",
+    "bổ xe ven đường",
+    "lốp non hơi"
+   ]
+  },
+  {
+   "id": "interest/services/vehicle_help/jump_start",
+   "parent": "interest/services/vehicle_help",
+   "name": {
+    "zh": "搭电启动",
+    "vi": "Cứu ắc quy",
+    "en": "Jump Start"
+   },
+   "keywords": [
+    "搭电",
+    "jump start",
+    "đề không nổ",
+    "bình yếu câu",
+    "kẹp accu"
+   ]
+  },
+  {
+   "id": "interest/services/vehicle_help/mobile_wash",
+   "parent": "interest/services/vehicle_help",
+   "name": {
+    "zh": "上门洗车",
+    "vi": "Rửa xe tại nhà",
+    "en": "Mobile Car Wash"
+   },
+   "keywords": [
+    "上门洗车",
+    "mobile car wash",
+    "bọt tuyết rửa",
+    "xe hút bụi nội",
+    "đánh bóng xe"
+   ]
+  },
+  {
+   "id": "interest/services/vehicle_help/bike_fix",
+   "parent": "interest/services/vehicle_help",
+   "name": {
+    "zh": "修自行车",
+    "vi": "Sửa xe đạp",
+    "en": "Bike Repair"
+   },
+   "keywords": [
+    "修自行车",
+    "bike repair",
+    "thay săm",
+    "xích tra dầu",
+    "phanh chỉnh"
+   ]
+  },
+  {
+   "id": "interest/services/vehicle_help/inspection",
+   "parent": "interest/services/vehicle_help",
+   "name": {
+    "zh": "年检代办",
+    "vi": "Đăng kiểm xe",
+    "en": "Vehicle Inspection"
+   },
+   "keywords": [
+    "vehicle inspection",
+    "đăng kiểm xe",
+    "gia hạn đăng kiểm",
+    "đưa xe đi kiểm"
+   ]
+  },
+  {
+   "id": "interest/services/event_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "活动协助",
+    "vi": "Hỗ trợ sự kiện",
+    "en": "Event Help"
+   },
+   "keywords": [
+    "活动协助",
+    "event help",
+    "ban tổ chức",
+    "chạy chương trình",
+    "người hỗ trợ buổi"
+   ]
+  },
+  {
+   "id": "interest/services/event_help/event_setup",
+   "parent": "interest/services/event_help",
+   "name": {
+    "zh": "场地布置",
+    "vi": "Trang trí sân khấu",
+    "en": "Venue Setup"
+   },
+   "keywords": [
+    "布置场地",
+    "venue setup",
+    "bàn tiệc xếp",
+    "backdrop dựng",
+    "sân khấu lắp"
+   ]
+  },
+  {
+   "id": "interest/services/event_help/event_staff",
+   "parent": "interest/services/event_help",
+   "name": {
+    "zh": "临时人手",
+    "vi": "Nhân viên thời vụ",
+    "en": "Event Staffing"
+   },
+   "keywords": [
+    "临时工",
+    "event staffing",
+    "xếp vé phát",
+    "dọn sau tiệc",
+    "phụ tiệc"
+   ]
+  },
+  {
+   "id": "interest/services/event_help/wedding_help",
+   "parent": "interest/services/event_help",
+   "name": {
+    "zh": "婚礼帮手",
+    "vi": "Phụ đám cưới",
+    "en": "Wedding Helper"
+   },
+   "keywords": [
+    "婚礼帮忙",
+    "wedding helper",
+    "quà cưới mang",
+    "bưng quả giúp",
+    "xếp bàn tiệc cưới"
+   ]
+  },
+  {
+   "id": "interest/services/event_help/group_booking",
+   "parent": "interest/services/event_help",
+   "name": {
+    "zh": "团体预订协助",
+    "vi": "Đặt chỗ nhóm",
+    "en": "Group Booking"
+   },
+   "keywords": [
+    "团体预订",
+    "group booking help",
+    "xe đoàn đặt",
+    "phòng nhóm giữ",
+    "danh sách người dự"
+   ]
+  },
+  {
+   "id": "interest/services/food_help",
+   "parent": "interest/services",
+   "name": {
+    "zh": "餐食到家",
+    "vi": "Dịch vụ bữa ăn",
+    "en": "Meal Services"
+   },
+   "keywords": [
+    "餐食到家",
+    "meal service",
+    "bữa cơm đặt",
+    "nấu tại nhà",
+    "đặt mâm"
+   ]
+  },
+  {
+   "id": "interest/services/food_help/home_cook",
+   "parent": "interest/services/food_help",
+   "name": {
+    "zh": "上门做饭",
+    "vi": "Đầu bếp tại nhà",
+    "en": "Private Home Cook"
+   },
+   "keywords": [
+    "上门做饭",
+    "private cook",
+    "nấu cơm hộ",
+    "dọn mâm cơm",
+    "đi chợ nấu cùng"
+   ]
+  },
+  {
+   "id": "interest/services/food_help/catering",
+   "parent": "interest/services/food_help",
+   "name": {
+    "zh": "酒席包桌",
+    "vi": "Đặt cỗ mang về",
+    "en": "Party Catering"
+   },
+   "keywords": [
+    "酒席",
+    "party catering",
+    "mâm cỗ thuê",
+    "tiệc công ty đặt",
+    "nồi lẩu thuê"
+   ]
+  }
+ ]
+}

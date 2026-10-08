@@ -1,0 +1,932 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/family/baby",
+   "parent": "interest/family",
+   "name": {
+    "zh": "婴幼儿照护",
+    "vi": "Chăm sóc bé",
+    "en": "Baby Care"
+   },
+   "keywords": [
+    "婴幼儿",
+    "chăm bé",
+    "baby care",
+    "bé sơ sinh",
+    "chăm con nhỏ"
+   ]
+  },
+  {
+   "id": "interest/family/baby/newborn",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "新生儿",
+    "vi": "Sơ sinh",
+    "en": "Newborn"
+   },
+   "keywords": [
+    "新生儿",
+    "sơ sinh",
+    "newborn",
+    "chăm bé mới đẻ",
+    "tuần đầu của bé"
+   ]
+  },
+  {
+   "id": "interest/family/baby/breastfeed",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "母乳喂养",
+    "vi": "Nuôi con bằng sữa mẹ",
+    "en": "Breastfeeding"
+   },
+   "keywords": [
+    "母乳",
+    "sữa mẹ",
+    "bú mẹ",
+    "breastfeeding",
+    "cai sữa"
+   ]
+  },
+  {
+   "id": "interest/family/baby/bottle",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "奶瓶喂养",
+    "vi": "Bình sữa",
+    "en": "Bottle Feeding"
+   },
+   "keywords": [
+    "奶瓶",
+    "pha sữa",
+    "sữa công thức",
+    "tiệt bình",
+    "đong sữa"
+   ]
+  },
+  {
+   "id": "interest/family/baby/diaper",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "尿布护理",
+    "vi": "Thay tã",
+    "en": "Diaper Care"
+   },
+   "keywords": [
+    "尿布",
+    "bỉm",
+    "tã giấy",
+    "thay bỉm",
+    "chăm mông bé"
+   ]
+  },
+  {
+   "id": "interest/family/baby/bath",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "给宝宝洗澡",
+    "vi": "Tắm cho bé",
+    "en": "Baby Bath"
+   },
+   "keywords": [
+    "洗澡",
+    "tắm nắng",
+    "chăm da bé",
+    "tắm gội bé",
+    "lau người bé"
+   ]
+  },
+  {
+   "id": "interest/family/baby/sleep",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "婴儿睡眠",
+    "vi": "Giấc ngủ của bé",
+    "en": "Baby Sleep"
+   },
+   "keywords": [
+    "婴儿睡眠",
+    "ru bé",
+    "ngủ xuyên giấc",
+    "giấc đêm",
+    "bé ngủ ngày"
+   ]
+  },
+  {
+   "id": "interest/family/baby/crawl",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "学爬学走",
+    "vi": "Bé bò và đi",
+    "en": "Crawling & Walking"
+   },
+   "keywords": [
+    "学爬",
+    "bé tập bò",
+    "tập đi",
+    "lật",
+    "ngồi vững"
+   ]
+  },
+  {
+   "id": "interest/family/baby/talk",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "开口说话",
+    "vi": "Bé bập bẹ",
+    "en": "First Words"
+   },
+   "keywords": [
+    "说话",
+    "bập bẹ",
+    "first words",
+    "bé gọi mẹ",
+    "chậm nói"
+   ]
+  },
+  {
+   "id": "interest/family/baby/tooth",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "长牙期",
+    "vi": "Mọc răng sữa",
+    "en": "Teething"
+   },
+   "keywords": [
+    "长牙",
+    "mọc răng sữa",
+    "gặm nướu",
+    "sốt mọc răng",
+    "chải nướu"
+   ]
+  },
+  {
+   "id": "interest/family/baby/wean",
+   "parent": "interest/family/baby",
+   "name": {
+    "zh": "辅食添加",
+    "vi": "Ăn dặm",
+    "en": "Weaning"
+   },
+   "keywords": [
+    "辅食",
+    "ăn dặm",
+    "weaning",
+    "bé tập ăn",
+    "thực phẩm băm"
+   ]
+  },
+  {
+   "id": "interest/family/play",
+   "parent": "interest/family",
+   "name": {
+    "zh": "亲子玩乐",
+    "vi": "Chơi cùng con",
+    "en": "Parent-Child Play"
+   },
+   "keywords": [
+    "带娃玩",
+    "chơi cùng con",
+    "parent child play",
+    "cuối tuần với bé",
+    "hoạt động cho bé"
+   ]
+  },
+  {
+   "id": "interest/family/play/playground",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "小区游乐场",
+    "vi": "Khu vui chơi",
+    "en": "Playground"
+   },
+   "keywords": [
+    "游乐场",
+    "khu vui chơi",
+    "playground",
+    "cầu trượt",
+    "đu quay"
+   ]
+  },
+  {
+   "id": "interest/family/play/indoor_play",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "室内乐园",
+    "vi": "Khu chơi trong nhà",
+    "en": "Indoor Play"
+   },
+   "keywords": [
+    "室内乐园",
+    "nhà liên hoàn",
+    "slide trong nhà",
+    "bóng bi",
+    "khu chơi lạnh"
+   ]
+  },
+  {
+   "id": "interest/family/play/theme_park",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "主题公园",
+    "vi": "Công viên chủ đề",
+    "en": "Theme Park"
+   },
+   "keywords": [
+    "主题公园",
+    "công viên chủ đề",
+    "theme park",
+    "trò chơi mạnh",
+    "vào cửa bé"
+   ]
+  },
+  {
+   "id": "interest/family/play/board_game",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "亲子桌游",
+    "vi": "Board game gia đình",
+    "en": "Family Board Games"
+   },
+   "keywords": [
+    "桌游",
+    "board game",
+    "cờ cá ngựa",
+    "uno",
+    "xếp hình"
+   ]
+  },
+  {
+   "id": "interest/family/play/outdoor_kid",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "带孩子户外",
+    "vi": "Cho bé ra ngoài",
+    "en": "Outdoor With Kids"
+   },
+   "keywords": [
+    "带娃出门",
+    "cho bé đi chơi",
+    "dạo công viên",
+    "thảm trải",
+    "bé dạo phố"
+   ]
+  },
+  {
+   "id": "interest/family/play/kids_show",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "看儿童演出",
+    "vi": "Xem kịch cho bé",
+    "en": "Kids Shows"
+   },
+   "keywords": [
+    "儿童剧",
+    "kịch cho bé",
+    "xiếc",
+    "rối",
+    "suất diễn cuối tuần"
+   ]
+  },
+  {
+   "id": "interest/family/play/water_play",
+   "parent": "interest/family/play",
+   "name": {
+    "zh": "戏水玩水",
+    "vi": "Chơi nước",
+    "en": "Water Play"
+   },
+   "keywords": [
+    "玩水",
+    "chơi nước",
+    "bể bơi trẻ em",
+    "vòi phun",
+    "đồ chơi nước"
+   ]
+  },
+  {
+   "id": "interest/family/learn",
+   "parent": "interest/family",
+   "name": {
+    "zh": "启蒙培养",
+    "vi": "Bé học hỏi",
+    "en": "Early Learning"
+   },
+   "keywords": [
+    "启蒙",
+    "bé học",
+    "khám phá thế giới",
+    "启智",
+    "dạy bé"
+   ]
+  },
+  {
+   "id": "interest/family/learn/montessori",
+   "parent": "interest/family/learn",
+   "name": {
+    "zh": "蒙氏教育",
+    "vi": "Phương pháp Montessori",
+    "en": "Montessori"
+   },
+   "keywords": [
+    "蒙氏",
+    "montessori",
+    "giáo cụ montessori",
+    "tự lập sớm",
+    "bàn học bé"
+   ]
+  },
+  {
+   "id": "interest/family/learn/numbers",
+   "parent": "interest/family/learn",
+   "name": {
+    "zh": "数数与拼读",
+    "vi": "Đếm và chữ cái",
+    "en": "Numbers & Letters"
+   },
+   "keywords": [
+    "数数",
+    "bảng chữ cái",
+    "ghép chữ",
+    "đếm ngón tay",
+    "hát chữ"
+   ]
+  },
+  {
+   "id": "interest/family/learn/read_aloud",
+   "parent": "interest/family/learn",
+   "name": {
+    "zh": "绘本共读",
+    "vi": "Đọc cùng con",
+    "en": "Read Aloud"
+   },
+   "keywords": [
+    "绘本",
+    "đọc cùng con",
+    "truyện tranh bé",
+    "read aloud",
+    "giọng đọc buổi tối"
+   ]
+  },
+  {
+   "id": "interest/family/learn/talent_class",
+   "parent": "interest/family/learn",
+   "name": {
+    "zh": "兴趣班选择",
+    "vi": "Chọn lớp cho con",
+    "en": "Choosing Classes"
+   },
+   "keywords": [
+    "选班",
+    "chọn lớp",
+    "lớp cuối tuần",
+    "năng khiếu sớm",
+    "học phí lớp bé"
+   ]
+  },
+  {
+   "id": "interest/family/learn/swim_kid",
+   "parent": "interest/family/learn",
+   "name": {
+    "zh": "少儿学游泳",
+    "vi": "Bé học bơi",
+    "en": "Kids Swimming"
+   },
+   "keywords": [
+    "学游泳",
+    "học bơi",
+    "lớp bơi trẻ em",
+    "phao tập bơi",
+    "khóa bơi"
+   ]
+  },
+  {
+   "id": "interest/family/learn/kids_art",
+   "parent": "interest/family/learn",
+   "name": {
+    "zh": "少儿画画",
+    "vi": "Bé vẽ",
+    "en": "Kids Art"
+   },
+   "keywords": [
+    "画画",
+    "tô màu",
+    "màu sáp",
+    "nặn đất",
+    "vẽ phấn"
+   ]
+  },
+  {
+   "id": "interest/family/school",
+   "parent": "interest/family",
+   "name": {
+    "zh": "上学准备",
+    "vi": "Vào lớp",
+    "en": "School Start"
+   },
+   "keywords": [
+    "入园",
+    "vào lớp",
+    "ngày đầu đi học",
+    "chuẩn bị đi học",
+    "đồ dùng đến lớp"
+   ]
+  },
+  {
+   "id": "interest/family/school/daycare",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "托班与幼儿园",
+    "vi": "Nhà trẻ",
+    "en": "Daycare"
+   },
+   "keywords": [
+    "托班",
+    "gửi trẻ",
+    "giữ trẻ theo giờ",
+    "nhóm trẻ tư",
+    "danh sách gửi"
+   ]
+  },
+  {
+   "id": "interest/family/school/primary",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "小学阶段",
+    "vi": "Tiểu học",
+    "en": "Primary School"
+   },
+   "keywords": [
+    "小学",
+    "tiểu học",
+    "lớp một",
+    "trường gần nhà",
+    "bán trú"
+   ]
+  },
+  {
+   "id": "interest/family/school/enroll",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "入学申请",
+    "vi": "Tuyển sinh",
+    "en": "Enrollment"
+   },
+   "keywords": [
+    "入学",
+    "tuyển sinh",
+    "hồ sơ nhập học",
+    "xin trường",
+    "suất học"
+   ]
+  },
+  {
+   "id": "interest/family/school/homework_help",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "作业辅导",
+    "vi": "Kèm cặp bài vở",
+    "en": "Homework Help"
+   },
+   "keywords": [
+    "作业",
+    "làm bài về nhà",
+    "kèm cặp",
+    "hướng dẫn con học",
+    "bàn học buổi tối"
+   ]
+  },
+  {
+   "id": "interest/family/school/parent_meeting",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "家长会",
+    "vi": "Họp lớp",
+    "en": "Class Meeting"
+   },
+   "keywords": [
+    "家长会",
+    "họp lớp",
+    "giáo viên chủ nhiệm",
+    "sổ liên lạc",
+    "cuối kỳ"
+   ]
+  },
+  {
+   "id": "interest/family/school/exam",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "升学考试",
+    "vi": "Thi chuyển cấp",
+    "en": "Entrance Exams"
+   },
+   "keywords": [
+    "升学",
+    "thi chuyển cấp",
+    "vào lớp 10",
+    "điểm chuẩn",
+    "ôn vào lớp"
+   ]
+  },
+  {
+   "id": "interest/family/school/supplies",
+   "parent": "interest/family/school",
+   "name": {
+    "zh": "文具准备",
+    "vi": "Đồ dùng học tập",
+    "en": "School Supplies"
+   },
+   "keywords": [
+    "文具",
+    "bút viết",
+    "vở ô ly",
+    "cặp sách",
+    "gọt chì"
+   ]
+  },
+  {
+   "id": "interest/family/parent",
+   "parent": "interest/family",
+   "name": {
+    "zh": "家长生活",
+    "vi": "Chuyện của bố mẹ",
+    "en": "Parents Life"
+   },
+   "keywords": [
+    "家长",
+    "bố mẹ",
+    "parents",
+    "làm cha mẹ",
+    "gia đình nhỏ"
+   ]
+  },
+  {
+   "id": "interest/family/parent/mom_group",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "妈妈群",
+    "vi": "Hội mẹ bỉm",
+    "en": "Moms Group"
+   },
+   "keywords": [
+    "妈妈群",
+    "mẹ bỉm",
+    "hội mẹ",
+    "bỉm sữa",
+    "chia sẻ chăm con"
+   ]
+  },
+  {
+   "id": "interest/family/parent/dad_role",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "爸爸带娃",
+    "vi": "Bố trông con",
+    "en": "Dads Parenting"
+   },
+   "keywords": [
+    "爸爸带娃",
+    "bố trông con",
+    "chơi với bố",
+    "hai bố con",
+    "bám bố"
+   ]
+  },
+  {
+   "id": "interest/family/parent/grandparents",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "隔代抚养",
+    "vi": "Ông bà trông cháu",
+    "en": "Grandparents"
+   },
+   "keywords": [
+    "隔代",
+    "ông bà trông",
+    "nuôi cháu",
+    "ý kiến ông bà",
+    "giúp việc trông trẻ"
+   ]
+  },
+  {
+   "id": "interest/family/parent/second_child",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "二胎家庭",
+    "vi": "Nhà có hai con",
+    "en": "Second Child"
+   },
+   "keywords": [
+    "二胎",
+    "sinh thêm bé",
+    "hai con",
+    "bé lớn ghen tị",
+    "cách bảo bé lớn"
+   ]
+  },
+  {
+   "id": "interest/family/parent/teen",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "青春期沟通",
+    "vi": "Tuổi teen",
+    "en": "Teen Parenting"
+   },
+   "keywords": [
+    "青春期",
+    "con lớn",
+    "khó bảo",
+    "góc teen",
+    "nói với con"
+   ]
+  },
+  {
+   "id": "interest/family/parent/working_parent",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "边工作边带娃",
+    "vi": "Vừa làm vừa trông con",
+    "en": "Working Parents"
+   },
+   "keywords": [
+    "带娃上班",
+    "giờ đưa đón",
+    "người đón con",
+    "gửi buổi tối",
+    "cân bằng tổ ấm"
+   ]
+  },
+  {
+   "id": "interest/family/parent/advice",
+   "parent": "interest/family/parent",
+   "name": {
+    "zh": "育儿经验交流",
+    "vi": "Hỏi kinh nghiệm",
+    "en": "Parenting Advice"
+   },
+   "keywords": [
+    "育儿",
+    "kinh nghiệm chăm con",
+    "hỏi mẹ",
+    "cách dạy bé",
+    "sai lầm khi dạy"
+   ]
+  },
+  {
+   "id": "interest/family/goods",
+   "parent": "interest/family",
+   "name": {
+    "zh": "母婴用品",
+    "vi": "Đồ cho mẹ và bé",
+    "en": "Baby & Kids Goods"
+   },
+   "keywords": [
+    "đồ cho bé",
+    "mua đồ em bé",
+    "baby goods",
+    "thanh lý đồ bé"
+   ]
+  },
+  {
+   "id": "interest/family/goods/stroller",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "婴儿车",
+    "vi": "Xe đẩy",
+    "en": "Stroller"
+   },
+   "keywords": [
+    "婴儿车",
+    "xe đẩy",
+    "gấp xe đẩy",
+    "túi treo xe",
+    "nôi"
+   ]
+  },
+  {
+   "id": "interest/family/goods/carrier",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "背带腰凳",
+    "vi": "Địu và ghế ngồi",
+    "en": "Baby Carrier"
+   },
+   "keywords": [
+    "背带",
+    "địu",
+    "địu chéo",
+    "ẵm bé",
+    "đai ngồi"
+   ]
+  },
+  {
+   "id": "interest/family/goods/high_chair",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "餐椅与餐具",
+    "vi": "Ghế ăn dặm",
+    "en": "High Chair"
+   },
+   "keywords": [
+    "餐椅",
+    "ghế ăn dặm",
+    "khay ăn",
+    "yếm ăn",
+    "ghế rung"
+   ]
+  },
+  {
+   "id": "interest/family/goods/toys",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "玩具",
+    "vi": "Đồ chơi",
+    "en": "Toys"
+   },
+   "keywords": [
+    "玩具",
+    "lego",
+    "búp bê",
+    "ô tô đồ chơi",
+    "sáp nặn"
+   ]
+  },
+  {
+   "id": "interest/family/goods/kids_clothes",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "童装童鞋",
+    "vi": "Quần áo trẻ em",
+    "en": "Kids Clothes"
+   },
+   "keywords": [
+    "童装",
+    "size bé",
+    "áo thun trẻ em",
+    "giày trẻ em",
+    "quần áo cũ của bé"
+   ]
+  },
+  {
+   "id": "interest/family/goods/safety",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "居家安全",
+    "vi": "An toàn cho bé",
+    "en": "Child Safety"
+   },
+   "keywords": [
+    "防意外",
+    "chốt chặn",
+    "góc bàn mềm",
+    "ổ điện trẻ em",
+    "hộp khóa tủ"
+   ]
+  },
+  {
+   "id": "interest/family/goods/baby_toiletries",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "宝宝护理品",
+    "vi": "Đồ chăm da bé",
+    "en": "Baby Toiletries"
+   },
+   "keywords": [
+    "护臀",
+    "kem hăm",
+    "dầu tràm",
+    "phấn rôm",
+    "nước muối sinh lý"
+   ]
+  },
+  {
+   "id": "interest/family/goods/maternity",
+   "parent": "interest/family/goods",
+   "name": {
+    "zh": "待产与产后",
+    "vi": "Đồ đi sinh",
+    "en": "Maternity Prep"
+   },
+   "keywords": [
+    "待产",
+    "đồ đi sinh",
+    "sau sinh",
+    "váy bầu",
+    "khám sau sinh"
+   ]
+  },
+  {
+   "id": "interest/family/events",
+   "parent": "interest/family",
+   "name": {
+    "zh": "家庭仪式",
+    "vi": "Mốc của gia đình",
+    "en": "Family Milestones"
+   },
+   "keywords": [
+    "家庭日",
+    "mốc của bé",
+    "kỷ niệm nhà",
+    "family day",
+    "ngày của nhà"
+   ]
+  },
+  {
+   "id": "interest/family/events/milestone",
+   "parent": "interest/family/events",
+   "name": {
+    "zh": "满月与百日",
+    "vi": "Đầy tháng và thôi nôi",
+    "en": "Baby Milestones"
+   },
+   "keywords": [
+    "满月",
+    "百日",
+    "đầy tháng",
+    "thôi nôi",
+    "mừng một tuổi"
+   ]
+  },
+  {
+   "id": "interest/family/events/kids_birthday",
+   "parent": "interest/family/events",
+   "name": {
+    "zh": "儿童生日会",
+    "vi": "Tiệc sinh nhật bé",
+    "en": "Kids Birthday"
+   },
+   "keywords": [
+    "生日会",
+    "tiệc cho bé",
+    "bong bóng số",
+    "quà cho bé",
+    "bánh sinh nhật bé"
+   ]
+  },
+  {
+   "id": "interest/family/events/first_day",
+   "parent": "interest/family/events",
+   "name": {
+    "zh": "开学日",
+    "vi": "Ngày khai giảng",
+    "en": "First Day Of School"
+   },
+   "keywords": [
+    "开学",
+    "ngày khai giảng",
+    "áo trắng mới",
+    "ảnh ngày đầu",
+    "chào cờ"
+   ]
+  },
+  {
+   "id": "interest/family/events/family_trip",
+   "parent": "interest/family/events",
+   "name": {
+    "zh": "全家出游",
+    "vi": "Đi cùng cả nhà",
+    "en": "Family Trips"
+   },
+   "keywords": [
+    "全家游",
+    "đi cùng cả nhà",
+    "cho con đi chơi xa",
+    "mang gì cho bé",
+    "bế đi tàu xe"
+   ]
+  },
+  {
+   "id": "interest/family/events/family_meal",
+   "parent": "interest/family/events",
+   "name": {
+    "zh": "家庭聚餐",
+    "vi": "Bữa cơm gia đình",
+    "en": "Family Meals"
+   },
+   "keywords": [
+    "家庭聚餐",
+    "bữa cơm nhà",
+    "món cho bé",
+    "ăn cùng bố mẹ",
+    "nồi cháo của con"
+   ]
+  },
+  {
+   "id": "interest/family/events/growth_photo",
+   "parent": "interest/family/events",
+   "name": {
+    "zh": "成长记录",
+    "vi": "Ảnh lớn lên của bé",
+    "en": "Growth Photos"
+   },
+   "keywords": [
+    "成长记录",
+    "chụp ảnh bé",
+    "ảnh mốc",
+    "album bé",
+    "ghi lại từng tháng"
+   ]
+  }
+ ]
+}

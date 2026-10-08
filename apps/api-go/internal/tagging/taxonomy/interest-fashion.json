@@ -1,0 +1,1010 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/fashion/style",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "穿搭风格",
+    "vi": "Phong cách phối đồ",
+    "en": "Style & Outfits"
+   },
+   "keywords": [
+    "穿搭",
+    "phối đồ",
+    "style",
+    "ootd",
+    "cách mặc đẹp"
+   ]
+  },
+  {
+   "id": "interest/fashion/style/office_wear",
+   "parent": "interest/fashion/style",
+   "name": {
+    "zh": "通勤上班装",
+    "vi": "Đồ công sở",
+    "en": "Office Wear"
+   },
+   "keywords": [
+    "通勤穿搭",
+    "đồ công sở",
+    "sơ mi công sở",
+    "chân váy bút chì",
+    "office outfit"
+   ]
+  },
+  {
+   "id": "interest/fashion/style/streetwear",
+   "parent": "interest/fashion/style",
+   "name": {
+    "zh": "街头风",
+    "vi": "Đồ streetwear",
+    "en": "Streetwear"
+   },
+   "keywords": [
+    "街头风",
+    "street style",
+    "áo oversize",
+    "quần ống rộng",
+    "đồ đường phố"
+   ]
+  },
+  {
+   "id": "interest/fashion/style/korean_look",
+   "parent": "interest/fashion/style",
+   "name": {
+    "zh": "韩系穿搭",
+    "vi": "Phong cách Hàn",
+    "en": "Korean Look"
+   },
+   "keywords": [
+    "韩系",
+    "phong cách hàn",
+    "váy hàn quốc",
+    "kiểu hàn",
+    "han style"
+   ]
+  },
+  {
+   "id": "interest/fashion/style/minimal_wardrobe",
+   "parent": "interest/fashion/style",
+   "name": {
+    "zh": "基础衣橱",
+    "vi": "Tủ đồ cơ bản",
+    "en": "Capsule Wardrobe"
+   },
+   "keywords": [
+    "基础款",
+    "tủ đồ cơ bản",
+    "màu trung tính",
+    "ít món mặc kỹ",
+    "capsule wardrobe"
+   ]
+  },
+  {
+   "id": "interest/fashion/style/vintage_look",
+   "parent": "interest/fashion/style",
+   "name": {
+    "zh": "复古风",
+    "vi": "Đồ vintage",
+    "en": "Vintage Look"
+   },
+   "keywords": [
+    "复古风",
+    "vintage",
+    "đồ kiểu cũ",
+    "retro style",
+    "áo hoài cổ"
+   ]
+  },
+  {
+   "id": "interest/fashion/style/ootd_shoot",
+   "parent": "interest/fashion/style",
+   "name": {
+    "zh": "晒穿搭",
+    "vi": "Chụp outfit",
+    "en": "Outfit Photos"
+   },
+   "keywords": [
+    "晒穿搭",
+    "chụp outfit",
+    "bộ ảnh mặc",
+    "换装记录",
+    "fit check"
+   ]
+  },
+  {
+   "id": "interest/fashion/womens_wear",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "女装",
+    "vi": "Quần áo nữ",
+    "en": "Womenswear"
+   },
+   "keywords": [
+    "女装",
+    "quần áo nữ",
+    "đồ nữ",
+    "womenswear",
+    "shop nữ"
+   ]
+  },
+  {
+   "id": "interest/fashion/womens_wear/dress",
+   "parent": "interest/fashion/womens_wear",
+   "name": {
+    "zh": "连衣裙",
+    "vi": "Váy liền",
+    "en": "Dresses"
+   },
+   "keywords": [
+    "连衣裙",
+    "váy liền",
+    "đầm dạ hội",
+    "váy hoa",
+    "maxi dress"
+   ]
+  },
+  {
+   "id": "interest/fashion/womens_wear/skirt_top",
+   "parent": "interest/fashion/womens_wear",
+   "name": {
+    "zh": "半裙与上衣",
+    "vi": "Chân váy & áo",
+    "en": "Skirts & Tops"
+   },
+   "keywords": [
+    "半身裙",
+    "chân váy",
+    "áo hai dây",
+    "áo croptop",
+    "skirt and top"
+   ]
+  },
+  {
+   "id": "interest/fashion/womens_wear/knitwear",
+   "parent": "interest/fashion/womens_wear",
+   "name": {
+    "zh": "针织毛衣",
+    "vi": "Áo len",
+    "en": "Knitwear"
+   },
+   "keywords": [
+    "针织",
+    "áo len",
+    "len đan",
+    "cardigan",
+    "sweater"
+   ]
+  },
+  {
+   "id": "interest/fashion/womens_wear/winter_coat",
+   "parent": "interest/fashion/womens_wear",
+   "name": {
+    "zh": "冬装外套",
+    "vi": "Áo khoác mùa đông",
+    "en": "Winter Coats"
+   },
+   "keywords": [
+    "羽绒服",
+    "áo chống rét",
+    "áo phao",
+    "khoác dạ",
+    "winter coat"
+   ]
+  },
+  {
+   "id": "interest/fashion/womens_wear/ao_dai",
+   "parent": "interest/fashion/womens_wear",
+   "name": {
+    "zh": "奥黛新做",
+    "vi": "Áo dài cách tân",
+    "en": "Modern Áo Dài"
+   },
+   "keywords": [
+    "áo dài cách tân",
+    "áo dài dự tiệc",
+    "may đo áo dài",
+    "奥黛新式",
+    "thuê áo dài"
+   ]
+  },
+  {
+   "id": "interest/fashion/mens_wear",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "男装",
+    "vi": "Quần áo nam",
+    "en": "Menswear"
+   },
+   "keywords": [
+    "男装",
+    "quần áo nam",
+    "đồ nam",
+    "menswear",
+    "shop nam"
+   ]
+  },
+  {
+   "id": "interest/fashion/mens_wear/shirt",
+   "parent": "interest/fashion/mens_wear",
+   "name": {
+    "zh": "衬衫 Polo",
+    "vi": "Sơ mi & polo",
+    "en": "Shirts & Polos"
+   },
+   "keywords": [
+    "衬衫",
+    "sơ mi nam",
+    "áo polo",
+    "cộc tay nam",
+    "dress shirt"
+   ]
+  },
+  {
+   "id": "interest/fashion/mens_wear/jeans",
+   "parent": "interest/fashion/mens_wear",
+   "name": {
+    "zh": "牛仔裤",
+    "vi": "Quần jean",
+    "en": "Jeans"
+   },
+   "keywords": [
+    "牛仔裤",
+    "quần jean",
+    "quần kaki",
+    "ống suông",
+    "denim"
+   ]
+  },
+  {
+   "id": "interest/fashion/mens_wear/suit",
+   "parent": "interest/fashion/mens_wear",
+   "name": {
+    "zh": "西装",
+    "vi": "Bộ vest nam",
+    "en": "Suits"
+   },
+   "keywords": [
+    "西装",
+    "bộ vest",
+    "com lê",
+    "thợ may vest",
+    "suit"
+   ]
+  },
+  {
+   "id": "interest/fashion/footwear",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "鞋",
+    "vi": "Giày dép",
+    "en": "Footwear"
+   },
+   "keywords": [
+    "鞋子",
+    "giày dép",
+    "đi giày",
+    "footwear",
+    "cỡ giày"
+   ]
+  },
+  {
+   "id": "interest/fashion/footwear/sneakers",
+   "parent": "interest/fashion/footwear",
+   "name": {
+    "zh": "运动鞋收藏",
+    "vi": "Giày sneaker",
+    "en": "Sneakers"
+   },
+   "keywords": [
+    "运动鞋",
+    "sneaker",
+    "giày thể thao",
+    "hàng limited",
+    "sưu tầm giày"
+   ]
+  },
+  {
+   "id": "interest/fashion/footwear/heels",
+   "parent": "interest/fashion/footwear",
+   "name": {
+    "zh": "高跟鞋",
+    "vi": "Giày cao gót",
+    "en": "Heels"
+   },
+   "keywords": [
+    "高跟鞋",
+    "giày cao gót",
+    "sandal nữ",
+    "guốc",
+    "heel"
+   ]
+  },
+  {
+   "id": "interest/fashion/footwear/slides_loafers",
+   "parent": "interest/fashion/footwear",
+   "name": {
+    "zh": "拖鞋乐福鞋",
+    "vi": "Dép & giày lười",
+    "en": "Slides & Loafers"
+   },
+   "keywords": [
+    "拖鞋",
+    "dép quai ngang",
+    "giày lười",
+    "dép kẹp",
+    "loafer"
+   ]
+  },
+  {
+   "id": "interest/fashion/accessories",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "配饰",
+    "vi": "Phụ kiện",
+    "en": "Accessories"
+   },
+   "keywords": [
+    "配饰",
+    "phụ kiện",
+    "đồ trang sức",
+    "accessories",
+    "mũ nón"
+   ]
+  },
+  {
+   "id": "interest/fashion/accessories/bags",
+   "parent": "interest/fashion/accessories",
+   "name": {
+    "zh": "包袋",
+    "vi": "Túi xách",
+    "en": "Bags"
+   },
+   "keywords": [
+    "包袋",
+    "túi xách",
+    "túi đeo chéo",
+    "túi tote",
+    "ví da"
+   ]
+  },
+  {
+   "id": "interest/fashion/accessories/jewelry",
+   "parent": "interest/fashion/accessories",
+   "name": {
+    "zh": "首饰",
+    "vi": "Trang sức",
+    "en": "Jewelry"
+   },
+   "keywords": [
+    "首饰",
+    "mặt dây chuyền",
+    "vòng tay",
+    "nhẫn bạc",
+    "bông tai"
+   ]
+  },
+  {
+   "id": "interest/fashion/accessories/watch",
+   "parent": "interest/fashion/accessories",
+   "name": {
+    "zh": "腕表",
+    "vi": "Đồng hồ đeo tay",
+    "en": "Watches"
+   },
+   "keywords": [
+    "腕表",
+    "đồng hồ cơ",
+    "dây đồng hồ",
+    "watch collector",
+    "kim đồng hồ"
+   ]
+  },
+  {
+   "id": "interest/fashion/accessories/hats_scarves",
+   "parent": "interest/fashion/accessories",
+   "name": {
+    "zh": "帽子围巾",
+    "vi": "Mũ & khăn",
+    "en": "Hats & Scarves"
+   },
+   "keywords": [
+    "帽子",
+    "mũ lưỡi trai",
+    "khăn len",
+    "nón lá",
+    "beanie"
+   ]
+  },
+  {
+   "id": "interest/fashion/beauty",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "美妆",
+    "vi": "Trang điểm",
+    "en": "Makeup & Beauty"
+   },
+   "keywords": [
+    "美妆",
+    "化妆",
+    "trang điểm",
+    "makeup",
+    "mỹ phẩm"
+   ]
+  },
+  {
+   "id": "interest/fashion/beauty/daily_makeup",
+   "parent": "interest/fashion/beauty",
+   "name": {
+    "zh": "日常妆容",
+    "vi": "Trang điểm hằng ngày",
+    "en": "Daily Makeup"
+   },
+   "keywords": [
+    "日常妆",
+    "lớp nền",
+    "phấn phủ",
+    "cushion",
+    "makeup nhẹ"
+   ]
+  },
+  {
+   "id": "interest/fashion/beauty/lips_eyes",
+   "parent": "interest/fashion/beauty",
+   "name": {
+    "zh": "唇妆眼妆",
+    "vi": "Son & mắt",
+    "en": "Lips & Eyes"
+   },
+   "keywords": [
+    "口红",
+    "son kem",
+    "kẻ mắt",
+    "mascara",
+    "phấn mắt"
+   ]
+  },
+  {
+   "id": "interest/fashion/beauty/bridal_makeup",
+   "parent": "interest/fashion/beauty",
+   "name": {
+    "zh": "新娘妆",
+    "vi": "Trang điểm cô dâu",
+    "en": "Bridal Makeup"
+   },
+   "keywords": [
+    "新娘妆",
+    "thợ trang điểm cô dâu",
+    "makeup dự tiệc",
+    "bàn trang điểm",
+    "bridal makeup"
+   ]
+  },
+  {
+   "id": "interest/fashion/beauty/makeup_tools",
+   "parent": "interest/fashion/beauty",
+   "name": {
+    "zh": "化妆工具",
+    "vi": "Dụng cụ makeup",
+    "en": "Makeup Tools"
+   },
+   "keywords": [
+    "化妆刷",
+    "cọ trang điểm",
+    "bọt mút",
+    "gương đèn led",
+    "makeup brush"
+   ]
+  },
+  {
+   "id": "interest/fashion/skincare",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "护肤",
+    "vi": "Dưỡng da",
+    "en": "Skincare"
+   },
+   "keywords": [
+    "护肤",
+    "chăm sóc da",
+    "routine da",
+    "dưỡng ẩm"
+   ]
+  },
+  {
+   "id": "interest/fashion/skincare/cleanse_toner",
+   "parent": "interest/fashion/skincare",
+   "name": {
+    "zh": "清洁与爽肤",
+    "vi": "Rửa mặt & toner",
+    "en": "Cleansing & Toner"
+   },
+   "keywords": [
+    "洗面奶",
+    "tẩy trang",
+    "toner",
+    "sữa rửa mặt",
+    "bông tẩy trang"
+   ]
+  },
+  {
+   "id": "interest/fashion/skincare/serum_actives",
+   "parent": "interest/fashion/skincare",
+   "name": {
+    "zh": "精华成分",
+    "vi": "Serum & hoạt chất",
+    "en": "Serums & Actives"
+   },
+   "keywords": [
+    "精华",
+    "retinol",
+    "niacinamide",
+    "vitamin c",
+    "tretinoin"
+   ]
+  },
+  {
+   "id": "interest/fashion/skincare/acne_care",
+   "parent": "interest/fashion/skincare",
+   "name": {
+    "zh": "痘痘护理",
+    "vi": "Chăm da mụn",
+    "en": "Acne Care"
+   },
+   "keywords": [
+    "祛痘",
+    "mụn đầu đen",
+    "gel mụn",
+    "băng trị mụn",
+    "pimple patch"
+   ]
+  },
+  {
+   "id": "interest/fashion/skincare/sun_protection",
+   "parent": "interest/fashion/skincare",
+   "name": {
+    "zh": "防晒",
+    "vi": "Chống nắng",
+    "en": "Sun Care"
+   },
+   "keywords": [
+    "防晒",
+    "kem chống nắng",
+    "chỉ số spf",
+    "áo chống nắng",
+    "sunscreen"
+   ]
+  },
+  {
+   "id": "interest/fashion/skincare/mask_scent",
+   "parent": "interest/fashion/skincare",
+   "name": {
+    "zh": "面膜与香水",
+    "vi": "Mặt nạ & nước hoa",
+    "en": "Masks & Fragrance"
+   },
+   "keywords": [
+    "面膜",
+    "xịt khoáng",
+    "nước hoa",
+    "lưu hương"
+   ]
+  },
+  {
+   "id": "interest/fashion/hair_nails",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "美发与美甲",
+    "vi": "Tóc & móng",
+    "en": "Hair & Nails"
+   },
+   "keywords": [
+    "美发",
+    "làm tóc",
+    "nail",
+    "salon tóc",
+    "móng tay"
+   ]
+  },
+  {
+   "id": "interest/fashion/hair_nails/hair_style",
+   "parent": "interest/fashion/hair_nails",
+   "name": {
+    "zh": "剪发造型",
+    "vi": "Tạo kiểu tóc",
+    "en": "Hair Styling"
+   },
+   "keywords": [
+    "剪发",
+    "tóc layer",
+    "uốn cụp",
+    "cắt tóc nam",
+    "kiểu tóc nữ"
+   ]
+  },
+  {
+   "id": "interest/fashion/hair_nails/hair_color",
+   "parent": "interest/fashion/hair_nails",
+   "name": {
+    "zh": "染发",
+    "vi": "Nhuộm tóc",
+    "en": "Hair Color"
+   },
+   "keywords": [
+    "染发",
+    "thuốc nhuộm",
+    "tóc highlight",
+    "nâng tone tóc",
+    "hair color"
+   ]
+  },
+  {
+   "id": "interest/fashion/hair_nails/nail_art",
+   "parent": "interest/fashion/hair_nails",
+   "name": {
+    "zh": "美甲",
+    "vi": "Làm móng nghệ thuật",
+    "en": "Nail Art"
+   },
+   "keywords": [
+    "美甲",
+    "sơn móng",
+    "nail gel",
+    "móng giả",
+    "vẽ móng"
+   ]
+  },
+  {
+   "id": "interest/fashion/hair_nails/lashes_brows",
+   "parent": "interest/fashion/hair_nails",
+   "name": {
+    "zh": "睫毛与眉形",
+    "vi": "Mi & chân mày",
+    "en": "Lashes & Brows"
+   },
+   "keywords": [
+    "嫁接睫毛",
+    "mi giả",
+    "dán mi",
+    "định hình mày",
+    "kẻ chân mày"
+   ]
+  },
+  {
+   "id": "interest/fashion/occasion",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "场合着装",
+    "vi": "Đồ theo dịp",
+    "en": "Occasion Wear"
+   },
+   "keywords": [
+    "场合着装",
+    "đồ dự tiệc",
+    "trang phục sự kiện",
+    "occasion wear",
+    "mặc đi tiệc"
+   ]
+  },
+  {
+   "id": "interest/fashion/occasion/wedding_attire",
+   "parent": "interest/fashion/occasion",
+   "name": {
+    "zh": "婚礼服饰",
+    "vi": "Đồ cưới",
+    "en": "Wedding Attire"
+   },
+   "keywords": [
+    "婚纱",
+    "váy cưới",
+    "vest chú rể",
+    "đồ dự cưới",
+    "wedding dress"
+   ]
+  },
+  {
+   "id": "interest/fashion/occasion/school_uniform",
+   "parent": "interest/fashion/occasion",
+   "name": {
+    "zh": "班服校服",
+    "vi": "Áo lớp & đồng phục",
+    "en": "Class Uniforms"
+   },
+   "keywords": [
+    "班服",
+    "áo lớp",
+    "đồng phục học sinh",
+    "quần áo nhóm",
+    "class uniform"
+   ]
+  },
+  {
+   "id": "interest/fashion/occasion/work_uniform",
+   "parent": "interest/fashion/occasion",
+   "name": {
+    "zh": "工作服",
+    "vi": "Đồng phục công ty",
+    "en": "Work Uniforms"
+   },
+   "keywords": [
+    "工作服",
+    "đồng phục nhà máy",
+    "bảo hộ lao động",
+    "áo công nhân",
+    "uniform may đo"
+   ]
+  },
+  {
+   "id": "interest/fashion/occasion/cosplay_costume",
+   "parent": "interest/fashion/occasion",
+   "name": {
+    "zh": "角色扮演服",
+    "vi": "Đồ hóa trang",
+    "en": "Costume & Cosplay"
+   },
+   "keywords": [
+    "角色扮演服",
+    "đồ hóa trang",
+    "phục trang nhân vật",
+    "thuê trang phục",
+    "halloween việt"
+   ]
+  },
+  {
+   "id": "interest/fashion/buying",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "买衣与改衣",
+    "vi": "Mua & sửa quần áo",
+    "en": "Buying & Altering"
+   },
+   "keywords": [
+    "买衣服",
+    "mua đồ",
+    "chợ thời trang",
+    "shopping wardrobe",
+    "cửa hàng áo quần"
+   ]
+  },
+  {
+   "id": "interest/fashion/buying/secondhand_clothes",
+   "parent": "interest/fashion/buying",
+   "name": {
+    "zh": "二手衣",
+    "vi": "Đồ si",
+    "en": "Secondhand Clothes"
+   },
+   "keywords": [
+    "二手衣",
+    "đồ si",
+    "hàng 2hand",
+    "chợ phiên đồ si",
+    "secondhand store"
+   ]
+  },
+  {
+   "id": "interest/fashion/buying/sale_hunting",
+   "parent": "interest/fashion/buying",
+   "name": {
+    "zh": "打折扫货",
+    "vi": "Săn đồ giảm giá",
+    "en": "Sale Hunting"
+   },
+   "keywords": [
+    "打折",
+    "săn discount",
+    "đồ sale sâu",
+    "hàng outlet",
+    "clearance"
+   ]
+  },
+  {
+   "id": "interest/fashion/buying/local_brands",
+   "parent": "interest/fashion/buying",
+   "name": {
+    "zh": "本土品牌",
+    "vi": "Local brand Việt",
+    "en": "Local Brands"
+   },
+   "keywords": [
+    "本土品牌",
+    "thương hiệu nội địa",
+    "đồ thiết kế việt",
+    "local brand việt",
+    "lookbook local"
+   ]
+  },
+  {
+   "id": "interest/fashion/buying/size_fit",
+   "parent": "interest/fashion/buying",
+   "name": {
+    "zh": "尺码与改衣",
+    "vi": "Số đo & sửa đồ",
+    "en": "Sizing & Alterations"
+   },
+   "keywords": [
+    "尺码",
+    "改 quần áo",
+    "thợ may sửa đồ",
+    "số đo cơ thể",
+    "phóng cỡ"
+   ]
+  },
+  {
+   "id": "interest/fashion/buying/imported_goods",
+   "parent": "interest/fashion/buying",
+   "name": {
+    "zh": "代购与国货",
+    "vi": "Hàng xách tay",
+    "en": "Imported & Hand-carried"
+   },
+   "keywords": [
+    "代购",
+    "hàng xách tay",
+    "国货彩妆",
+    "order hàng",
+    "hàng nội địa trung"
+   ]
+  },
+  {
+   "id": "interest/fashion/garment_care",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "衣物保养",
+    "vi": "Giữ đồ bền",
+    "en": "Garment Care"
+   },
+   "keywords": [
+    "衣物保养",
+    "giữ form đồ",
+    "chống ẩm mốc đồ",
+    "treo tủ đồ",
+    "garment care"
+   ]
+  },
+  {
+   "id": "interest/fashion/garment_care/fabric_stain",
+   "parent": "interest/fashion/garment_care",
+   "name": {
+    "zh": "面料与去渍",
+    "vi": "Vải & tẩy vết",
+    "en": "Fabric & Stains"
+   },
+   "keywords": [
+    "面料",
+    "vải cotton",
+    "vải lanh",
+    "vết mực trên áo",
+    "fabric care"
+   ]
+  },
+  {
+   "id": "interest/fashion/garment_care/knit_care",
+   "parent": "interest/fashion/garment_care",
+   "name": {
+    "zh": "毛衣防起球",
+    "vi": "Chống xù len",
+    "en": "Knit Care"
+   },
+   "keywords": [
+    "起球",
+    "xù len",
+    "lược tẩy xù",
+    "len bị xơ",
+    "knit care"
+   ]
+  },
+  {
+   "id": "interest/fashion/body_shape",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "身形与版型",
+    "vi": "Dáng người & form",
+    "en": "Fit & Body Shape"
+   },
+   "keywords": [
+    "身形",
+    "dáng người",
+    "che khuyết điểm",
+    "form đồ rộng",
+    "body shape"
+   ]
+  },
+  {
+   "id": "interest/fashion/body_shape/plus_size",
+   "parent": "interest/fashion/body_shape",
+   "name": {
+    "zh": "大码女装",
+    "vi": "Đồ big size",
+    "en": "Plus Size"
+   },
+   "keywords": [
+    "大码",
+    "big size",
+    "đồ ngoại cỡ",
+    "cỡ xl",
+    "plus size"
+   ]
+  },
+  {
+   "id": "interest/fashion/body_shape/petite_tall",
+   "parent": "interest/fashion/body_shape",
+   "name": {
+    "zh": "小个子与高个",
+    "vi": "Dáng nhỏ & dáng cao",
+    "en": "Petite & Tall"
+   },
+   "keywords": [
+    "小个子",
+    "người thấp bé",
+    "dáng cao",
+    "giấu chân",
+    "petite outfit"
+   ]
+  },
+  {
+   "id": "interest/fashion/kids_family_wear",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "童装亲子装",
+    "vi": "Đồ trẻ em",
+    "en": "Kids & Family Wear"
+   },
+   "keywords": [
+    "quần áo trẻ em",
+    "đồ gia đình mặc giống",
+    "kids fashion",
+    "áo bé sơ sinh"
+   ]
+  },
+  {
+   "id": "interest/fashion/kids_family_wear/school_gear",
+   "parent": "interest/fashion/kids_family_wear",
+   "name": {
+    "zh": "上学行头",
+    "vi": "Đồ đi học",
+    "en": "School Gear"
+   },
+   "keywords": [
+    "上学装备",
+    "đồ đi học",
+    "túi đi học",
+    "giày đến trường",
+    "school kit"
+   ]
+  },
+  {
+   "id": "interest/fashion/color_styling",
+   "parent": "interest/fashion",
+   "name": {
+    "zh": "配色与形象课",
+    "vi": "Phối màu & hình ảnh",
+    "en": "Color & Image Styling"
+   },
+   "keywords": [
+    "配色",
+    "色彩搭配",
+    "hợp màu da",
+    "stylist cá nhân",
+    "color matching"
+   ]
+  },
+  {
+   "id": "interest/fashion/color_styling/season_palette",
+   "parent": "interest/fashion/color_styling",
+   "name": {
+    "zh": "季节色板",
+    "vi": "Bảng màu mùa",
+    "en": "Seasonal Palette"
+   },
+   "keywords": [
+    "色板",
+    "màu xu hướng",
+    "tone sur tone",
+    "换季颜色",
+    "seasonal colors"
+   ]
+  }
+ ]
+}

@@ -141,7 +141,6 @@
     "aerobic",
     "nhịp điệu",
     "zumba",
-    "thể dục sáng",
     "theo nhạc"
    ]
   },
@@ -233,7 +232,6 @@
     "en": "Running Crew"
    },
    "keywords": [
-    "跑团",
     "pace",
     "nhóm chạy",
     "chạy nhóm",
@@ -266,7 +264,6 @@
    },
    "keywords": [
     "骑行",
-    "xe đạp",
     "đạp",
     "cycling",
     "biker"
@@ -779,7 +776,6 @@
     "救生",
     "cứu hộ",
     "phao",
-    "còi",
     "an toàn nước"
    ]
   },
@@ -906,7 +902,6 @@
     "滑冰",
     "sân băng",
     "lưỡi",
-    "vincom",
     "quay"
    ]
   },
@@ -934,7 +929,6 @@
     "en": "Chess"
    },
    "keywords": [
-    "cờ vua",
     "quốc tế",
     "đen trắng",
     "mở cờ",
@@ -950,7 +944,6 @@
     "en": "Xiangqi"
    },
    "keywords": [
-    "中国象棋",
     "khai cuộc",
     "sòng cờ",
     "phố"
@@ -965,8 +958,6 @@
     "en": "Go"
    },
    "keywords": [
-    "围棋",
-    "cờ vây",
     "weiqi",
     "hắc bạch",
     "kỳ thủ"

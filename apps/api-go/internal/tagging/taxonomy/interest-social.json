@@ -1,0 +1,884 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/social/meetup",
+   "parent": "interest/social",
+   "name": {
+    "zh": "线下聚会",
+    "vi": "Gặp mặt trực tiếp",
+    "en": "In-Person Meetups"
+   },
+   "keywords": [
+    "聚会",
+    "gặp mặt",
+    "hội nhóm",
+    "offline meet",
+    "集合",
+    "nhóm offline"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/interest_club",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "兴趣社团",
+    "vi": "Câu lạc bộ sở thích",
+    "en": "Hobby Clubs"
+   },
+   "keywords": [
+    "社团",
+    "câu lạc bộ",
+    "sở thích chung",
+    "clb sở thích",
+    "圈子活动"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/welcome_new",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "新人欢迎局",
+    "vi": "Buổi đón người mới",
+    "en": "Welcome Meetups"
+   },
+   "keywords": [
+    "欢迎新人",
+    "đón người mới",
+    "làm quen",
+    "tân binh",
+    "初次见面"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/language_exchange",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "语言角",
+    "vi": "Góc trao đổi ngôn ngữ",
+    "en": "Language Exchange"
+   },
+   "keywords": [
+    "语言角",
+    "练口语",
+    "luyện nói",
+    "口语会话"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/board_game_night",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "桌游局",
+    "vi": "Đêm trò chơi",
+    "en": "Game Night Gatherings"
+   },
+   "keywords": [
+    "桌游局",
+    "game night",
+    "约局",
+    "cuối tuần chơi",
+    "chơi nhóm tối"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/class_reunion",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "同学聚会",
+    "vi": "Họp lớp",
+    "en": "Class Reunions"
+   },
+   "keywords": [
+    "同学聚会",
+    "bạn cũ",
+    "cùng lớp",
+    "老同学"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/alumni_reunion",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "校友活动",
+    "vi": "Gặp lại cựu sinh viên",
+    "en": "Alumni Meetups"
+   },
+   "keywords": [
+    "校友",
+    "cựu sinh viên",
+    "回母校",
+    "trường xưa",
+    "kỷ niệm trường"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/senior_gathering",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "广场舞与长辈聚会",
+    "vi": "Sinh hoạt người cao tuổi",
+    "en": "Senior Gatherings"
+   },
+   "keywords": [
+    "广场舞",
+    "khiêu vũ tập thể",
+    "nhảy quảng trường",
+    "老年活动",
+    "坝坝舞"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/neighbor_meet",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "邻里见面",
+    "vi": "Gặp gỡ xóm giềng",
+    "en": "Neighbour Meetups"
+   },
+   "keywords": [
+    "邻里",
+    "xóm giềng",
+    "楼下见",
+    "sân chung cư",
+    "gặp xóm"
+   ]
+  },
+  {
+   "id": "interest/social/meetup/coffee_meet",
+   "parent": "interest/social/meetup",
+   "name": {
+    "zh": "网友线下见面",
+    "vi": "Hẹn gặp ngoài đời",
+    "en": "Offline Meetups"
+   },
+   "keywords": [
+    "面基",
+    "奔现",
+    "hẹn gặp",
+    "gặp thật",
+    "ra mắt ngoài đời"
+   ]
+  },
+  {
+   "id": "interest/social/friends",
+   "parent": "interest/social",
+   "name": {
+    "zh": "结交朋友",
+    "vi": "Kết bạn",
+    "en": "Making Friends"
+   },
+   "keywords": [
+    "交朋友",
+    "kết bạn",
+    "làm bạn",
+    "找朋友",
+    "bạn mới"
+   ]
+  },
+  {
+   "id": "interest/social/friends/buddy",
+   "parent": "interest/social/friends",
+   "name": {
+    "zh": "找搭子",
+    "vi": "Tìm bạn cùng",
+    "en": "Activity Buddies"
+   },
+   "keywords": [
+    "搭子",
+    "找搭子",
+    "tìm bạn cùng",
+    "cùng đi",
+    "bạn đồng hành"
+   ]
+  },
+  {
+   "id": "interest/social/friends/pen_pal",
+   "parent": "interest/social/friends",
+   "name": {
+    "zh": "笔友通信",
+    "vi": "Bạn bút",
+    "en": "Pen Pals"
+   },
+   "keywords": [
+    "笔友",
+    "pen pal",
+    "viết thư",
+    "bạn qua thư",
+    "交换信件"
+   ]
+  },
+  {
+   "id": "interest/social/friends/neighbor_friend",
+   "parent": "interest/social/friends",
+   "name": {
+    "zh": "邻居朋友",
+    "vi": "Bạn hàng xóm",
+    "en": "Neighbour Friends"
+   },
+   "keywords": [
+    "邻居",
+    "同楼",
+    "bạn xóm",
+    "kết bạn gần nhà",
+    "làm quen xóm"
+   ]
+  },
+  {
+   "id": "interest/social/friends/online_friend",
+   "parent": "interest/social/friends",
+   "name": {
+    "zh": "网友",
+    "vi": "Bạn trên mạng",
+    "en": "Online Friends"
+   },
+   "keywords": [
+    "网友",
+    "bạn chat",
+    "kết bạn online",
+    "线上认识",
+    "tin nhắn làm quen"
+   ]
+  },
+  {
+   "id": "interest/social/friends/travel_partner",
+   "parent": "interest/social/friends",
+   "name": {
+    "zh": "结伴同行",
+    "vi": "Đi cùng nhau",
+    "en": "Trip Partners"
+   },
+   "keywords": [
+    "结伴",
+    "找同游",
+    "đi cùng nhau",
+    "tìm bạn đi cùng",
+    "顺路搭伴"
+   ]
+  },
+  {
+   "id": "interest/social/friends/new_in_town",
+   "parent": "interest/social/friends",
+   "name": {
+    "zh": "初来乍到",
+    "vi": "Mới đến thành phố",
+    "en": "New In Town"
+   },
+   "keywords": [
+    "新来的",
+    "mới đến",
+    "hòa nhập",
+    "融入环境",
+    "tân cư"
+   ]
+  },
+  {
+   "id": "interest/social/community",
+   "parent": "interest/social",
+   "name": {
+    "zh": "社群组织",
+    "vi": "Cộng đồng nhóm",
+    "en": "Communities"
+   },
+   "keywords": [
+    "社群",
+    "tổ chức nhóm",
+    "群组",
+    "nhóm chung"
+   ]
+  },
+  {
+   "id": "interest/social/community/chinese_circle",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "华人圈子",
+    "vi": "Cộng đồng người Hoa",
+    "en": "Chinese-Speaking Circle"
+   },
+   "keywords": [
+    "华人圈",
+    "华人群",
+    "người hoa",
+    "cộng đồng người hoa",
+    "中文交流"
+   ]
+  },
+  {
+   "id": "interest/social/community/region_group",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "同乡会",
+    "vi": "Hội đồng hương",
+    "en": "Hometown Associations"
+   },
+   "keywords": [
+    "同乡",
+    "老乡",
+    "hội đồng hương",
+    "地缘"
+   ]
+  },
+  {
+   "id": "interest/social/community/chat_group",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "线上群组",
+    "vi": "Nhóm chat",
+    "en": "Chat Groups"
+   },
+   "keywords": [
+    "微信群",
+    "nhóm zalo",
+    "zalo group",
+    "拉群",
+    "加入群",
+    "group chat"
+   ]
+  },
+  {
+   "id": "interest/social/community/student_club",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "校园社团",
+    "vi": "Đội nhóm sinh viên",
+    "en": "Student Clubs"
+   },
+   "keywords": [
+    "校园社团",
+    "đội sinh viên",
+    "câu lạc bộ trường",
+    "hoạt động đoàn",
+    "đoàn trường"
+   ]
+  },
+  {
+   "id": "interest/social/community/moms_group",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "妈妈群",
+    "vi": "Nhóm mẹ bỉm sữa",
+    "en": "Mums' Groups"
+   },
+   "keywords": [
+    "宝妈",
+    "mẹ bỉm sữa",
+    "nhóm mẹ",
+    "chị em nội trợ",
+    "育儿交流"
+   ]
+  },
+  {
+   "id": "interest/social/community/worker_group",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "工友圈子",
+    "vi": "Nhóm công nhân",
+    "en": "Worker Circles"
+   },
+   "keywords": [
+    "工人",
+    "công nhân",
+    "同厂",
+    "ca sản xuất",
+    "bạn cùng xưởng"
+   ]
+  },
+  {
+   "id": "interest/social/community/interest_forum",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "兴趣论坛",
+    "vi": "Diễn đàn sở thích",
+    "en": "Interest Forums"
+   },
+   "keywords": [
+    "论坛",
+    "diễn đàn",
+    "帖子",
+    "board thảo luận",
+    "同好会"
+   ]
+  },
+  {
+   "id": "interest/social/community/faith_group",
+   "parent": "interest/social/community",
+   "name": {
+    "zh": "信仰小组",
+    "vi": "Nhóm đức tin",
+    "en": "Faith Groups"
+   },
+   "keywords": [
+    "教会",
+    "nhà thờ",
+    "团契",
+    "cộng đoàn",
+    "đi lễ"
+   ]
+  },
+  {
+   "id": "interest/social/party",
+   "parent": "interest/social",
+   "name": {
+    "zh": "派对宴席",
+    "vi": "Bữa tiệc",
+    "en": "Parties"
+   },
+   "keywords": [
+    "派对",
+    "bữa tiệc",
+    "tiệc",
+    "筵席",
+    "tiệc tùng"
+   ]
+  },
+  {
+   "id": "interest/social/party/birthday_party",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "生日派对",
+    "vi": "Tiệc sinh nhật",
+    "en": "Birthday Parties"
+   },
+   "keywords": [
+    "生日",
+    "吹蜡烛",
+    "sinh nhật",
+    "寿星",
+    "quà sinh nhật"
+   ]
+  },
+  {
+   "id": "interest/social/party/housewarming_party",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "乔迁暖房",
+    "vi": "Tiệc tân gia",
+    "en": "Housewarming Parties"
+   },
+   "keywords": [
+    "暖房",
+    "tân gia",
+    "mừng nhà mới",
+    "nhập trạch",
+    "搬新家"
+   ]
+  },
+  {
+   "id": "interest/social/party/picnic_gathering",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "草地野餐聚会",
+    "vi": "Tiệc ngoài trời",
+    "en": "Picnic Gatherings"
+   },
+   "keywords": [
+    "dã ngoại",
+    "trải bạt",
+    "bếp picnic",
+    "bữa ngoài trời"
+   ]
+  },
+  {
+   "id": "interest/social/party/potluck",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "各带一道菜",
+    "vi": "Góp món ăn chung",
+    "en": "Potluck Meals"
+   },
+   "keywords": [
+    "各带菜",
+    "góp món",
+    "potluck",
+    "mỗi người một món",
+    "ăn chung"
+   ]
+  },
+  {
+   "id": "interest/social/party/team_building",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "团队建设",
+    "vi": "Xây dựng đội nhóm",
+    "en": "Team Building"
+   },
+   "keywords": [
+    "团建",
+    "team building",
+    "hoạt động nhóm",
+    "ngoại khóa",
+    "teambuilding"
+   ]
+  },
+  {
+   "id": "interest/social/party/farewell_party",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "散伙告别",
+    "vi": "Tiệc chia tay",
+    "en": "Farewell Gatherings"
+   },
+   "keywords": [
+    "散伙饭",
+    "chia tay",
+    "送别",
+    "chúc lên đường",
+    "rời nhóm"
+   ]
+  },
+  {
+   "id": "interest/social/party/themed_party",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "主题派对",
+    "vi": "Tiệc theo chủ đề",
+    "en": "Themed Parties"
+   },
+   "keywords": [
+    "主题派对",
+    "dress code",
+    "trang phục dự tiệc",
+    "chủ đề tiệc",
+    "装扮入场"
+   ]
+  },
+  {
+   "id": "interest/social/party/anniversary_meal",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "纪念日聚餐",
+    "vi": "Bữa kỷ niệm",
+    "en": "Anniversary Meals"
+   },
+   "keywords": [
+    "mừng kỷ niệm",
+    "bữa kỷ niệm"
+   ]
+  },
+  {
+   "id": "interest/social/party/graduation_party",
+   "parent": "interest/social/party",
+   "name": {
+    "zh": "毕业聚会",
+    "vi": "Tiệc tốt nghiệp",
+    "en": "Graduation Parties"
+   },
+   "keywords": [
+    "毕业",
+    "tốt nghiệp",
+    "kỷ yếu",
+    "tân cử nhân"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering",
+   "parent": "interest/social",
+   "name": {
+    "zh": "公益志愿",
+    "vi": "Tình nguyện",
+    "en": "Volunteering"
+   },
+   "keywords": [
+    "志愿",
+    "tình nguyện",
+    "从善",
+    "việc tốt",
+    "thiện nguyện"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/blood_drive",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "献血活动",
+    "vi": "Hiến máu",
+    "en": "Blood Drives"
+   },
+   "keywords": [
+    "献血",
+    "giọt máu",
+    "nhân đạo",
+    "máu nóng"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/charity_bazaar",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "慈善义卖",
+    "vi": "Chợ từ thiện",
+    "en": "Charity Bazaars"
+   },
+   "keywords": [
+    "义卖",
+    "chợ từ thiện",
+    "gây quỹ",
+    "bazaar"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/cleanup_group",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "社区清扫",
+    "vi": "Ngày chủ nhật xanh",
+    "en": "Cleanup Groups"
+   },
+   "keywords": [
+    "清扫",
+    "dọn vệ sinh",
+    "chủ nhật xanh",
+    "捡垃圾",
+    "thu gom rác"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/donation_drive",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "旧物捐赠",
+    "vi": "Quyên góp đồ",
+    "en": "Donation Drives"
+   },
+   "keywords": [
+    "捐赠",
+    "捐旧衣",
+    "ủng hộ",
+    "gửi quà",
+    "quà vùng cao"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/mentoring",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "义务辅导",
+    "vi": "Kèm cặp miễn phí",
+    "en": "Volunteer Mentoring"
+   },
+   "keywords": [
+    "辅导",
+    "传帮带",
+    "chia sẻ kinh nghiệm"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/elder_visit",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "探访长辈",
+    "vi": "Thăm trại dưỡng lão",
+    "en": "Elder Visits"
+   },
+   "keywords": [
+    "慰问",
+    "dưỡng lão",
+    "thăm người già",
+    "hiếu thảo",
+    "viếng ông bà"
+   ]
+  },
+  {
+   "id": "interest/social/volunteering/children_visit",
+   "parent": "interest/social/volunteering",
+   "name": {
+    "zh": "探访儿童",
+    "vi": "Thăm trẻ mồ côi",
+    "en": "Children's Home Visits"
+   },
+   "keywords": [
+    "孤儿",
+    "trẻ mồ côi",
+    "mái ấm",
+    "viếng trẻ",
+    "nuôi dưỡng"
+   ]
+  },
+  {
+   "id": "interest/social/talking",
+   "parent": "interest/social",
+   "name": {
+    "zh": "交流分享",
+    "vi": "Trò chuyện",
+    "en": "Talks & Sharing"
+   },
+   "keywords": [
+    "聊天",
+    "trò chuyện",
+    "tám",
+    "交心",
+    "buổi trò"
+   ]
+  },
+  {
+   "id": "interest/social/talking/book_club",
+   "parent": "interest/social/talking",
+   "name": {
+    "zh": "读书会",
+    "vi": "Câu lạc bộ đọc sách",
+    "en": "Book Clubs"
+   },
+   "keywords": [
+    "bàn sách",
+    "đọc rồi bàn"
+   ]
+  },
+  {
+   "id": "interest/social/talking/story_night",
+   "parent": "interest/social/talking",
+   "name": {
+    "zh": "故事分享会",
+    "vi": "Đêm kể chuyện",
+    "en": "Story Nights"
+   },
+   "keywords": [
+    "故事会",
+    "chia sẻ câu chuyện",
+    "chuyện đời",
+    "kể lại"
+   ]
+  },
+  {
+   "id": "interest/social/talking/skill_share",
+   "parent": "interest/social/talking",
+   "name": {
+    "zh": "技能互换",
+    "vi": "Trao đổi kỹ năng",
+    "en": "Skill Sharing"
+   },
+   "keywords": [
+    "技能互换",
+    "dạy lẫn nhau",
+    "trao đổi kỹ năng",
+    "skill swap",
+    "互相教"
+   ]
+  },
+  {
+   "id": "interest/social/talking/topic_debate",
+   "parent": "interest/social/talking",
+   "name": {
+    "zh": "话题讨论",
+    "vi": "Thảo luận chủ đề",
+    "en": "Discussion Groups"
+   },
+   "keywords": [
+    "讨论",
+    "tranh luận",
+    "debate",
+    "bình luận chung",
+    "góc nhìn"
+   ]
+  },
+  {
+   "id": "interest/social/talking/tea_talk",
+   "parent": "interest/social/talking",
+   "name": {
+    "zh": "街边茶水闲聊",
+    "vi": "Tám chuyện quán nước",
+    "en": "Sidewalk Tea Chat"
+   },
+   "keywords": [
+    "quán nước",
+    "lê la",
+    "chém gió",
+    "喝茶聊天"
+   ]
+  },
+  {
+   "id": "interest/social/etiquette",
+   "parent": "interest/social",
+   "name": {
+    "zh": "人情往来",
+    "vi": "Đối nhân xử thế",
+    "en": "Social Etiquette"
+   },
+   "keywords": [
+    "人情",
+    "đối nhân",
+    "往来",
+    "ứng xử"
+   ]
+  },
+  {
+   "id": "interest/social/etiquette/wedding_gift_money",
+   "parent": "interest/social/etiquette",
+   "name": {
+    "zh": "随份子",
+    "vi": "Tiền mừng",
+    "en": "Gift Money"
+   },
+   "keywords": [
+    "随礼",
+    "份子钱",
+    "tiền mừng",
+    "phong bao cưới",
+    "mừng đám cưới"
+   ]
+  },
+  {
+   "id": "interest/social/etiquette/gift_exchange",
+   "parent": "interest/social/etiquette",
+   "name": {
+    "zh": "互赠小礼",
+    "vi": "Trao quà nhỏ",
+    "en": "Gift Exchanges"
+   },
+   "keywords": [
+    "互送礼物",
+    "đổi quà",
+    "trao tay",
+    "小礼物",
+    "quà tặng nhau"
+   ]
+  },
+  {
+   "id": "interest/social/etiquette/home_visit",
+   "parent": "interest/social/etiquette",
+   "name": {
+    "zh": "登门拜访",
+    "vi": "Ghé nhà chơi",
+    "en": "Home Visits"
+   },
+   "keywords": [
+    "拜访",
+    "ghé nhà",
+    "作客",
+    "đến thăm",
+    "chơi nhà"
+   ]
+  },
+  {
+   "id": "interest/social/etiquette/thank_back",
+   "parent": "interest/social/etiquette",
+   "name": {
+    "zh": "回请答礼",
+    "vi": "Đáp lễ",
+    "en": "Return Hospitality"
+   },
+   "keywords": [
+    "回请",
+    "đáp lễ",
+    "请客回礼",
+    "tạ ơn",
+    "mời lại"
+   ]
+  },
+  {
+   "id": "interest/social/etiquette/bill_splitting",
+   "parent": "interest/social/etiquette",
+   "name": {
+    "zh": "结账分摊",
+    "vi": "Chia tiền ăn",
+    "en": "Bill Splitting"
+   },
+   "keywords": [
+    "请客",
+    "分摊",
+    "thanh toán chung",
+    "轮流请",
+    "chia hóa đơn"
+   ]
+  }
+ ]
+}

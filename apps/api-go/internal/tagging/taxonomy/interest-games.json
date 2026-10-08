@@ -1,0 +1,923 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/games/mobile",
+   "parent": "interest/games",
+   "name": {
+    "zh": "手机游戏",
+    "vi": "Game mobile",
+    "en": "Mobile Games"
+   },
+   "keywords": [
+    "手游",
+    "game mobile",
+    "trò chơi mobile",
+    "mobile gaming"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/moba",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "竞技推塔手游",
+    "vi": "Game MOBA",
+    "en": "Mobile MOBA"
+   },
+   "keywords": [
+    "王者荣耀",
+    "liên quân",
+    "moba",
+    "lien quan",
+    "liên quân mobile",
+    "竞技手游"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/battle_royale",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "大逃杀手游",
+    "vi": "Game bắn nhau",
+    "en": "Mobile Battle Royale"
+   },
+   "keywords": [
+    "pubg",
+    "吃鸡",
+    "free fire",
+    "bắn nhau",
+    "game bắn súng",
+    "pubg mobile",
+    "battle royale"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/casual_puzzle",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "休闲消除手游",
+    "vi": "Game xếp hình nhẹ",
+    "en": "Casual Mobile Games"
+   },
+   "keywords": [
+    "消消乐",
+    "candy crush",
+    "2048",
+    "game casual",
+    "休闲手游",
+    "消除游戏"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/gacha",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "抽卡养成",
+    "vi": "Quay thẻ nhân vật",
+    "en": "Gacha Games"
+   },
+   "keywords": [
+    "抽卡",
+    "gacha",
+    "genshin",
+    "nguyên thần",
+    "米哈游",
+    "祈愿"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/sandbox_mobile",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "沙盒建造手游",
+    "vi": "Sandbox điện thoại",
+    "en": "Mobile Sandbox"
+   },
+   "keywords": [
+    "roblox",
+    "迷你世界",
+    "minecraftpe",
+    "nuôi thú trên điện thoại",
+    "sandbox mobile",
+    "xây trên điện thoại"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/idle_tycoon",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "放置经营手游",
+    "vi": "Game idle",
+    "en": "Idle & Tycoon Games"
+   },
+   "keywords": [
+    "挂机",
+    "game idle",
+    "kiếm tiền offline",
+    "放置玩法",
+    "nuôi trồng",
+    "idle game"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/party_games",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "派对闯关手游",
+    "vi": "Game đối kháng vui",
+    "en": "Mobile Party Games"
+   },
+   "keywords": [
+    "egg party",
+    "siêu trứng",
+    "元蛋派对",
+    "糖豆人",
+    "fall guys",
+    "game vui"
+   ]
+  },
+  {
+   "id": "interest/games/mobile/card_mobile",
+   "parent": "interest/games/mobile",
+   "name": {
+    "zh": "卡牌对战手游",
+    "vi": "Game thẻ bài",
+    "en": "Mobile Card Games"
+   },
+   "keywords": [
+    "卡牌手游",
+    "自走棋",
+    "hearthstone",
+    "炉石传说",
+    "đấu thẻ",
+    "auto chess"
+   ]
+  },
+  {
+   "id": "interest/games/pc",
+   "parent": "interest/games",
+   "name": {
+    "zh": "端游",
+    "vi": "Game PC",
+    "en": "PC Games"
+   },
+   "keywords": [
+    "端游",
+    "pc",
+    "game pc",
+    "máy tính",
+    "steam",
+    "电脑游戏"
+   ]
+  },
+  {
+   "id": "interest/games/pc/shooter",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "第一人称射击",
+    "vi": "Bắn súng góc nhìn thứ nhất",
+    "en": "First-Person Shooters"
+   },
+   "keywords": [
+    "射击游戏",
+    "fps",
+    "valorant",
+    "无畏契约",
+    "cs2",
+    "counter-strike",
+    "overwatch"
+   ]
+  },
+  {
+   "id": "interest/games/pc/moba_pc",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "电脑竞技对战",
+    "vi": "Liên minh",
+    "en": "PC MOBA"
+   },
+   "keywords": [
+    "英雄联盟",
+    "dota",
+    "liên minh huyền thoại",
+    "dota 2",
+    "pc moba",
+    "moba máy tính"
+   ]
+  },
+  {
+   "id": "interest/games/pc/rpg_open_world",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "开放世界单机",
+    "vi": "Thế giới mở",
+    "en": "Open-World Games"
+   },
+   "keywords": [
+    "开放世界",
+    "gta",
+    "the witcher",
+    "thế giới mở",
+    "单机大作"
+   ]
+  },
+  {
+   "id": "interest/games/pc/strategy",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "策略战争游戏",
+    "vi": "Game chiến thuật",
+    "en": "Strategy Games"
+   },
+   "keywords": [
+    "即时战略",
+    "strategy",
+    "đế chế",
+    "age of empires",
+    "战争游戏",
+    "xây căn cứ"
+   ]
+  },
+  {
+   "id": "interest/games/pc/sandbox",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "方块沙盒",
+    "vi": "Thế giới khối",
+    "en": "Block Building Games"
+   },
+   "keywords": [
+    "我的世界",
+    "minecraft",
+    "terraria",
+    "沙盒游戏",
+    "thế giới vuông",
+    "xây nhà trong game"
+   ]
+  },
+  {
+   "id": "interest/games/pc/racing",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "赛车竞速",
+    "vi": "Đua xe",
+    "en": "Racing Games"
+   },
+   "keywords": [
+    "赛车",
+    "đua xe",
+    "need for speed",
+    "f1 2024",
+    "drift",
+    "赛道",
+    "mô phỏng lái"
+   ]
+  },
+  {
+   "id": "interest/games/pc/fighting",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "格斗对战",
+    "vi": "Game đối kháng",
+    "en": "Fighting Games"
+   },
+   "keywords": [
+    "格斗游戏",
+    "街霸",
+    "tekken",
+    "đối kháng tay đôi",
+    "铁拳",
+    "combo",
+    "liên kích"
+   ]
+  },
+  {
+   "id": "interest/games/pc/horror",
+   "parent": "interest/games/pc",
+   "name": {
+    "zh": "恐怖解谜游戏",
+    "vi": "Game kinh dị",
+    "en": "Horror Games"
+   },
+   "keywords": [
+    "恐怖游戏",
+    "ma ám",
+    "outlast",
+    "逃生",
+    "jump scare"
+   ]
+  },
+  {
+   "id": "interest/games/console",
+   "parent": "interest/games",
+   "name": {
+    "zh": "主机游戏",
+    "vi": "Máy chơi game",
+    "en": "Console Games"
+   },
+   "keywords": [
+    "主机游戏",
+    "console",
+    "máy chơi game",
+    "手柄",
+    "tay cầm",
+    "đĩa game"
+   ]
+  },
+  {
+   "id": "interest/games/console/nintendo",
+   "parent": "interest/games/console",
+   "name": {
+    "zh": "任天堂",
+    "vi": "Nintendo",
+    "en": "Nintendo Switch"
+   },
+   "keywords": [
+    "switch",
+    "塞尔达",
+    "zelda",
+    "nintendo",
+    "mario",
+    "超级马里奥"
+   ]
+  },
+  {
+   "id": "interest/games/console/playstation",
+   "parent": "interest/games/console",
+   "name": {
+    "zh": "PS 主机",
+    "vi": "Máy PlayStation",
+    "en": "PlayStation"
+   },
+   "keywords": [
+    "ps5",
+    "playstation",
+    "god of war",
+    "ps4",
+    "máy ps",
+    "bóng đá ps"
+   ]
+  },
+  {
+   "id": "interest/games/console/xbox",
+   "parent": "interest/games/console",
+   "name": {
+    "zh": "Xbox 主机",
+    "vi": "Xbox",
+    "en": "Xbox"
+   },
+   "keywords": [
+    "xbox",
+    "game pass",
+    "xbox series",
+    "xcloud",
+    "điều khiển xbox"
+   ]
+  },
+  {
+   "id": "interest/games/console/retro",
+   "parent": "interest/games/console",
+   "name": {
+    "zh": "复古主机",
+    "vi": "Máy game cổ",
+    "en": "Retro Consoles"
+   },
+   "keywords": [
+    "红白机",
+    "小霸王",
+    "famicom",
+    "retro game",
+    "máy 8 bit",
+    "复古机"
+   ]
+  },
+  {
+   "id": "interest/games/console/vr",
+   "parent": "interest/games/console",
+   "name": {
+    "zh": "虚拟现实游戏",
+    "vi": "Kính thực tế ảo",
+    "en": "VR Games"
+   },
+   "keywords": [
+    "vr",
+    "meta quest",
+    "kính vr",
+    "thực tế ảo",
+    "beat saber"
+   ]
+  },
+  {
+   "id": "interest/games/console/handheld",
+   "parent": "interest/games/console",
+   "name": {
+    "zh": "掌机",
+    "vi": "Máy cầm tay",
+    "en": "Handheld Consoles"
+   },
+   "keywords": [
+    "steam deck",
+    "máy cầm tay",
+    "掌机",
+    "deck",
+    "ns lite"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop",
+   "parent": "interest/games",
+   "name": {
+    "zh": "桌面游戏",
+    "vi": "Trò chơi trên bàn",
+    "en": "Tabletop Games"
+   },
+   "keywords": [
+    "桌面游戏",
+    "trên bàn",
+    "tabletop",
+    "chơi bài",
+    "聚会游戏"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/board_game",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "桌游",
+    "vi": "Board game",
+    "en": "Board Games"
+   },
+   "keywords": [
+    "bàn cờ",
+    "hộp trò chơi",
+    "卡坦岛",
+    "catan"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/card_game",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "牌类游戏",
+    "vi": "Bài lá",
+    "en": "Playing-Card Games"
+   },
+   "keywords": [
+    "扑克牌",
+    "bài uno",
+    "三国杀",
+    "thẻ tam quốc",
+    "牌类"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/murder_mystery",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "剧本杀",
+    "vi": "Suy luận kịch bản",
+    "en": "Murder Mystery Games"
+   },
+   "keywords": [
+    "剧本杀",
+    "suy luận kịch bản",
+    "推理游戏",
+    "tìm hung thủ",
+    "剧本"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/werewolf",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "狼人杀",
+    "vi": "Ma sói",
+    "en": "Werewolf Games"
+   },
+   "keywords": [
+    "狼人杀",
+    "ma sói",
+    "dân làng",
+    "预言家",
+    "屠边",
+    "nói dối"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/trpg",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "桌上角色扮演",
+    "vi": "Nhập vai trên bàn",
+    "en": "Tabletop RPG"
+   },
+   "keywords": [
+    "龙与地下城",
+    "dnd",
+    "trpg",
+    "跑团",
+    "người dẫn truyện",
+    "bài nhập vai"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/chess",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "棋类",
+    "vi": "Cờ",
+    "en": "Chess & Strategy Board"
+   },
+   "keywords": [
+    "象棋",
+    "中国象棋",
+    "围棋",
+    "cờ vây",
+    "国际象棋",
+    "cờ vua",
+    "chess"
+   ]
+  },
+  {
+   "id": "interest/games/tabletop/mahjong",
+   "parent": "interest/games/tabletop",
+   "name": {
+    "zh": "麻将牌戏",
+    "vi": "Mạt chược",
+    "en": "Mahjong"
+   },
+   "keywords": [
+    "麻将",
+    "mahjong",
+    "mạt chược",
+    "xì dách",
+    "打麻将",
+    "bài mạt"
+   ]
+  },
+  {
+   "id": "interest/games/esports",
+   "parent": "interest/games",
+   "name": {
+    "zh": "电子竞技",
+    "vi": "Thể thao điện tử",
+    "en": "Esports"
+   },
+   "keywords": [
+    "电竞",
+    "esports",
+    "thể thao điện tử",
+    "比赛",
+    "giải đấu"
+   ]
+  },
+  {
+   "id": "interest/games/esports/watch",
+   "parent": "interest/games/esports",
+   "name": {
+    "zh": "赛事围观",
+    "vi": "Xem thi đấu",
+    "en": "Esports Fandom"
+   },
+   "keywords": [
+    "看比赛",
+    "观赛",
+    "theo dõi giải đấu",
+    "cổ vũ đội",
+    "cổ vũ online",
+    "team fan"
+   ]
+  },
+  {
+   "id": "interest/games/esports/amateur_team",
+   "parent": "interest/games/esports",
+   "name": {
+    "zh": "民间战队",
+    "vi": "Đội phong trào",
+    "en": "Amateur Teams"
+   },
+   "keywords": [
+    "民间战队",
+    "网吧赛",
+    "giải phong trào",
+    "tuyển thủ tự do",
+    "战队招人",
+    "đội cộng đồng"
+   ]
+  },
+  {
+   "id": "interest/games/esports/tournament",
+   "parent": "interest/games/esports",
+   "name": {
+    "zh": "电竞赛事",
+    "vi": "Giải đấu game",
+    "en": "Game Tournaments"
+   },
+   "keywords": [
+    "电竞比赛",
+    "线下观赛",
+    "giải vô địch",
+    "tournament",
+    "比赛报名",
+    "观赛聚会"
+   ]
+  },
+  {
+   "id": "interest/games/arcade",
+   "parent": "interest/games",
+   "name": {
+    "zh": "游艺娱乐",
+    "vi": "Trò chơi khu vui chơi",
+    "en": "Arcade Games"
+   },
+   "keywords": [
+    "电玩",
+    "trò chơi máy",
+    "game thùng",
+    "游乐场游戏",
+    "arcade"
+   ]
+  },
+  {
+   "id": "interest/games/arcade/claw_machine",
+   "parent": "interest/games/arcade",
+   "name": {
+    "zh": "娃娃机",
+    "vi": "Máy gắp thú",
+    "en": "Claw Machines"
+   },
+   "keywords": [
+    "夹娃娃",
+    "máy gắp",
+    "gắp thú bông",
+    "娃娃机",
+    "cần gắp",
+    "thú nhồi bông"
+   ]
+  },
+  {
+   "id": "interest/games/arcade/dance_machine",
+   "parent": "interest/games/arcade",
+   "name": {
+    "zh": "跳舞机",
+    "vi": "Máy nhảy",
+    "en": "Dance Machines"
+   },
+   "keywords": [
+    "跳舞机",
+    "nhảy theo nhịp",
+    "eadm",
+    "ddr",
+    "chơi máy nhảy",
+    "bệ nhảy"
+   ]
+  },
+  {
+   "id": "interest/games/arcade/shoot_gallery",
+   "parent": "interest/games/arcade",
+   "name": {
+    "zh": "游艺射击",
+    "vi": "Bắn súng trò chơi",
+    "en": "Arcade Shooters"
+   },
+   "keywords": [
+    "射气球",
+    "máy bắn súng",
+    "枪战游戏",
+    "bắn súng trò chơi",
+    "súng nhựa",
+    "đấm máy"
+   ]
+  },
+  {
+   "id": "interest/games/arcade/billiards",
+   "parent": "interest/games/arcade",
+   "name": {
+    "zh": "台球",
+    "vi": "Bida",
+    "en": "Billiards"
+   },
+   "keywords": [
+    "台球",
+    "bi-a",
+    "bida",
+    "8 ball",
+    "cơ bida",
+    "打台球"
+   ]
+  },
+  {
+   "id": "interest/games/puzzle",
+   "parent": "interest/games",
+   "name": {
+    "zh": "益智解谜",
+    "vi": "Trò chơi trí tuệ",
+    "en": "Puzzles"
+   },
+   "keywords": [
+    "益智",
+    "đố vui",
+    "trí nhớ",
+    "脑力",
+    "puzzle",
+    "解谜"
+   ]
+  },
+  {
+   "id": "interest/games/puzzle/rubik",
+   "parent": "interest/games/puzzle",
+   "name": {
+    "zh": "魔方",
+    "vi": "Khối rubik",
+    "en": "Rubik's Cube"
+   },
+   "keywords": [
+    "魔方",
+    "rubik",
+    "rubik's cube",
+    "khối rubik",
+    "speedcube",
+    "还原公式"
+   ]
+  },
+  {
+   "id": "interest/games/puzzle/jigsaw",
+   "parent": "interest/games/puzzle",
+   "name": {
+    "zh": "拼图",
+    "vi": "Tranh ghép hình",
+    "en": "Jigsaw Puzzles"
+   },
+   "keywords": [
+    "拼图",
+    "jigsaw",
+    "tranh ghép",
+    "miếng ghép"
+   ]
+  },
+  {
+   "id": "interest/games/puzzle/sudoku",
+   "parent": "interest/games/puzzle",
+   "name": {
+    "zh": "数独",
+    "vi": "Sudoku",
+    "en": "Sudoku"
+   },
+   "keywords": [
+    "数独",
+    "sudoku",
+    "điền số",
+    "số sudoku",
+    "九宫格"
+   ]
+  },
+  {
+   "id": "interest/games/puzzle/tangram",
+   "parent": "interest/games/puzzle",
+   "name": {
+    "zh": "七巧板",
+    "vi": "Xếp hình thông minh",
+    "en": "Tangram"
+   },
+   "keywords": [
+    "七巧板",
+    "ghép hình",
+    "tangram",
+    "xếp hình tam giác",
+    "积木拼图"
+   ]
+  },
+  {
+   "id": "interest/games/streaming",
+   "parent": "interest/games",
+   "name": {
+    "zh": "游戏直播内容",
+    "vi": "Nội dung game",
+    "en": "Game Content"
+   },
+   "keywords": [
+    "游戏内容",
+    "nội dung game",
+    "game video",
+    "录屏",
+    "看别人玩"
+   ]
+  },
+  {
+   "id": "interest/games/streaming/livestream",
+   "parent": "interest/games/streaming",
+   "name": {
+    "zh": "游戏直播",
+    "vi": "Livestream game",
+    "en": "Game Livestreams"
+   },
+   "keywords": [
+    "游戏直播间",
+    "直播打游戏",
+    "xem game trực tiếp",
+    "livestream game",
+    "twitch",
+    "streamer"
+   ]
+  },
+  {
+   "id": "interest/games/streaming/clip",
+   "parent": "interest/games/streaming",
+   "name": {
+    "zh": "游戏精彩剪辑",
+    "vi": "Highlight game",
+    "en": "Game Clips"
+   },
+   "keywords": [
+    "游戏高光",
+    "highlight game",
+    "游戏集锦",
+    "clip game",
+    "五杀",
+    "penta kill"
+   ]
+  },
+  {
+   "id": "interest/games/streaming/upload",
+   "parent": "interest/games/streaming",
+   "name": {
+    "zh": "游戏解说投稿",
+    "vi": "Đăng video game",
+    "en": "Game Uploads"
+   },
+   "keywords": [
+    "游戏解说",
+    "up video game",
+    "tổng hợp game",
+    "游戏投稿",
+    "bilibili"
+   ]
+  },
+  {
+   "id": "interest/games/communities",
+   "parent": "interest/games",
+   "name": {
+    "zh": "玩家圈子",
+    "vi": "Cộng đồng game",
+    "en": "Player Communities"
+   },
+   "keywords": [
+    "玩家",
+    "cộng đồng game",
+    "game thủ",
+    "公会",
+    "同好",
+    "đội nhóm game"
+   ]
+  },
+  {
+   "id": "interest/games/communities/lend_account",
+   "parent": "interest/games/communities",
+   "name": {
+    "zh": "账号借用",
+    "vi": "Cho mượn nick",
+    "en": "Account Sharing"
+   },
+   "keywords": [
+    "借号",
+    "cho mượn nick",
+    "账号共用",
+    "借账号上分",
+    "mượn tài khoản"
+   ]
+  },
+  {
+   "id": "interest/games/communities/boosting",
+   "parent": "interest/games/communities",
+   "name": {
+    "zh": "带打上分",
+    "vi": "Kèm leo hạng",
+    "en": "Rank Coaching"
+   },
+   "keywords": [
+    "代练",
+    "带打",
+    "上分",
+    "thuê leo rank",
+    "kèm rank"
+   ]
+  },
+  {
+   "id": "interest/games/communities/lan_cafe",
+   "parent": "interest/games/communities",
+   "name": {
+    "zh": "网吧开黑",
+    "vi": "Quán net",
+    "en": "LAN Cafe Gaming"
+   },
+   "keywords": [
+    "网吧",
+    "quán net",
+    "开黑",
+    "game net",
+    "ping cao",
+    "ngồi máy lẻ"
+   ]
+  }
+ ]
+}

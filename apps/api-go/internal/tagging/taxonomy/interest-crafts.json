@@ -1,0 +1,1187 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/crafts/textile",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "织物线艺",
+    "vi": "Sợi & chỉ",
+    "en": "Fiber Crafts"
+   },
+   "keywords": [
+    "线艺",
+    "thủ công sợi",
+    "fiber art",
+    "sợi đan",
+    "chỉ màu"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/knitting",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "棒针编织",
+    "vi": "Đan len",
+    "en": "Knitting"
+   },
+   "keywords": [
+    "棒针",
+    "đan len",
+    "knitting",
+    "áo len đan",
+    "đan khăn"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/crochet",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "钩针编织",
+    "vi": "Móc đan",
+    "en": "Crochet"
+   },
+   "keywords": [
+    "钩针",
+    "móc đan",
+    "crochet",
+    "móc len",
+    "túi móc"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/macrame",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "编绳挂饰",
+    "vi": "Đan rối dây",
+    "en": "Macrame"
+   },
+   "keywords": [
+    "编绳",
+    "đan rối",
+    "macrame",
+    "dây tết treo tường",
+    "túi lưới đan"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/tufting",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "簇绒地毯",
+    "vi": "Làm thảm tufting",
+    "en": "Tufting"
+   },
+   "keywords": [
+    "簇绒",
+    "tufting",
+    "làm thảm len",
+    "thảm bông",
+    "khung căng thảm"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/weaving",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "手工织布",
+    "vi": "Dệt tay",
+    "en": "Hand Weaving"
+   },
+   "keywords": [
+    "织布",
+    "dệt tay",
+    "weaving",
+    "khung cửi",
+    "vải dệt tay"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/felting",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "羊毛毡",
+    "vi": "Nỉ len",
+    "en": "Needle Felting"
+   },
+   "keywords": [
+    "羊毛毡",
+    "nỉ len",
+    "felting",
+    "bông cừu",
+    "nỉ kim"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/embroidery",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "手工刺绣",
+    "vi": "Thêu tay",
+    "en": "Hand Embroidery"
+   },
+   "keywords": [
+    "刺绣",
+    "thêu tay",
+    "embroidery",
+    "khung thêu",
+    "chỉ thêu"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/cross_stitch",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "十字绣",
+    "vi": "Thêu chữ thập",
+    "en": "Cross Stitch"
+   },
+   "keywords": [
+    "十字绣",
+    "thêu chữ thập",
+    "cross stitch",
+    "mũi chữ thập",
+    "bìa thêu"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/punch_needle",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "戳戳绣",
+    "vi": "Thêu nổi",
+    "en": "Punch Needle"
+   },
+   "keywords": [
+    "戳戳绣",
+    "punch needle",
+    "thêu nổi",
+    "len nổi",
+    "mũi len"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/beadwork",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "串珠手作",
+    "vi": "Xâu hạt",
+    "en": "Beadwork"
+   },
+   "keywords": [
+    "串珠",
+    "xâu hạt",
+    "beadwork",
+    "hạt cườm",
+    "vòng tay hạt"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/patchwork",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "拼布被",
+    "vi": "Chắp vải",
+    "en": "Patchwork Quilt"
+   },
+   "keywords": [
+    "拼布",
+    "chắp vải",
+    "patchwork",
+    "miếng vá vải",
+    "chăn chắp"
+   ]
+  },
+  {
+   "id": "interest/crafts/textile/fabric_dye",
+   "parent": "interest/crafts/textile",
+   "name": {
+    "zh": "扎染",
+    "vi": "Nhuộm vải",
+    "en": "Fabric Dyeing"
+   },
+   "keywords": [
+    "扎染",
+    "nhuộm vải",
+    "tie dye",
+    "vải buộc nhuộm",
+    "màu nhuộm"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "纸质手作",
+    "vi": "Thủ công giấy",
+    "en": "Paper Crafts"
+   },
+   "keywords": [
+    "纸质手作",
+    "thủ công giấy",
+    "paper craft",
+    "nghề giấy",
+    "tờ giấy cắt"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/origami",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "折纸",
+    "vi": "Gấp giấy",
+    "en": "Origami"
+   },
+   "keywords": [
+    "折纸",
+    "gấp giấy",
+    "origami",
+    "hạc giấy",
+    "gấp hoa"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/paper_cut",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "剪纸",
+    "vi": "Cắt giấy",
+    "en": "Paper Cutting"
+   },
+   "keywords": [
+    "剪纸",
+    "cắt giấy",
+    "papercut",
+    "giấy đỏ cắt",
+    "mẫu cắt"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/bookbinding",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "手工装订",
+    "vi": "Đóng sách tay",
+    "en": "Bookbinding"
+   },
+   "keywords": [
+    "手工书",
+    "đóng sách",
+    "bookbinding",
+    "gáy sách",
+    "bìa sách đóng"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/card_making",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "自制贺卡",
+    "vi": "Làm thiệp",
+    "en": "Card Making"
+   },
+   "keywords": [
+    "贺卡",
+    "làm thiệp",
+    "card making",
+    "thiệp giấy",
+    "thiệp nổi"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/scrapbook",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "剪贴簿",
+    "vi": "Album dán ảnh",
+    "en": "Scrapbooking"
+   },
+   "keywords": [
+    "剪贴簿",
+    "scrapbook",
+    "album dán",
+    "ảnh dán",
+    "miếng dán trang trí"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/stamp_carving",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "橡皮章",
+    "vi": "Khắc con dấu",
+    "en": "Stamp Carving"
+   },
+   "keywords": [
+    "橡皮章",
+    "khắc con dấu",
+    "stamp carving",
+    "mộc dấu cao su",
+    "mực dấu"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/paper_flower",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "纸花",
+    "vi": "Hoa giấy",
+    "en": "Paper Flowers"
+   },
+   "keywords": [
+    "纸花",
+    "hoa giấy",
+    "bó hoa tự làm",
+    "cành hoa giấy",
+    "giấy cuộn"
+   ]
+  },
+  {
+   "id": "interest/crafts/paper/paper_mache",
+   "parent": "interest/crafts/paper",
+   "name": {
+    "zh": "纸浆造型",
+    "vi": "Giấy bồi",
+    "en": "Papier-mâché"
+   },
+   "keywords": [
+    "纸浆",
+    "giấy bồi",
+    "papier-mache",
+    "mặt nạ giấy",
+    "tượng giấy"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "陶泥手作",
+    "vi": "Nặn đất sét",
+    "en": "Clay Crafts"
+   },
+   "keywords": [
+    "陶泥",
+    "clay crafts",
+    "đất nặn",
+    "sét thủ công",
+    "nặn tay"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/wheel_throwing",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "拉坯",
+    "vi": "Vuốt gốm",
+    "en": "Wheel Throwing"
+   },
+   "keywords": [
+    "拉坯",
+    "vuốt gốm",
+    "wheel throwing",
+    "bàn xoay tay",
+    "hũ gốm vuốt"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/hand_building",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "手捏陶",
+    "vi": "Nặn gốm tay",
+    "en": "Hand Building"
+   },
+   "keywords": [
+    "手捏陶",
+    "nặn gốm tay",
+    "handbuilding",
+    "tượng đất sét",
+    "bát nặn"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/ceramic_paint",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "陶瓷彩绘",
+    "vi": "Vẽ trên sứ",
+    "en": "Ceramic Painting"
+   },
+   "keywords": [
+    "陶瓷彩绘",
+    "vẽ trên sứ",
+    "ceramic painting",
+    "bát đĩa vẽ",
+    "tách vẽ men"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/polymer_clay",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "软陶",
+    "vi": "Đất sét polymer",
+    "en": "Polymer Clay"
+   },
+   "keywords": [
+    "软陶",
+    "polymer clay",
+    "đất sét polymer",
+    "sét cứng",
+    "nặn thú"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/clay_charm",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "黏土挂饰",
+    "vi": "Móc khóa nặn",
+    "en": "Clay Charms"
+   },
+   "keywords": [
+    "黏土挂件",
+    "clay charm",
+    "hạt đất sét",
+    "nặn trái cây",
+    "bích chương đất"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/kiln_firing",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "窑烧与上釉",
+    "vi": "Nung gốm",
+    "en": "Kiln Firing"
+   },
+   "keywords": [
+    "窑烧",
+    "nung gốm",
+    "kiln firing",
+    "lò nung",
+    "men rạn"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/plaster_cast",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "石膏浇筑",
+    "vi": "Đổ thạch cao",
+    "en": "Plaster Casting"
+   },
+   "keywords": [
+    "石膏浇筑",
+    "thạch cao",
+    "plaster cast",
+    "khuôn thạch cao",
+    "tượng thạch cao"
+   ]
+  },
+  {
+   "id": "interest/crafts/clay/pottery_class",
+   "parent": "interest/crafts/clay",
+   "name": {
+    "zh": "陶艺体验",
+    "vi": "Học làm gốm",
+    "en": "Pottery Class"
+   },
+   "keywords": [
+    "陶艺体验",
+    "học làm gốm",
+    "pottery class",
+    "lớp vuốt gốm",
+    "xưởng gốm thuê"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "木作",
+    "vi": "Đồ gỗ tự làm",
+    "en": "Woodwork"
+   },
+   "keywords": [
+    "木作",
+    "woodwork",
+    "đồ gỗ tự làm",
+    "xưởng mộc gia đình",
+    "phoi gỗ"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood/whittling",
+   "parent": "interest/crafts/wood",
+   "name": {
+    "zh": "削木",
+    "vi": "Gọt gỗ",
+    "en": "Whittling"
+   },
+   "keywords": [
+    "削木",
+    "gọt gỗ",
+    "whittling",
+    "muỗng gỗ",
+    "dao gọt tay"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood/wood_turning",
+   "parent": "interest/crafts/wood",
+   "name": {
+    "zh": "车木",
+    "vi": "Tiện gỗ",
+    "en": "Wood Turning"
+   },
+   "keywords": [
+    "车木",
+    "tiện gỗ",
+    "wood turning",
+    "máy tiện tay",
+    "chén gỗ tiện"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood/joinery",
+   "parent": "interest/crafts/wood",
+   "name": {
+    "zh": "榫卯木盒",
+    "vi": "Ghép mộc",
+    "en": "Joinery"
+   },
+   "keywords": [
+    "榫卯",
+    "ghép mộc",
+    "joinery",
+    "hộp gỗ lắp",
+    "keo gỗ"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood/wood_carving",
+   "parent": "interest/crafts/wood",
+   "name": {
+    "zh": "木雕",
+    "vi": "Chạm khắc gỗ",
+    "en": "Wood Carving"
+   },
+   "keywords": [
+    "木雕",
+    "chạm khắc gỗ",
+    "wood carving",
+    "tượng gỗ nhỏ",
+    "mặt nạ gỗ"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood/bamboo_craft",
+   "parent": "interest/crafts/wood",
+   "name": {
+    "zh": "竹藤编",
+    "vi": "Đan mây tre",
+    "en": "Bamboo & Rattan"
+   },
+   "keywords": [
+    "竹编",
+    "đan mây",
+    "bamboo craft",
+    "phên tre",
+    "rổ đan tay"
+   ]
+  },
+  {
+   "id": "interest/crafts/wood/furniture_refresh",
+   "parent": "interest/crafts/wood",
+   "name": {
+    "zh": "旧家具翻新",
+    "vi": "Sơn lại bàn ghế",
+    "en": "Furniture Upcycle"
+   },
+   "keywords": [
+    "家具翻新",
+    "furniture upcycle",
+    "đồ gỗ cũ",
+    "phủ vecni",
+    "sơn lại ghế"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "金工与玻璃",
+    "vi": "Kim loại & kính",
+    "en": "Metal & Glass"
+   },
+   "keywords": [
+    "金工",
+    "dập kim loại",
+    "metal craft",
+    "thủy tinh nghệ thuật",
+    "bàn mòn kim loại"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass/jewelry_making",
+   "parent": "interest/crafts/metal_glass",
+   "name": {
+    "zh": "首饰制作",
+    "vi": "Làm trang sức",
+    "en": "Jewelry Making"
+   },
+   "keywords": [
+    "首饰制作",
+    "làm trang sức",
+    "jewelry making",
+    "dây chuyền tự làm",
+    "lắc tay tự xâu"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass/wire_wrap",
+   "parent": "interest/crafts/metal_glass",
+   "name": {
+    "zh": "绕线镶嵌",
+    "vi": "Uốn dây kim loại",
+    "en": "Wire Wrapping"
+   },
+   "keywords": [
+    "绕线",
+    "wire wrapping",
+    "đá bọc dây",
+    "khuyên quấn",
+    "kìm uốn"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass/silversmith",
+   "parent": "interest/crafts/metal_glass",
+   "name": {
+    "zh": "打银",
+    "vi": "Đập bạc",
+    "en": "Silversmithing"
+   },
+   "keywords": [
+    "打银",
+    "đập bạc",
+    "silversmith",
+    "nhẫn bạc tự làm",
+    "mạ bạc"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass/enamel_pin",
+   "parent": "interest/crafts/metal_glass",
+   "name": {
+    "zh": "珐琅徽章",
+    "vi": "Huy hiệu men",
+    "en": "Enamel Pins"
+   },
+   "keywords": [
+    "珐琅徽章",
+    "huy hiệu men",
+    "enamel pin",
+    "ghim cài",
+    "khóa cài áo"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass/glass_craft",
+   "parent": "interest/crafts/metal_glass",
+   "name": {
+    "zh": "玻璃手作",
+    "vi": "Kính màu",
+    "en": "Glass Art"
+   },
+   "keywords": [
+    "玻璃工艺",
+    "glass art",
+    "tranh ghép kính",
+    "chai thủy tinh cắt",
+    "kính tán"
+   ]
+  },
+  {
+   "id": "interest/crafts/metal_glass/resin_cast",
+   "parent": "interest/crafts/metal_glass",
+   "name": {
+    "zh": "滴胶浇筑",
+    "vi": "Nhựa epoxy",
+    "en": "Resin Casting"
+   },
+   "keywords": [
+    "滴胶",
+    "nhựa epoxy",
+    "resin casting",
+    "epoxy trong",
+    "móc khóa resin"
+   ]
+  },
+  {
+   "id": "interest/crafts/scent",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "香与蜡",
+    "vi": "Nến & hương liệu",
+    "en": "Wax & Scent"
+   },
+   "keywords": [
+    "香薰自制",
+    "wax crafts",
+    "hương liệu",
+    "mùi thơm nhà"
+   ]
+  },
+  {
+   "id": "interest/crafts/scent/candle_pour",
+   "parent": "interest/crafts/scent",
+   "name": {
+    "zh": "浇蜡烛",
+    "vi": "Đổ nến",
+    "en": "Candle Making"
+   },
+   "keywords": [
+    "浇蜡烛",
+    "candle making",
+    "nến thơm",
+    "hũ nến sáp",
+    "bấc nến"
+   ]
+  },
+  {
+   "id": "interest/crafts/scent/soap_making",
+   "parent": "interest/crafts/scent",
+   "name": {
+    "zh": "手工皂",
+    "vi": "Xà phòng tự làm",
+    "en": "Soap Making"
+   },
+   "keywords": [
+    "手工皂",
+    "soap making",
+    "khuôn xà phòng",
+    "bọt xà phòng",
+    "xà phòng lạnh"
+   ]
+  },
+  {
+   "id": "interest/crafts/scent/incense_roll",
+   "parent": "interest/crafts/scent",
+   "name": {
+    "zh": "制香",
+    "vi": "Se nhang",
+    "en": "Incense Making"
+   },
+   "keywords": [
+    "制香",
+    "se nhang",
+    "incense making",
+    "hương nụ",
+    "bột trầm"
+   ]
+  },
+  {
+   "id": "interest/crafts/model",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "模型拼装",
+    "vi": "Đồ lắp ráp",
+    "en": "Models & Kits"
+   },
+   "keywords": [
+    "模型拼装",
+    "model making",
+    "hộp mô hình",
+    "đồ lắp ráp",
+    "tỉ lệ mô hình"
+   ]
+  },
+  {
+   "id": "interest/crafts/model/model_kit",
+   "parent": "interest/crafts/model",
+   "name": {
+    "zh": "拼装模型",
+    "vi": "Lắp ráp mô hình",
+    "en": "Model Kits"
+   },
+   "keywords": [
+    "拼装模型",
+    "model kit",
+    "gundam",
+    "mô hình nhựa",
+    "runner nhựa"
+   ]
+  },
+  {
+   "id": "interest/crafts/model/model_paint",
+   "parent": "interest/crafts/model",
+   "name": {
+    "zh": "模型涂装",
+    "vi": "Sơn mô hình",
+    "en": "Model Painting"
+   },
+   "keywords": [
+    "模型涂装",
+    "model painting",
+    "màu sơn mô hình",
+    "bút sơn",
+    "phun sơn"
+   ]
+  },
+  {
+   "id": "interest/crafts/model/diorama",
+   "parent": "interest/crafts/model",
+   "name": {
+    "zh": "场景模型",
+    "vi": "Làm cảnh mô hình",
+    "en": "Diorama"
+   },
+   "keywords": [
+    "场景模型",
+    "diorama",
+    "nền cảnh",
+    "phố mô hình",
+    "cảnh thu nhỏ"
+   ]
+  },
+  {
+   "id": "interest/crafts/model/miniature",
+   "parent": "interest/crafts/model",
+   "name": {
+    "zh": "微缩屋",
+    "vi": "Nhà búp bê",
+    "en": "Miniatures"
+   },
+   "keywords": [
+    "微缩屋",
+    "miniature",
+    "bếp tí hon",
+    "mô hình thu nhỏ",
+    "nhà gỗ mini"
+   ]
+  },
+  {
+   "id": "interest/crafts/model/block_build",
+   "parent": "interest/crafts/model",
+   "name": {
+    "zh": "拼插积木",
+    "vi": "Xếp khối",
+    "en": "Building Blocks"
+   },
+   "keywords": [
+    "拼插积木",
+    "brick building",
+    "gạch lắp",
+    "xếp khối",
+    "hộp xếp hình"
+   ]
+  },
+  {
+   "id": "interest/crafts/model/doll_making",
+   "parent": "interest/crafts/model",
+   "name": {
+    "zh": "棉花娃娃",
+    "vi": "Búp bê nhồi bông",
+    "en": "Doll Making"
+   },
+   "keywords": [
+    "棉花娃娃",
+    "doll making",
+    "vải nhồi",
+    "may thú bông",
+    "búp bê vải"
+   ]
+  },
+  {
+   "id": "interest/crafts/leather",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "皮具",
+    "vi": "Đồ da",
+    "en": "Leatherwork"
+   },
+   "keywords": [
+    "皮具",
+    "leathercraft",
+    "da thuộc",
+    "xưởng da",
+    "tấm da bò"
+   ]
+  },
+  {
+   "id": "interest/crafts/leather/leather_cut",
+   "parent": "interest/crafts/leather",
+   "name": {
+    "zh": "皮具裁切",
+    "vi": "Cắt da",
+    "en": "Leather Cutting"
+   },
+   "keywords": [
+    "皮具裁切",
+    "leather cutting",
+    "ví da cắt",
+    "chốt da",
+    "đục lỗ da"
+   ]
+  },
+  {
+   "id": "interest/crafts/leather/leather_stitch",
+   "parent": "interest/crafts/leather",
+   "name": {
+    "zh": "手缝皮具",
+    "vi": "Khâu da",
+    "en": "Saddle Stitching"
+   },
+   "keywords": [
+    "手缝皮具",
+    "hand stitching",
+    "khâu da",
+    "chỉ dù",
+    "mũi khâu tay"
+   ]
+  },
+  {
+   "id": "interest/crafts/leather/leather_tooling",
+   "parent": "interest/crafts/leather",
+   "name": {
+    "zh": "皮雕",
+    "vi": "Dập da",
+    "en": "Leather Tooling"
+   },
+   "keywords": [
+    "皮雕",
+    "leather tooling",
+    "khắc trên da",
+    "dây lưng dập",
+    "dập nổi da"
+   ]
+  },
+  {
+   "id": "interest/crafts/sewing",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "缝纫自制",
+    "vi": "May mặc tự làm",
+    "en": "Home Sewing"
+   },
+   "keywords": [
+    "缝纫自制",
+    "home sewing",
+    "xưởng may tại nhà",
+    "vải & chỉ may",
+    "gối kim"
+   ]
+  },
+  {
+   "id": "interest/crafts/sewing/sewing_machine",
+   "parent": "interest/crafts/sewing",
+   "name": {
+    "zh": "家用缝纫机",
+    "vi": "Máy may gia đình",
+    "en": "Sewing Machine"
+   },
+   "keywords": [
+    "缝纫机",
+    "sewing machine",
+    "máy may gia đình",
+    "bàn máy may",
+    "chỉ may"
+   ]
+  },
+  {
+   "id": "interest/crafts/sewing/garment_sew",
+   "parent": "interest/crafts/sewing",
+   "name": {
+    "zh": "自制衣服",
+    "vi": "May quần áo",
+    "en": "Making Clothes"
+   },
+   "keywords": [
+    "自制衣服",
+    "garment making",
+    "quần áo tự cắt",
+    "vải may",
+    "áo tự may"
+   ]
+  },
+  {
+   "id": "interest/crafts/sewing/pattern_draft",
+   "parent": "interest/crafts/sewing",
+   "name": {
+    "zh": "打版制图",
+    "vi": "Vẽ rập",
+    "en": "Pattern Drafting"
+   },
+   "keywords": [
+    "打版",
+    "pattern drafting",
+    "giấy rập",
+    "cắt theo rập",
+    "size mẫu"
+   ]
+  },
+  {
+   "id": "interest/crafts/sewing/upcycle_clothes",
+   "parent": "interest/crafts/sewing",
+   "name": {
+    "zh": "旧衣改造",
+    "vi": "Tái chế áo quần",
+    "en": "Clothing Upcycle"
+   },
+   "keywords": [
+    "旧衣改造",
+    "clothing upcycle",
+    "áo cũ may lại",
+    "vá áo",
+    "thêu lại áo"
+   ]
+  },
+  {
+   "id": "interest/crafts/sewing/tote_bag",
+   "parent": "interest/crafts/sewing",
+   "name": {
+    "zh": "缝布袋",
+    "vi": "May túi vải",
+    "en": "Bag Sewing"
+   },
+   "keywords": [
+    "缝布袋",
+    "tote bag sewing",
+    "túi rút",
+    "ví nhỏ may",
+    "túi vải gấp"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker",
+   "parent": "interest/crafts",
+   "name": {
+    "zh": "工坊与材料",
+    "vi": "Xưởng & nguyên liệu",
+    "en": "Makers & Supplies"
+   },
+   "keywords": [
+    "手作工坊",
+    "makers",
+    "nguyên liệu làm tay",
+    "hội handmade"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/craft_workshop",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "手作体验",
+    "vi": "Workshop thủ công",
+    "en": "Craft Workshop"
+   },
+   "keywords": [
+    "手作体验",
+    "craft workshop",
+    "trải nghiệm làm tay",
+    "lớp làm thử",
+    "làm tại quán"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/makerspace",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "创客空间",
+    "vi": "Không gian chế tác",
+    "en": "Makerspace"
+   },
+   "keywords": [
+    "创客空间",
+    "makerspace",
+    "xưởng dùng chung",
+    "dụng cụ thuê",
+    "thuê máy cắt"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/material_kit",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "材料包",
+    "vi": "Kit tự làm",
+    "en": "Craft Kit"
+   },
+   "keywords": [
+    "材料包",
+    "craft kit",
+    "set tự làm",
+    "hộp vật liệu",
+    "kit đan"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/craft_supply",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "买手作材料",
+    "vi": "Tiệm đồ thủ công",
+    "en": "Craft Supplies"
+   },
+   "keywords": [
+    "买材料",
+    "craft supplies",
+    "tiệm vải",
+    "kệ dụng cụ",
+    "mua len"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/craft_gift",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "手作礼物",
+    "vi": "Quà tự làm",
+    "en": "Handmade Gifts"
+   },
+   "keywords": [
+    "手作礼物",
+    "quà tự làm",
+    "handmade gift",
+    "làm quà tặng",
+    "gói quà"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/craft_fair",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "手作市集",
+    "vi": "Chợ handmade",
+    "en": "Craft Fair"
+   },
+   "keywords": [
+    "手作市集",
+    "chợ handmade",
+    "craft fair",
+    "gian hàng thủ công",
+    "bày bán đồ làm"
+   ]
+  },
+  {
+   "id": "interest/crafts/maker/craft_community",
+   "parent": "interest/crafts/maker",
+   "name": {
+    "zh": "手作同好",
+    "vi": "Nhóm handmade",
+    "en": "Craft Community"
+   },
+   "keywords": [
+    "手作同好",
+    "craft club",
+    "cộng đồng tự làm",
+    "quy trình làm",
+    "mẹo thủ công"
+   ]
+  }
+ ]
+}
