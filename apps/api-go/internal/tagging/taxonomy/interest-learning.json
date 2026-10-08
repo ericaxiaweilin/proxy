@@ -1,0 +1,383 @@
+{
+  "domain": "interest",
+  "nodes": [
+    {
+      "id": "interest/learning/lang",
+      "parent": "interest/learning",
+      "name": {"zh": "语言学习", "vi": "Học ngoại ngữ", "en": "Language Learning"},
+      "keywords": ["外语", "ngoại ngữ", "language learning", "luyện nói"]
+    },
+    {
+      "id": "interest/learning/lang/chinese",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "中文", "vi": "Tiếng Trung", "en": "Chinese"},
+      "keywords": ["中文", "tiếng trung", "học hoa", "chinese", "pinyin"]
+    },
+    {
+      "id": "interest/learning/lang/bizchinese",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "商务中文", "vi": "Tiếng Hoa thương mại", "en": "Business Chinese"},
+      "keywords": ["商务中文", "hoa thương mại", "từ vựng văn phòng", "tiếng hoa công sở"]
+    },
+    {
+      "id": "interest/learning/lang/english",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "英语", "vi": "Tiếng Anh", "en": "English"},
+      "keywords": ["英语", "tiếng anh", "english", "tieng anh", "giao tiếp tiếng anh"]
+    },
+    {
+      "id": "interest/learning/lang/japanese",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "日语", "vi": "Tiếng Nhật", "en": "Japanese"},
+      "keywords": ["日语", "tiếng nhật", "nihongo", "hiragana", "cấp độ n5"]
+    },
+    {
+      "id": "interest/learning/lang/korean",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "韩语", "vi": "Tiếng Hàn", "en": "Korean"},
+      "keywords": ["韩语", "tiếng hàn", "hangul", "eps hàn", "luyện nói hàn"]
+    },
+    {
+      "id": "interest/learning/lang/french",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "法语", "vi": "Tiếng Pháp", "en": "French"},
+      "keywords": ["法语", "tiếng pháp", "french", "delf"]
+    },
+    {
+      "id": "interest/learning/lang/spanish",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "西班牙语", "vi": "Tiếng Tây Ban Nha", "en": "Spanish"},
+      "keywords": ["西班牙语", "tây ban nha", "spanish", "dele"]
+    },
+    {
+      "id": "interest/learning/lang/thai",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "泰语", "vi": "Tiếng Thái", "en": "Thai"},
+      "keywords": ["泰语", "tiếng thái", "thai", "phiên âm thái"]
+    },
+    {
+      "id": "interest/learning/lang/vietnamese",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "越南语", "vi": "Tiếng Việt", "en": "Vietnamese"},
+      "keywords": ["越南语", "tiếng việt", "vietnamese", "tieng viet", "dấu thanh"]
+    },
+    {
+      "id": "interest/learning/lang/pronounce",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "发音纠正", "vi": "Luyện phát âm", "en": "Pronunciation"},
+      "keywords": ["发音", "phát âm", "accent", "ngữ điệu", "thanh mẫu"]
+    },
+    {
+      "id": "interest/learning/lang/listening",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "听力", "vi": "Luyện nghe", "en": "Listening"},
+      "keywords": ["听力", "luyện nghe", "listening", "shadowing", "nghe chép"]
+    },
+    {
+      "id": "interest/learning/lang/vocab",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "词汇", "vi": "Từ vựng", "en": "Vocabulary"},
+      "keywords": ["词汇", "từ vựng", "anki", "spaced repetition", "memorize"]
+    },
+    {
+      "id": "interest/learning/lang/grammar",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "语法写作", "vi": "Ngữ pháp", "en": "Grammar & Writing"},
+      "keywords": ["语法", "ngữ pháp", "cấu trúc câu", "viết đoạn văn"]
+    },
+    {
+      "id": "interest/learning/lang/exchange",
+      "parent": "interest/learning/lang",
+      "name": {"zh": "语言交换", "vi": "Trao đổi ngôn ngữ", "en": "Language Exchange"},
+      "keywords": ["语言伙伴", "language exchange", "bạn luyện nói", "trao đổi ngôn ngữ"]
+    },
+    {
+      "id": "interest/learning/exam",
+      "parent": "interest/learning",
+      "name": {"zh": "考试", "vi": "Kỳ thi", "en": "Exams"},
+      "keywords": ["考试", "kỳ thi", "đề thi", "luyện thi"]
+    },
+    {
+      "id": "interest/learning/exam/ielts",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "雅思", "vi": "IELTS", "en": "IELTS"},
+      "keywords": ["雅思", "ielts", "band điểm", "mock ielts", "writing task 2"]
+    },
+    {
+      "id": "interest/learning/exam/toeic",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "托业", "vi": "TOEIC", "en": "TOEIC"},
+      "keywords": ["toeic", "thi toeic", "700 toeic"]
+    },
+    {
+      "id": "interest/learning/exam/toefl",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "托福", "vi": "TOEFL", "en": "TOEFL"},
+      "keywords": ["托福", "toefl", "ibt"]
+    },
+    {
+      "id": "interest/learning/exam/hsk",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "HSK 汉语考试", "vi": "HSK", "en": "HSK Chinese Test"},
+      "keywords": ["hsk", "汉字", "chữ hán", "hsk 5"]
+    },
+    {
+      "id": "interest/learning/exam/jlpt",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "日语能力考", "vi": "JLPT", "en": "JLPT"},
+      "keywords": ["jlpt", "n2 n3", "kanji", "luyện jlpt"]
+    },
+    {
+      "id": "interest/learning/exam/topik",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "韩语能力考", "vi": "TOPIK", "en": "TOPIK"},
+      "keywords": ["topik", "luyện topik", "chứng chỉ hàn ngữ"]
+    },
+    {
+      "id": "interest/learning/exam/grade10",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "中考入学", "vi": "Thi vào lớp 10", "en": "Secondary Entrance"},
+      "keywords": ["中考", "tuyển sinh", "điểm chuẩn", "lớp 10"]
+    },
+    {
+      "id": "interest/learning/exam/national",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "高考与毕业考", "vi": "Thi tốt nghiệp", "en": "National Exam"},
+      "keywords": ["高考", "tốt nghiệp thpt", "khối a", "điểm xét"]
+    },
+    {
+      "id": "interest/learning/exam/graduate",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "考研与硕士", "vi": "Học cao học", "en": "Graduate Entry"},
+      "keywords": ["考研", "cao học", "thạc sĩ", "luan văn"]
+    },
+    {
+      "id": "interest/learning/exam/cert",
+      "parent": "interest/learning/exam",
+      "name": {"zh": "考证", "vi": "Thi lấy chứng nhận", "en": "Certification Tests"},
+      "keywords": ["考证", "bằng cấp", "thi lấy bằng", "chứng chỉ tin học"]
+    },
+    {
+      "id": "interest/learning/kids",
+      "parent": "interest/learning",
+      "name": {"zh": "儿童学习", "vi": "Chuyện học của bé", "en": "Kids Learning"},
+      "keywords": ["早教", "học sớm", "cho bé học", "trẻ nhỏ"]
+    },
+    {
+      "id": "interest/learning/kids/math",
+      "parent": "interest/learning/kids",
+      "name": {"zh": "数学思维", "vi": "Toán tư duy", "en": "Math"},
+      "keywords": ["数学", "toán tư duy", "tính nhẩm", "abacus", "suy luận"]
+    },
+    {
+      "id": "interest/learning/kids/english",
+      "parent": "interest/learning/kids",
+      "name": {"zh": "少儿英语", "vi": "Tiếng Anh trẻ em", "en": "Kids English"},
+      "keywords": ["少儿英语", "tiếng anh trẻ em", "phonics", "học qua bài hát"]
+    },
+    {
+      "id": "interest/learning/kids/preschool",
+      "parent": "interest/learning/kids",
+      "name": {"zh": "幼小衔接", "vi": "Tiền tiểu học", "en": "Pre-school"},
+      "keywords": ["幼小衔接", "tiền tiểu học", "lớp lá", "mẫu giáo"]
+    },
+    {
+      "id": "interest/learning/kids/code",
+      "parent": "interest/learning/kids",
+      "name": {"zh": "编程启蒙", "vi": "Lập trình cho bé", "en": "Kids Coding"},
+      "keywords": ["编程启蒙", "scratch", "code cho bé", "tư duy logic"]
+    },
+    {
+      "id": "interest/learning/kids/handwriting",
+      "parent": "interest/learning/kids",
+      "name": {"zh": "练字", "vi": "Luyện chữ", "en": "Handwriting"},
+      "keywords": ["练字", "chữ đẹp", "luyện viết", "nắn nót"]
+    },
+    {
+      "id": "interest/learning/kids/club",
+      "parent": "interest/learning/kids",
+      "name": {"zh": "兴趣班与暑假班", "vi": "Lớp năng khiếu", "en": "Enrichment Classes"},
+      "keywords": ["兴趣班", "lớp năng khiếu", "hè bán trú", "khóa hè"]
+    },
+    {
+      "id": "interest/learning/study",
+      "parent": "interest/learning",
+      "name": {"zh": "学习方法", "vi": "Cách học", "en": "Study Methods"},
+      "keywords": ["自习", "tự học", "phương pháp học", "lịch học"]
+    },
+    {
+      "id": "interest/learning/study/room",
+      "parent": "interest/learning/study",
+      "name": {"zh": "自习室", "vi": "Quán học bài", "en": "Study Rooms"},
+      "keywords": ["自习室", "quán học", "study room", "ca học"]
+    },
+    {
+      "id": "interest/learning/study/tutor",
+      "parent": "interest/learning/study",
+      "name": {"zh": "家教辅导", "vi": "Dạy kèm", "en": "Tutoring"},
+      "keywords": ["家教", "dạy kèm", "gia sư", "kèm thêm"]
+    },
+    {
+      "id": "interest/learning/study/group",
+      "parent": "interest/learning/study",
+      "name": {"zh": "学习小组", "vi": "Học nhóm", "en": "Study Groups"},
+      "keywords": ["学习小组", "học nhóm", "nhóm cùng tiến", "study buddy"]
+    },
+    {
+      "id": "interest/learning/study/notes",
+      "parent": "interest/learning/study",
+      "name": {"zh": "笔记与思维导图", "vi": "Sơ đồ ghi", "en": "Note-making"},
+      "keywords": ["ghi chép", "sơ đồ tư duy", "mindmap", "cornell"]
+    },
+    {
+      "id": "interest/learning/study/plan",
+      "parent": "interest/learning/study",
+      "name": {"zh": "计划与专注", "vi": "Lập kế hoạch học", "en": "Focus & Planning"},
+      "keywords": ["专注", "deep work", "thời gian biểu", "chống xao nhãng", "kỷ luật học"]
+    },
+    {
+      "id": "interest/learning/study/review",
+      "parent": "interest/learning/study",
+      "name": {"zh": "复习备考", "vi": "Ôn thi", "en": "Revision"},
+      "keywords": ["复习", "ôn thi", "bộ đề", "đề cương", "làm đề"]
+    },
+    {
+      "id": "interest/learning/online",
+      "parent": "interest/learning",
+      "name": {"zh": "网课与资源", "vi": "Học online", "en": "Online Courses"},
+      "keywords": ["网课", "khóa học", "học online", "tài liệu học"]
+    },
+    {
+      "id": "interest/learning/online/mooc",
+      "parent": "interest/learning/online",
+      "name": {"zh": "公开课", "vi": "Khóa học mở", "en": "Open Courses"},
+      "keywords": ["公开课", "mooc", "coursera", "miễn phí học"]
+    },
+    {
+      "id": "interest/learning/online/apps",
+      "parent": "interest/learning/online",
+      "name": {"zh": "学习 App", "vi": "Ứng dụng luyện tập", "en": "Learning Apps"},
+      "keywords": ["duolingo", "app luyện", "kho học liệu", "vnedu"]
+    },
+    {
+      "id": "interest/learning/online/audio",
+      "parent": "interest/learning/online",
+      "name": {"zh": "音频课与讲座", "vi": "Nghe bài giảng", "en": "Audio Lessons"},
+      "keywords": ["音频课", "bài giảng", "podcast học", "lecture"]
+    },
+    {
+      "id": "interest/learning/online/live",
+      "parent": "interest/learning/online",
+      "name": {"zh": "直播课", "vi": "Lớp học trực tuyến", "en": "Live Classes"},
+      "keywords": ["直播课", "học trực tuyến", "zoom lớp", "lớp zoom"]
+    },
+    {
+      "id": "interest/learning/vocational",
+      "parent": "interest/learning",
+      "name": {"zh": "技能培训", "vi": "Học nghề", "en": "Vocational Training"},
+      "keywords": ["học nghề", "chứng chỉ nghề", "kỹ năng nghề", "đào tạo nghề"]
+    },
+    {
+      "id": "interest/learning/vocational/electric",
+      "parent": "interest/learning/vocational",
+      "name": {"zh": "电工", "vi": "Thợ điện", "en": "Electrical Work"},
+      "keywords": ["电工", "thợ điện", "an toàn điện", "bằng điện"]
+    },
+    {
+      "id": "interest/learning/vocational/welding",
+      "parent": "interest/learning/vocational",
+      "name": {"zh": "焊接工", "vi": "Thợ hàn", "en": "Welding"},
+      "keywords": ["焊工", "thợ hàn", "hàn xì", "cơ khí", "cắt gọt kim loại"]
+    },
+    {
+      "id": "interest/learning/vocational/cnc",
+      "parent": "interest/learning/vocational",
+      "name": {"zh": "数控加工", "vi": "Máy CNC", "en": "CNC Machining"},
+      "keywords": ["数控", "cnc", "thợ tiện", "phay cnc", "vận hành máy"]
+    },
+    {
+      "id": "interest/learning/vocational/sewing",
+      "parent": "interest/learning/vocational",
+      "name": {"zh": "缝纫裁剪", "vi": "Thợ may", "en": "Sewing"},
+      "keywords": ["缝纫", "thợ may", "cắt may", "máy may"]
+    },
+    {
+      "id": "interest/learning/vocational/forklift",
+      "parent": "interest/learning/vocational",
+      "name": {"zh": "叉车操作", "vi": "Lái xe nâng", "en": "Forklift Operation"},
+      "keywords": ["叉车", "xe nâng", "lái nâng", "forklift"]
+    },
+    {
+      "id": "interest/learning/vocational/accounting",
+      "parent": "interest/learning/vocational",
+      "name": {"zh": "会计培训", "vi": "Học làm kế toán", "en": "Accounting Course"},
+      "keywords": ["会计证", "học làm kế toán", "kế toán trưởng", "thực hành kế toán"]
+    },
+    {
+      "id": "interest/learning/school",
+      "parent": "interest/learning",
+      "name": {"zh": "学校与家校", "vi": "Trường lớp", "en": "School Life"},
+      "keywords": ["学校", "trường học", "phụ huynh", "thầy cô"]
+    },
+    {
+      "id": "interest/learning/school/homework",
+      "parent": "interest/learning/school",
+      "name": {"zh": "作业", "vi": "Bài tập về nhà", "en": "Homework"},
+      "keywords": ["作业", "bài tập", "vở bài tập", "chữa bài"]
+    },
+    {
+      "id": "interest/learning/school/grades",
+      "parent": "interest/learning/school",
+      "name": {"zh": "成绩排名", "vi": "Bảng điểm", "en": "Grades"},
+      "keywords": ["成绩", "điểm số", "bảng điểm", "gpa", "xếp loại"]
+    },
+    {
+      "id": "interest/learning/school/tuition",
+      "parent": "interest/learning/school",
+      "name": {"zh": "学费杂费", "vi": "Học phí", "en": "Tuition"},
+      "keywords": ["学费", "đóng phí đầu năm", "tiền trường", "học phí bán trú"]
+    },
+    {
+      "id": "interest/learning/school/uni",
+      "parent": "interest/learning/school",
+      "name": {"zh": "大学生活", "vi": "Đời sinh viên", "en": "University Life"},
+      "keywords": ["大学", "sinh viên", "đại học", "câu lạc bộ sinh viên"]
+    },
+    {
+      "id": "interest/learning/abroad",
+      "parent": "interest/learning",
+      "name": {"zh": "留学深造", "vi": "Du học", "en": "Study Abroad"},
+      "keywords": ["留学", "học bổng", "visa học", "cần chuẩn bị du học"]
+    },
+    {
+      "id": "interest/learning/abroad/japan",
+      "parent": "interest/learning/abroad",
+      "name": {"zh": "日本留学", "vi": "Du học Nhật", "en": "Study in Japan"},
+      "keywords": ["日本留学", "du học nhật", "senmon", "eju", "xkld nhật bản"]
+    },
+    {
+      "id": "interest/learning/abroad/korea",
+      "parent": "interest/learning/abroad",
+      "name": {"zh": "韩国留学", "vi": "Du học Hàn", "en": "Study in Korea"},
+      "keywords": ["韩国留学", "du học hàn", "học tại seoul", "korea scholarship"]
+    },
+    {
+      "id": "interest/learning/abroad/china",
+      "parent": "interest/learning/abroad",
+      "name": {"zh": "来华留学", "vi": "Học tại Trung Quốc", "en": "Study in China"},
+      "keywords": ["来华", "csc", "học tại bắc kinh", "học phí trung quốc"]
+    },
+    {
+      "id": "interest/learning/abroad/west",
+      "parent": "interest/learning/abroad",
+      "name": {"zh": "欧美留学", "vi": "Du học Âu Mỹ", "en": "Study in the West"},
+      "keywords": ["du mỹ", "sat", "au my", "chứng minh tài chính"]
+    },
+    {
+      "id": "interest/learning/abroad/paper",
+      "parent": "interest/learning/abroad",
+      "name": {"zh": "申请与文书", "vi": "Hồ sơ du học", "en": "Applications"},
+      "keywords": ["留学材料", "study plan", "thư giới thiệu", "phỏng vấn visa học"]
+    }
+  ]
+}

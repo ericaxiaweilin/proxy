@@ -1,0 +1,443 @@
+{
+  "domain": "interest",
+  "nodes": [
+    {
+      "id": "interest/work/job",
+      "parent": "interest/work",
+      "name": {"zh": "求职招聘", "vi": "Tuyển dụng", "en": "Jobs & Hiring"},
+      "keywords": ["求职", "tuyển dụng", "việc làm", "job posting"]
+    },
+    {
+      "id": "interest/work/job/resume",
+      "parent": "interest/work/job",
+      "name": {"zh": "简历", "vi": "Hồ sơ xin việc", "en": "Resumes"},
+      "keywords": ["简历", "cv", "xin việc", "cover letter", "sửa cv"]
+    },
+    {
+      "id": "interest/work/job/interview",
+      "parent": "interest/work/job",
+      "name": {"zh": "面试", "vi": "Phỏng vấn", "en": "Interviews"},
+      "keywords": ["面试", "phỏng vấn xin việc", "sơ yếu lý lịch", "trial test"]
+    },
+    {
+      "id": "interest/work/job/referral",
+      "parent": "interest/work/job",
+      "name": {"zh": "内推与猎头", "vi": "Giới thiệu nhân sự", "en": "Referrals"},
+      "keywords": ["内推", "headhunt", "nhà tuyển dụng", "giới thiệu người"]
+    },
+    {
+      "id": "interest/work/job/salary",
+      "parent": "interest/work/job",
+      "name": {"zh": "薪资与 offer", "vi": "Đàm phán lương", "en": "Salary & Offers"},
+      "keywords": ["薪资", "lương cứng", "deal lương", "offer việc"]
+    },
+    {
+      "id": "interest/work/job/factory",
+      "parent": "interest/work/job",
+      "name": {"zh": "普工与产线招聘", "vi": "Tuyển công nhân", "en": "Factory Hiring"},
+      "keywords": ["普工", "tuyển công nhân", "lao động phổ thông", "xưởng cần người"]
+    },
+    {
+      "id": "interest/work/job/intern",
+      "parent": "interest/work/job",
+      "name": {"zh": "实习", "vi": "Thực tập", "en": "Internships"},
+      "keywords": ["实习", "thực tập sinh", "intern", "mới ra trường"]
+    },
+    {
+      "id": "interest/work/job/resign",
+      "parent": "interest/work/job",
+      "name": {"zh": "离职跳糟", "vi": "Nghỉ việc", "en": "Resignation"},
+      "keywords": ["离职", "nhảy việc", "don xin nghi viec", "báo trước 45 ngày"]
+    },
+    {
+      "id": "interest/work/job/switch",
+      "parent": "interest/work/job",
+      "name": {"zh": "转行", "vi": "Chuyển ngành", "en": "Career Change"},
+      "keywords": ["转行", "chuyển ngành", "từ ngành khác", "career switch"]
+    },
+    {
+      "id": "interest/work/job/layoff",
+      "parent": "interest/work/job",
+      "name": {"zh": "裁员与补偿", "vi": "Cho thôi việc", "en": "Layoffs"},
+      "keywords": ["裁员", "bị cho nghỉ", "layoff", "trợ cấp thôi việc"]
+    },
+    {
+      "id": "interest/work/office",
+      "parent": "interest/work",
+      "name": {"zh": "办公室日常", "vi": "Chuyện công sở", "en": "Office Life"},
+      "keywords": ["上班", "đi làm", "công sở", "office"]
+    },
+    {
+      "id": "interest/work/office/desk",
+      "parent": "interest/work/office",
+      "name": {"zh": "工位布置", "vi": "Bàn làm việc", "en": "Desk Setup"},
+      "keywords": ["工位", "bàn làm việc", "dọn bàn", "desk tour"]
+    },
+    {
+      "id": "interest/work/office/meeting",
+      "parent": "interest/work/office",
+      "name": {"zh": "开会", "vi": "Họp", "en": "Meetings"},
+      "keywords": ["开会", "họp", "biên bản họp", "booking phòng họp"]
+    },
+    {
+      "id": "interest/work/office/shift",
+      "parent": "interest/work/office",
+      "name": {"zh": "排班考勤", "vi": "Ca kíp & chấm công", "en": "Shifts & Attendance"},
+      "keywords": ["排班", "ca kíp", "chấm công", "làm ca đêm", "thẻ chấm công"]
+    },
+    {
+      "id": "interest/work/office/commute",
+      "parent": "interest/work/office",
+      "name": {"zh": "上下班通勤", "vi": "Đi làm hằng ngày", "en": "Commute"},
+      "keywords": ["通勤", "giờ cao điểm", "đi làm sớm", "kẹt xe đầu giờ"]
+    },
+    {
+      "id": "interest/work/office/lunch",
+      "parent": "interest/work/office",
+      "name": {"zh": "工作日午餐", "vi": "Cơm trưa văn phòng", "en": "Working Lunch"},
+      "keywords": ["工作餐", "cơm suất", "đặt cơm trưa", "giờ nghỉ trưa"]
+    },
+    {
+      "id": "interest/work/office/team",
+      "parent": "interest/work/office",
+      "name": {"zh": "同事与团队", "vi": "Đồng nghiệp", "en": "Coworkers"},
+      "keywords": ["同事", "đồng nghiệp", "làm việc nhóm", "teambuilding"]
+    },
+    {
+      "id": "interest/work/office/boss",
+      "parent": "interest/work/office",
+      "name": {"zh": "上下级沟通", "vi": "Sếp và nhân viên", "en": "Managing Up"},
+      "keywords": ["领导", "sếp", "report sếp", "one on one"]
+    },
+    {
+      "id": "interest/work/career",
+      "parent": "interest/work",
+      "name": {"zh": "职业发展", "vi": "Phát triển nghề", "en": "Career Growth"},
+      "keywords": ["职业发展", "con đường nghề", "career path", "tư duy nghề"]
+    },
+    {
+      "id": "interest/work/career/plan",
+      "parent": "interest/work/career",
+      "name": {"zh": "职业规划辅导", "vi": "Hướng nghiệp", "en": "Career Coaching"},
+      "keywords": ["职业规划", "hướng nghiệp", "mentor nghề", "kế hoạch 5 năm"]
+    },
+    {
+      "id": "interest/work/career/promotion",
+      "parent": "interest/work/career",
+      "name": {"zh": "升职考核", "vi": "Xét thăng chức", "en": "Promotions"},
+      "keywords": ["晋升", "thăng chức", "đánh giá cuối năm", "kpi"]
+    },
+    {
+      "id": "interest/work/career/leading",
+      "parent": "interest/work/career",
+      "name": {"zh": "带团队", "vi": "Quản lý nhóm", "en": "People Management"},
+      "keywords": ["带团队", "quản lý nhân sự", "tuyển người về team", "offboard"]
+    },
+    {
+      "id": "interest/work/career/present",
+      "parent": "interest/work/career",
+      "name": {"zh": "汇报与演讲", "vi": "Thuyết trình", "en": "Presentations"},
+      "keywords": ["汇报", "thuyết trình", "powerpoint", "nói trước đám đông"]
+    },
+    {
+      "id": "interest/work/career/softskill",
+      "parent": "interest/work/career",
+      "name": {"zh": "软技能", "vi": "Kỹ năng mềm", "en": "Soft Skills"},
+      "keywords": ["软技能", "kỹ năng mềm", "quản lý thời gian", "thuyết phục"]
+    },
+    {
+      "id": "interest/work/money",
+      "parent": "interest/work",
+      "name": {"zh": "财税与钱", "vi": "Tài chính", "en": "Finance"},
+      "keywords": ["财务", "tài chính", "finance", "dòng tiền"]
+    },
+    {
+      "id": "interest/work/money/tax",
+      "parent": "interest/work/money",
+      "name": {"zh": "报税", "vi": "Khai thuế", "en": "Tax Filing"},
+      "keywords": ["报税", "khai thuế", "thuế tncn", "quyết toán thuế", "thue"]
+    },
+    {
+      "id": "interest/work/money/invoice",
+      "parent": "interest/work/money",
+      "name": {"zh": "发票与收据", "vi": "Hóa đơn", "en": "Invoices"},
+      "keywords": ["发票", "hóa đơn", "xuất hóa đơn", "hủy hóa đơn"]
+    },
+    {
+      "id": "interest/work/money/bookkeeping",
+      "parent": "interest/work/money",
+      "name": {"zh": "记账", "vi": "Sổ sách kế toán", "en": "Bookkeeping"},
+      "keywords": ["记账", "sổ quỹ", "kế toán nội bộ", "bảng kê"]
+    },
+    {
+      "id": "interest/work/money/payroll",
+      "parent": "interest/work/money",
+      "name": {"zh": "工资发放", "vi": "Tính lương", "en": "Payroll"},
+      "keywords": ["工资", "trả lương", "bảng lương", "phụ cấp", "tạm ứng lương"]
+    },
+    {
+      "id": "interest/work/money/stocks",
+      "parent": "interest/work/money",
+      "name": {"zh": "股票基金", "vi": "Chứng khoán", "en": "Stocks & Funds"},
+      "keywords": ["股票", "chứng khoán", "cổ phiếu", "quỹ mở", "mở tài khoản ck"]
+    },
+    {
+      "id": "interest/work/money/crypto",
+      "parent": "interest/work/money",
+      "name": {"zh": "加密资产", "vi": "Tiền mã hóa", "en": "Crypto"},
+      "keywords": ["crypto", "bitcoin", "tiền mã hóa", "sàn giao dịch số"]
+    },
+    {
+      "id": "interest/work/money/banking",
+      "parent": "interest/work/money",
+      "name": {"zh": "银行账户", "vi": "Ngân hàng", "en": "Banking"},
+      "keywords": ["开户", "mở tài khoản", "lãi suất", "internet banking", "quẹt thẻ"]
+    },
+    {
+      "id": "interest/work/money/insurance",
+      "parent": "interest/work/money",
+      "name": {"zh": "商业保险", "vi": "Bảo hiểm", "en": "Insurance"},
+      "keywords": ["保险", "bảo hiểm nhân thọ", "bảo hiểm y tế", "pru"]
+    },
+    {
+      "id": "interest/work/money/loan",
+      "parent": "interest/work/money",
+      "name": {"zh": "贷款分期", "vi": "Vay vốn", "en": "Loans"},
+      "keywords": ["贷款", "vay ngân hàng", "vay tiêu dùng", "trả góp", "hạn mức"]
+    },
+    {
+      "id": "interest/work/startup",
+      "parent": "interest/work",
+      "name": {"zh": "创业开店", "vi": "Khởi nghiệp", "en": "Startup & Shops"},
+      "keywords": ["创业", "khởi nghiệp", "startup", "doanh nghiệp"]
+    },
+    {
+      "id": "interest/work/startup/register",
+      "parent": "interest/work/startup",
+      "name": {"zh": "注册公司", "vi": "Thành lập công ty", "en": "Company Setup"},
+      "keywords": ["注册公司", "đăng ký kinh doanh", "mã số thuế", "con dấu"]
+    },
+    {
+      "id": "interest/work/startup/shop",
+      "parent": "interest/work/startup",
+      "name": {"zh": "店面与选址", "vi": "Mặt bằng & mở tiệm", "en": "Shop Opening"},
+      "keywords": ["开店", "mặt bằng", "sang nhượng", "thuê ki ốt", "setup cửa hàng"]
+    },
+    {
+      "id": "interest/work/startup/funding",
+      "parent": "interest/work/startup",
+      "name": {"zh": "找投资", "vi": "Gọi vốn", "en": "Fundraising"},
+      "keywords": ["融资", "gọi vốn", "investor", "demo day"]
+    },
+    {
+      "id": "interest/work/startup/plan",
+      "parent": "interest/work/startup",
+      "name": {"zh": "商业计划", "vi": "Kế hoạch kinh doanh", "en": "Business Plan"},
+      "keywords": ["商业计划", "ý tưởng kinh doanh", "pitch", "bảng dự toán"]
+    },
+    {
+      "id": "interest/work/startup/small",
+      "parent": "interest/work/startup",
+      "name": {"zh": "小生意", "vi": "Buôn bán nhỏ", "en": "Small Business"},
+      "keywords": ["小生意", "buôn bán", "hàng xách tay", "side hustle"]
+    },
+    {
+      "id": "interest/work/startup/franchise",
+      "parent": "interest/work/startup",
+      "name": {"zh": "加盟", "vi": "Nhượng quyền", "en": "Franchise"},
+      "keywords": ["加盟", "nhượng quyền", "franchise", "mở chuỗi"]
+    },
+    {
+      "id": "interest/work/startup/pricing",
+      "parent": "interest/work/startup",
+      "name": {"zh": "成本定价", "vi": "Định giá", "en": "Pricing"},
+      "keywords": ["定价", "giá vốn", "biên lợi nhuận", "công thức giá"]
+    },
+    {
+      "id": "interest/work/sales",
+      "parent": "interest/work",
+      "name": {"zh": "销售与市场", "vi": "Bán hàng", "en": "Sales & Marketing"},
+      "keywords": ["销售", "bán hàng", "marketing", "kinh doanh nhỏ"]
+    },
+    {
+      "id": "interest/work/sales/customer",
+      "parent": "interest/work/sales",
+      "name": {"zh": "客户维护", "vi": "Chăm sóc khách hàng", "en": "Customer Care"},
+      "keywords": ["客户", "khách quen", "chăm sóc khách", "cskh"]
+    },
+    {
+      "id": "interest/work/sales/deal",
+      "parent": "interest/work/sales",
+      "name": {"zh": "谈判成交", "vi": "Đàm phán", "en": "Negotiation"},
+      "keywords": ["谈判", "đàm phán giá", "chốt đơn", "kỹ năng bán"]
+    },
+    {
+      "id": "interest/work/sales/ads",
+      "parent": "interest/work/sales",
+      "name": {"zh": "广告投放", "vi": "Chạy quảng cáo", "en": "Paid Ads"},
+      "keywords": ["广告投放", "chạy ads", "facebook ads", "quảng cáo google", "tiếp thị"]
+    },
+    {
+      "id": "interest/work/sales/content",
+      "parent": "interest/work/sales",
+      "name": {"zh": "账号运营", "vi": "Sáng tạo nội dung", "en": "Content Ops"},
+      "keywords": ["运营账号", "viết content", "content plan", "bài bán hàng"]
+    },
+    {
+      "id": "interest/work/sales/shortvideo",
+      "parent": "interest/work/sales",
+      "name": {"zh": "短视频带货", "vi": "Video ngắn", "en": "Short Video"},
+      "keywords": ["短视频", "video ngắn", "douyin", "kênh tiktok", "cắt ghép video"]
+    },
+    {
+      "id": "interest/work/sales/brand",
+      "parent": "interest/work/sales",
+      "name": {"zh": "品牌", "vi": "Thương hiệu", "en": "Branding"},
+      "keywords": ["品牌", "nhận diện", "logo", "slogan"]
+    },
+    {
+      "id": "interest/work/sales/kol",
+      "parent": "interest/work/sales",
+      "name": {"zh": "达人合作", "vi": "Hợp tác KOL", "en": "KOL & Affiliates"},
+      "keywords": ["kol", "booking kol", "reseller", "cộng tác viên"]
+    },
+    {
+      "id": "interest/work/sales/exhibition",
+      "parent": "interest/work/sales",
+      "name": {"zh": "展会摆摊", "vi": "Hội chợ & triển lãm", "en": "Trade Shows"},
+      "keywords": ["展会", "hội chợ", "triển lãm", "booth", "expo"]
+    },
+    {
+      "id": "interest/work/ecommerce",
+      "parent": "interest/work",
+      "name": {"zh": "电商", "vi": "Thương mại điện tử", "en": "E-commerce"},
+      "keywords": ["电商", "thương mại điện tử", "online selling", "sàn bán"]
+    },
+    {
+      "id": "interest/work/ecommerce/marketplace",
+      "parent": "interest/work/ecommerce",
+      "name": {"zh": "平台店铺运营", "vi": "Vận hành sàn", "en": "Marketplace Ops"},
+      "keywords": ["shopee", "lazada", "tiktok shop", "lên sàn", "dọn kho hàng"]
+    },
+    {
+      "id": "interest/work/ecommerce/livestream",
+      "parent": "interest/work/ecommerce",
+      "name": {"zh": "直播带货", "vi": "Livestream bán hàng", "en": "Livestream Selling"},
+      "keywords": ["直播", "livestream", "lịch live", "kèo live"]
+    },
+    {
+      "id": "interest/work/ecommerce/shipping",
+      "parent": "interest/work/ecommerce",
+      "name": {"zh": "发货快递", "vi": "Giao hàng", "en": "Shipping"},
+      "keywords": ["发货", "giao hàng", "vận chuyển", "cod", "phí ship"]
+    },
+    {
+      "id": "interest/work/ecommerce/warehouse",
+      "parent": "interest/work/ecommerce",
+      "name": {"zh": "仓储打包", "vi": "Kho & đóng gói", "en": "Warehousing"},
+      "keywords": ["仓库", "kho hàng", "đóng gói", "kiểm kho", "dãn nhãn"]
+    },
+    {
+      "id": "interest/work/ecommerce/crossborder",
+      "parent": "interest/work/ecommerce",
+      "name": {"zh": "跨境代购", "vi": "Order hàng Trung", "en": "Cross-border Buying"},
+      "keywords": ["代购", "order hàng", "1688", "quảng châu", "taobao"]
+    },
+    {
+      "id": "interest/work/trade",
+      "parent": "interest/work",
+      "name": {"zh": "外贸与工厂", "vi": "Xuất khẩu & nhà máy", "en": "Trade & Factory"},
+      "keywords": ["外贸", "xuất khẩu", "khu công nghiệp", "import export"]
+    },
+    {
+      "id": "interest/work/trade/customs",
+      "parent": "interest/work/trade",
+      "name": {"zh": "报关清关", "vi": "Thủ tục hải quan", "en": "Customs"},
+      "keywords": ["报关", "hải quan", "thông quan", "cước vận tải", "tờ khai"]
+    },
+    {
+      "id": "interest/work/trade/sourcing",
+      "parent": "interest/work/trade",
+      "name": {"zh": "找供应商", "vi": "Tìm nguồn hàng", "en": "Sourcing"},
+      "keywords": ["货源", "nhà cung cấp", "xin báo giá", "làm mẫu"]
+    },
+    {
+      "id": "interest/work/trade/qc",
+      "parent": "interest/work/trade",
+      "name": {"zh": "质检", "vi": "Kiểm hàng", "en": "Quality Control"},
+      "keywords": ["质检", "kiểm hàng", "lỗi sản phẩm", "aql"]
+    },
+    {
+      "id": "interest/work/trade/line",
+      "parent": "interest/work/trade",
+      "name": {"zh": "产线日常", "vi": "Vận hành dây chuyền", "en": "Production Line"},
+      "keywords": ["产线", "dây chuyền", "ca sản xuất", "năng suất xưởng"]
+    },
+    {
+      "id": "interest/work/trade/oem",
+      "parent": "interest/work/trade",
+      "name": {"zh": "代工订单", "vi": "Gia công hàng", "en": "OEM Orders"},
+      "keywords": ["oem", "gia công", "fob", "đơn gia công", "chất lượng lô"]
+    },
+    {
+      "id": "interest/work/legal",
+      "parent": "interest/work",
+      "name": {"zh": "合同与用工", "vi": "Hợp đồng & lao động", "en": "Contracts & Labor"},
+      "keywords": ["合同", "hợp đồng", "giấy tờ lao động", "pháp lý"]
+    },
+    {
+      "id": "interest/work/legal/labor",
+      "parent": "interest/work/legal",
+      "name": {"zh": "劳动合同", "vi": "Hợp đồng lao động", "en": "Labor Contract"},
+      "keywords": ["劳动合同", "thử việc", "bảo hiểm xã hội", "sa thải"]
+    },
+    {
+      "id": "interest/work/legal/permit",
+      "parent": "interest/work/legal",
+      "name": {"zh": "工作许可", "vi": "Giấy phép lao động", "en": "Work Permit"},
+      "keywords": ["工作证", "giấy phép lao động", "visa lao động", "tạm trú"]
+    },
+    {
+      "id": "interest/work/legal/dispute",
+      "parent": "interest/work/legal",
+      "name": {"zh": "劳动纠纷", "vi": "Tranh chấp lao động", "en": "Labor Disputes"},
+      "keywords": ["劳动仲裁", "khiếu nại", "công đoàn", "nợ lương"]
+    },
+    {
+      "id": "interest/work/legal/nda",
+      "parent": "interest/work/legal",
+      "name": {"zh": "保密与条款", "vi": "Điều khoản bảo mật", "en": "NDA & Terms"},
+      "keywords": ["保密协议", "nda", "điều khoản bí mật", "không cạnh tranh"]
+    },
+    {
+      "id": "interest/work/remote",
+      "parent": "interest/work",
+      "name": {"zh": "远程与自由职业", "vi": "Làm tự do", "en": "Remote & Freelance"},
+      "keywords": ["远程办公", "làm tự do", "freelancer", "wfh"]
+    },
+    {
+      "id": "interest/work/remote/nomad",
+      "parent": "interest/work/remote",
+      "name": {"zh": "远程协作", "vi": "Làm từ xa", "en": "Remote Work"},
+      "keywords": ["làm từ xa", "online meeting", "ca lệch giờ", "home office"]
+    },
+    {
+      "id": "interest/work/remote/gig",
+      "parent": "interest/work/remote",
+      "name": {"zh": "兼职零工", "vi": "Việc làm thêm", "en": "Side Gigs"},
+      "keywords": ["兼职", "làm thêm", "giờ chính", "part time"]
+    },
+    {
+      "id": "interest/work/remote/project",
+      "parent": "interest/work/remote",
+      "name": {"zh": "接单外包", "vi": "Nhận dự án", "en": "Outsourcing"},
+      "keywords": ["外包", "outsourcing", "dự án thuê ngoài", "client nước ngoài", "báo giá dự án"]
+    },
+    {
+      "id": "interest/work/remote/community",
+      "parent": "interest/work/remote",
+      "name": {"zh": "行业交流", "vi": "Cộng đồng nghề", "en": "Professional Meetups"},
+      "keywords": ["行业交流", "seminar nghề", "hội thảo", "workshop nghề"]
+    }
+  ]
+}

@@ -1,0 +1,359 @@
+{
+  "domain": "interest",
+  "nodes": [
+    {
+      "id": "interest/tech/devices",
+      "parent": "interest/tech",
+      "name": {"zh": "数码设备", "vi": "Thiết bị số", "en": "Gadgets"},
+      "keywords": ["数码", "gadgets", "electronics", "hàng công nghệ"]
+    },
+    {
+      "id": "interest/tech/devices/phone",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "手机", "vi": "Điện thoại", "en": "Smartphones"},
+      "keywords": ["手机", "điện thoại", "smartphone", "iphone", "android", "xiaomi"]
+    },
+    {
+      "id": "interest/tech/devices/laptop",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "笔记本电脑", "vi": "Laptop", "en": "Laptops"},
+      "keywords": ["笔记本", "laptop", "macbook", "asus", "dell"]
+    },
+    {
+      "id": "interest/tech/devices/tablet",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "平板与手写笔", "vi": "Máy tính bảng", "en": "Tablets & Stylus"},
+      "keywords": ["平板", "ipad", "máy tính bảng", "bút cảm ứng", "stylus"]
+    },
+    {
+      "id": "interest/tech/devices/audio",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "耳机与音箱", "vi": "Tai nghe & loa", "en": "Headphones & Speakers"},
+      "keywords": ["耳机", "tai nghe", "airpods", "chống ồn", "bluetooth", "jbl"]
+    },
+    {
+      "id": "interest/tech/devices/watch",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "智能手表手环", "vi": "Đồng hồ thông minh", "en": "Smartwatches"},
+      "keywords": ["智能手表", "smartwatch", "garmin", "vòng thông minh", "apple watch"]
+    },
+    {
+      "id": "interest/tech/devices/keyboard",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "机械键盘", "vi": "Bàn phím cơ", "en": "Mechanical Keyboards"},
+      "keywords": ["键盘", "bàn phím", "keycap", "hot swap", "switch cơ"]
+    },
+    {
+      "id": "interest/tech/devices/ereader",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "电子阅读器", "vi": "Máy đọc sách", "en": "E-readers"},
+      "keywords": ["电子墨水", "kindle", "ebook reader", "máy đọc"]
+    },
+    {
+      "id": "interest/tech/devices/charger",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "充电与线材", "vi": "Phụ kiện sạc", "en": "Chargers & Cables"},
+      "keywords": ["充电宝", "sạc dự phòng", "usb-c", "gan charger", "anker"]
+    },
+    {
+      "id": "interest/tech/devices/case",
+      "parent": "interest/tech/devices",
+      "name": {"zh": "手机壳与贴膜", "vi": "Ốp lưng & dán màn", "en": "Cases & Screen Guards"},
+      "keywords": ["手机壳", "ốp lưng", "dán cường lực", "phone case"]
+    },
+    {
+      "id": "interest/tech/computers",
+      "parent": "interest/tech",
+      "name": {"zh": "电脑硬件", "vi": "Máy tính", "en": "Computers"},
+      "keywords": ["电脑", "máy tính", "computer", "pc"]
+    },
+    {
+      "id": "interest/tech/computers/build",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "装机配置", "vi": "Dựng máy", "en": "PC Building"},
+      "keywords": ["装机", "dựng máy", "custom pc", "build pc", "cấu hình máy"]
+    },
+    {
+      "id": "interest/tech/computers/gpu",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "显卡", "vi": "Card đồ họa", "en": "Graphics Cards"},
+      "keywords": ["显卡", "card đồ họa", "gpu", "rtx", "geforce"]
+    },
+    {
+      "id": "interest/tech/computers/cpu",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "处理器", "vi": "Vi xử lý", "en": "Processors"},
+      "keywords": ["处理器", "vi xử lý", "cpu intel", "ryzen", "core i5"]
+    },
+    {
+      "id": "interest/tech/computers/monitor",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "显示器", "vi": "Màn hình", "en": "Monitors"},
+      "keywords": ["显示器", "màn hình rời", "ultrawide", "monitor arm", "2k monitor"]
+    },
+    {
+      "id": "interest/tech/computers/storage",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "硬盘存储", "vi": "Ổ cứng", "en": "Drives & Storage"},
+      "keywords": ["硬盘", "ổ cứng", "ssd", "nas", "hdd"]
+    },
+    {
+      "id": "interest/tech/computers/repair",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "设备维修", "vi": "Sửa chữa máy", "en": "Device Repair"},
+      "keywords": ["维修", "sửa chữa", "thay màn", "repair shop", "bảo hành"]
+    },
+    {
+      "id": "interest/tech/computers/secondhand",
+      "parent": "interest/tech/computers",
+      "name": {"zh": "二手数码", "vi": "Máy cũ", "en": "Used Devices"},
+      "keywords": ["二手数码", "máy cũ", "hàng thanh lý", "used device"]
+    },
+    {
+      "id": "interest/tech/software",
+      "parent": "interest/tech",
+      "name": {"zh": "软件应用", "vi": "Ứng dụng", "en": "Apps & Software"},
+      "keywords": ["软件", "phần mềm", "ứng dụng", "software"]
+    },
+    {
+      "id": "interest/tech/software/office",
+      "parent": "interest/tech/software",
+      "name": {"zh": "办公表格", "vi": "Công cụ văn phòng", "en": "Office Tools"},
+      "keywords": ["办公软件", "excel", "google sheet", "phím tắt excel"]
+    },
+    {
+      "id": "interest/tech/software/notes",
+      "parent": "interest/tech/software",
+      "name": {"zh": "笔记与效率", "vi": "Ghi chú", "en": "Notes & Productivity"},
+      "keywords": ["笔记", "ghi chú", "obsidian", "notion", "todo", "pomodoro"]
+    },
+    {
+      "id": "interest/tech/software/photoedit",
+      "parent": "interest/tech/software",
+      "name": {"zh": "修图软件", "vi": "Chỉnh ảnh", "en": "Photo Editing"},
+      "keywords": ["修图", "chỉnh ảnh", "lightroom", "photoshop", "preset màu"]
+    },
+    {
+      "id": "interest/tech/software/videoedit",
+      "parent": "interest/tech/software",
+      "name": {"zh": "剪辑软件", "vi": "Dựng video", "en": "Video Editing"},
+      "keywords": ["剪辑", "dựng video", "capcut", "premiere", "davinci"]
+    },
+    {
+      "id": "interest/tech/software/design",
+      "parent": "interest/tech/software",
+      "name": {"zh": "设计工具", "vi": "Dụng cụ thiết kế", "en": "Design Tools"},
+      "keywords": ["figma", "canva", "thiết kế ảnh", "mockup"]
+    },
+    {
+      "id": "interest/tech/software/cloud",
+      "parent": "interest/tech/software",
+      "name": {"zh": "网盘云存储", "vi": "Lưu trữ đám mây", "en": "Cloud Storage"},
+      "keywords": ["网盘", "đám mây", "google drive", "icloud", "tải lên cloud"]
+    },
+    {
+      "id": "interest/tech/software/os",
+      "parent": "interest/tech/software",
+      "name": {"zh": "系统与刷机", "vi": "Hệ điều hành", "en": "Operating Systems"},
+      "keywords": ["系统", "hệ điều hành", "windows 11", "linux", "cài win"]
+    },
+    {
+      "id": "interest/tech/software/translate",
+      "parent": "interest/tech/software",
+      "name": {"zh": "翻译工具", "vi": "Công cụ dịch", "en": "Translation Tools"},
+      "keywords": ["翻译工具", "công cụ dịch", "deepl", "google dịch"]
+    },
+    {
+      "id": "interest/tech/dev",
+      "parent": "interest/tech",
+      "name": {"zh": "编程开发", "vi": "Lập trình", "en": "Programming"},
+      "keywords": ["编程", "lập trình", "coding", "developer"]
+    },
+    {
+      "id": "interest/tech/dev/frontend",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "前端开发", "vi": "Frontend", "en": "Front-end"},
+      "keywords": ["前端", "javascript", "react", "html css"]
+    },
+    {
+      "id": "interest/tech/dev/backend",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "后端开发", "vi": "Backend", "en": "Back-end"},
+      "keywords": ["后端", "nodejs", "golang", "rest api"]
+    },
+    {
+      "id": "interest/tech/dev/python",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "Python 与脚本", "vi": "Python", "en": "Python & Scripts"},
+      "keywords": ["python", "pandas", "脚本", "scripting", "tự động hóa"]
+    },
+    {
+      "id": "interest/tech/dev/app",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "App 开发", "vi": "Làm ứng dụng", "en": "App Development"},
+      "keywords": ["app开发", "flutter", "react native", "lên app store"]
+    },
+    {
+      "id": "interest/tech/dev/data",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "数据分析", "vi": "Phân tích dữ liệu", "en": "Data Analysis"},
+      "keywords": ["数据分析", "sql", "power bi", "jupyter", "dashboard"]
+    },
+    {
+      "id": "interest/tech/dev/database",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "数据库", "vi": "Cơ sở dữ liệu", "en": "Databases"},
+      "keywords": ["数据库", "postgre", "mongodb", "truy vấn"]
+    },
+    {
+      "id": "interest/tech/dev/git",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "版本管理", "vi": "Quản lý phiên bản", "en": "Git & Versioning"},
+      "keywords": ["git", "github", "merge conflict", "mã nguồn"]
+    },
+    {
+      "id": "interest/tech/dev/embedded",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "嵌入式开发", "vi": "Lập trình nhúng", "en": "Embedded Development"},
+      "keywords": ["嵌入式", "firmware", "mcu", "mạch điều khiển", "test bo"]
+    },
+    {
+      "id": "interest/tech/dev/quality",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "测试与上线", "vi": "Kiểm thử & triển khai", "en": "Testing & Release"},
+      "keywords": ["测试", "kiểm thử", "ci cd", "debug", "qa software"]
+    },
+    {
+      "id": "interest/tech/dev/web",
+      "parent": "interest/tech/dev",
+      "name": {"zh": "建站与域名", "vi": "Làm website", "en": "Site Building"},
+      "keywords": ["建站", "làm website", "wordpress", "tên miền", "shared host"]
+    },
+    {
+      "id": "interest/tech/ai",
+      "parent": "interest/tech",
+      "name": {"zh": "人工智能", "vi": "Trí tuệ nhân tạo", "en": "AI"},
+      "keywords": ["人工智能", "trí tuệ nhân tạo", "ai工具"]
+    },
+    {
+      "id": "interest/tech/ai/llm",
+      "parent": "interest/tech/ai",
+      "name": {"zh": "大模型对话", "vi": "Chatbot AI", "en": "Chatbots & LLMs"},
+      "keywords": ["大模型", "chatgpt", "deepseek", "prompt", "mô hình ngôn ngữ"]
+    },
+    {
+      "id": "interest/tech/ai/imagegen",
+      "parent": "interest/tech/ai",
+      "name": {"zh": "AI 绘图", "vi": "Ảnh tạo bằng AI", "en": "AI Image"},
+      "keywords": ["ai绘图", "生成图片", "midjourney", "stable diffusion"]
+    },
+    {
+      "id": "interest/tech/ai/coding",
+      "parent": "interest/tech/ai",
+      "name": {"zh": "AI 辅助写代码", "vi": "Viết code với AI", "en": "AI Coding"},
+      "keywords": ["copilot", "cursor ide", "ai viết code", "gợi ý code"]
+    },
+    {
+      "id": "interest/tech/ai/video",
+      "parent": "interest/tech/ai",
+      "name": {"zh": "AI 视频与配音", "vi": "Video & lồng tiếng AI", "en": "AI Video & Voice"},
+      "keywords": ["ai视频", "clip ai", "lồng tiếng tự động", "voice clone"]
+    },
+    {
+      "id": "interest/tech/ai/assistant",
+      "parent": "interest/tech/ai",
+      "name": {"zh": "AI 提效玩法", "vi": "Trợ lý ảo", "en": "AI Productivity"},
+      "keywords": ["trợ lý ảo", "tự động hóa công việc", "workflow ai", "ai总结"]
+    },
+    {
+      "id": "interest/tech/ai/robotics",
+      "parent": "interest/tech/ai",
+      "name": {"zh": "机器人与自动化", "vi": "Robot & tự động hóa", "en": "Robotics"},
+      "keywords": ["机器人", "robot", "cánh tay robot", "robot hút bụi"]
+    },
+    {
+      "id": "interest/tech/network",
+      "parent": "interest/tech",
+      "name": {"zh": "网络与服务器", "vi": "Mạng & máy chủ", "en": "Networks & Servers"},
+      "keywords": ["网络", "máy chủ", "server", "cable mạng"]
+    },
+    {
+      "id": "interest/tech/network/wifi",
+      "parent": "interest/tech/network",
+      "name": {"zh": "家庭网络", "vi": "Mạng gia đình", "en": "Home Network"},
+      "keywords": ["路由器", "wifi mesh", "modem", "sóng yếu", "lắp mạng"]
+    },
+    {
+      "id": "interest/tech/network/hosting",
+      "parent": "interest/tech/network",
+      "name": {"zh": "自建服务", "vi": "Máy chủ riêng", "en": "Self-hosting"},
+      "keywords": ["自建", "vps", "self-host", "docker compose", "home lab"]
+    },
+    {
+      "id": "interest/tech/network/sim",
+      "parent": "interest/tech/network",
+      "name": {"zh": "电话卡与流量", "vi": "SIM & dữ liệu", "en": "SIMs & Data"},
+      "keywords": ["流量卡", "e sim", "sim data", "nhà mạng", "số đẹp"]
+    },
+    {
+      "id": "interest/tech/security",
+      "parent": "interest/tech",
+      "name": {"zh": "隐私与安全", "vi": "Bảo mật", "en": "Privacy & Security"},
+      "keywords": ["密码", "bảo mật", "password", "an toàn thông tin"]
+    },
+    {
+      "id": "interest/tech/security/keeper",
+      "parent": "interest/tech/security",
+      "name": {"zh": "账号与验证", "vi": "Quản lý tài khoản", "en": "Accounts & 2FA"},
+      "keywords": ["密码管理", "2fa", "xác thực", "1password", "đổi mật khẩu"]
+    },
+    {
+      "id": "interest/tech/security/privacy",
+      "parent": "interest/tech/security",
+      "name": {"zh": "防追踪", "vi": "Quyền riêng tư", "en": "Online Privacy"},
+      "keywords": ["隐私", "quyền riêng tư", "ad block", "anti tracking", "data leak"]
+    },
+    {
+      "id": "interest/tech/security/scam",
+      "parent": "interest/tech/security",
+      "name": {"zh": "杀毒与防骗", "vi": "Diệt virus & chống lừa", "en": "Antivirus & Anti-scam"},
+      "keywords": ["杀毒", "virus máy tính", "lừa đảo online", "antivirus", "mạo danh"]
+    },
+    {
+      "id": "interest/tech/electronics",
+      "parent": "interest/tech",
+      "name": {"zh": "电子自制", "vi": "Điện tử tự làm", "en": "Electronics DIY"},
+      "keywords": ["电子制作", "điện tử", "diy electronics", "maker"]
+    },
+    {
+      "id": "interest/tech/electronics/soldering",
+      "parent": "interest/tech/electronics",
+      "name": {"zh": "焊接", "vi": "Hàn mạch", "en": "Soldering"},
+      "keywords": ["焊接", "hàn mạch", "solder", "thiếc", "khò thiếc"]
+    },
+    {
+      "id": "interest/tech/electronics/board",
+      "parent": "interest/tech/electronics",
+      "name": {"zh": "开发板", "vi": "Mạch phát triển", "en": "Dev Boards"},
+      "keywords": ["arduino", "esp32", "raspberry pi", "breadboard", "mạch thử"]
+    },
+    {
+      "id": "interest/tech/electronics/print3d",
+      "parent": "interest/tech/electronics",
+      "name": {"zh": "3D 打印", "vi": "In 3D", "en": "3D Printing"},
+      "keywords": ["3d打印", "in 3d", "file stl", "máy in 3d", "resin"]
+    },
+    {
+      "id": "interest/tech/electronics/drone",
+      "parent": "interest/tech/electronics",
+      "name": {"zh": "无人机", "vi": "Flycam", "en": "Drones"},
+      "keywords": ["无人机", "drone", "flycam", "bay camera", "dji mini"]
+    },
+    {
+      "id": "interest/tech/electronics/gear",
+      "parent": "interest/tech/electronics",
+      "name": {"zh": "工具与测量", "vi": "Dụng cụ đo", "en": "Bench Tools"},
+      "keywords": ["万用表", "multimeter", "kìm", "nguồn thử", "đồ nghề"]
+    }
+  ]
+}
