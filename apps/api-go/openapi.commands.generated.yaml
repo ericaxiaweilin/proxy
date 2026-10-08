@@ -261,6 +261,8 @@ commands:
     domain: Fulfillment
   - command: GetUserProfile
     domain: Profile
+  - command: GetVenueCrowding
+    domain: Activity
   - command: GetVoucher
     domain: Voucher
   - command: GetVoucherSettlement

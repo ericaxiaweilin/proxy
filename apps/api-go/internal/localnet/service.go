@@ -1,6 +1,7 @@
 package localnet
 
 import (
+	consentpkg "github.com/proxy-app/proxy-api/internal/consent"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -387,17 +388,9 @@ type MentionRepository interface {
 // 判据很简单：用户说「我从没同意过」，平台能不能拿出一条带时间戳的记录？
 // 在改动之前，答案是**不能** —— 唯一的记录在用户自己的设备里。
 const (
-	// PurposeBehaviorAnalytics：追踪用户在社交网络上的行为与活动 ——
-	// 看了哪条动态、每张照片停留多久、放大过几次、打开过谁的主页、看过哪个候选人。
-	// NĐ 356/2025 Art. 4.1(l) 把这一类列为**敏感个人数据**。
-	PurposeBehaviorAnalytics = "BEHAVIOR_ANALYTICS"
-
-	// PurposePolicyVersion 是「这个目的」的说明文本版本。
-	// 读活跃同意时按 (user, purpose, policy_version) 过滤，所以**改这个值 =
-	// 所有旧同意立即失效、用户必须重新同意**。这正是「同意与所述目的绑定」的实现。
-	// 改它之前必须先改用户看到的说明文案（me.tsx 的动态浏览统计开关），
-	// 否则就是「用户同意的是一段他没见过的话」。
-	PurposePolicyVersion = "2026-09-27"
+	// capturePurposeAny 是「至少有一个采集用途的同意有效」的占位值（COMP-CONSENT-PIPELINE-001）。
+	// 用途的登记、政策版本、有效性判定都在 internal/consent，这里不再有第二份。
+	capturePurposeAny = "ANY_BEHAVIOR_CAPTURE_PURPOSE"
 )
 
 // behaviouralTrackingEventTypes 列出**入库前必须先有同意**的事件类型。
@@ -410,11 +403,11 @@ const (
 // 也方便钉去遍历它。**新增行为追踪事件时必须往这里加一条**，否则它会
 // 悄悄变成一条不设防的通道 —— 本仓最熟的那种病。
 var behaviouralTrackingEventTypes = map[string]string{
-	"POST_IMPRESSION":  PurposeBehaviorAnalytics,
-	"MEDIA_IMPRESSION": PurposeBehaviorAnalytics,
-	"MEDIA_ZOOM":       PurposeBehaviorAnalytics,
-	"PROFILE_OPEN":     PurposeBehaviorAnalytics,
-	"CANDIDATE_VIEWED": PurposeBehaviorAnalytics,
+	"POST_IMPRESSION":  capturePurposeAny,
+	"MEDIA_IMPRESSION": capturePurposeAny,
+	"MEDIA_ZOOM":       capturePurposeAny,
+	"PROFILE_OPEN":     capturePurposeAny,
+	"CANDIDATE_VIEWED": capturePurposeAny,
 }
 
 // PurposeConsent 是**一次**同意动作（授予或撤回），不是「当前状态」。
@@ -2888,11 +2881,30 @@ func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) comman
 // 也不能悄悄默认「没有」然后让调用方以为这是用户的意愿 ——
 // 所以这里把 err 原样交出去，由调用方决定用什么错误码告诉客户端。
 func (s *Service) hasActivePurposeConsent(ctx context.Context, userID, purpose string) (bool, error) {
-	consent, found, err := s.repository.PurposeConsentState(ctx, userID, purpose, PurposePolicyVersion)
+	if _, registered := consentpkg.Lookup(purpose); !registered {
+		return false, nil // 没登记的用途不可能有同意
+	}
+	state, found, err := s.repository.PurposeConsentState(ctx, userID, purpose, consentpkg.PolicyVersion(purpose))
 	if err != nil {
 		return false, err
 	}
-	return found && consent.Active(), nil
+	return found && state.Active(), nil
+}
+
+// hasAnyCaptureConsent：至少有一个「需要采集浏览行为」的用途当前同意有效，事件才能入库。
+// 入库之后每个用途各管各的读取（各自按 consent.ValidAtSQL 过滤），所以这里只回答「能不能存」，
+// 不回答「谁能用」。任何一个用途读不出来 ⇒ 整体 fail-closed（返回 err，调用方拒收）。
+func (s *Service) hasAnyCaptureConsent(ctx context.Context, userID string) (bool, error) {
+	for _, purpose := range consentpkg.CapturePurposes() {
+		active, err := s.hasActivePurposeConsent(ctx, userID, purpose)
+		if err != nil {
+			return false, err
+		}
+		if active {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eventType, defaultTargetType string) command.Result {
@@ -2902,7 +2914,13 @@ func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eve
 	// 该收到的是「先取得同意」，而不是一个关于 payload 的报错 —— 后者会
 	// 引导它去修 payload，然后重试，然后又被拒。
 	if purpose, gated := behaviouralTrackingEventTypes[eventType]; gated {
-		active, err := s.hasActivePurposeConsent(ctx, e.Actor.ID, purpose)
+		var active bool
+		var err error
+		if purpose == capturePurposeAny {
+			active, err = s.hasAnyCaptureConsent(ctx, e.Actor.ID)
+		} else {
+			active, err = s.hasActivePurposeConsent(ctx, e.Actor.ID, purpose)
+		}
 		if err != nil {
 			// 读不出来 = 证明不了有同意 = 拒收（Art. 6.2 举证责任在平台）。
 			return command.Rejected(e, "CONSENT_STATE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "localnet.consent_state_unavailable", map[string]any{
@@ -2912,8 +2930,8 @@ func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eve
 		}
 		if !active {
 			return command.Rejected(e, "CONSENT_REQUIRED", "COMPLIANCE", "AFTER_USER_ACTION", "localnet.consent_required", map[string]any{
-				"purpose":       purpose,
-				"policyVersion": PurposePolicyVersion,
+				"purpose":         purpose,
+				"anyOfPurposes":   consentpkg.CapturePurposes(),
 				"note": "该事件属于对用户在社交网络上的行为与活动的追踪，是敏感个人数据" +
 					"（Nghị định 356/2025/NĐ-CP Art. 4.1(l)），必须先取得该目的的明确同意。" +
 					"客户端的开关不是闸 —— 服务端在这里强制。",
@@ -2983,6 +3001,14 @@ func (s *Service) recordPurposeConsent(ctx context.Context, e command.Envelope) 
 	if e.Actor.ID == "" {
 		return command.Rejected(e, "CONSENT_ACTOR_REQUIRED", "AUTHENTICATION", "AFTER_USER_ACTION", "localnet.consent_actor_required", nil)
 	}
+	// 统一同意管线：用途必须是登记过的；授予还要求「已开放且没退役」，撤回对任何登记过的用途都放行。
+	if p.Granted && !consentpkg.Grantable(p.Purpose) || !p.Granted && !consentpkg.Withdrawable(p.Purpose) {
+		return command.Rejected(e, "CONSENT_PURPOSE_NOT_AVAILABLE", "VALIDATION", "AFTER_USER_ACTION", "localnet.consent_purpose_not_available", map[string]any{
+			"purpose": p.Purpose,
+			"note":    "这个用途不存在、还没对用户开放，或已退役（退役的旧同意只能撤回，不能再授予）。",
+		})
+	}
+	policyVersion := consentpkg.PolicyVersion(p.Purpose)
 	now := s.clock.Now().UTC()
 	source := p.Source
 	if source == "" {
@@ -2995,7 +3021,7 @@ func (s *Service) recordPurposeConsent(ctx context.Context, e command.Envelope) 
 		if err := s.repository.GrantPurposeConsent(ctx, PurposeConsent{
 			UserID:        e.Actor.ID,
 			Purpose:       p.Purpose,
-			PolicyVersion: PurposePolicyVersion,
+			PolicyVersion: policyVersion,
 			Action:        ConsentActionGrant,
 			ActedAt:       now,
 			Source:        source,
@@ -3003,7 +3029,7 @@ func (s *Service) recordPurposeConsent(ctx context.Context, e command.Envelope) 
 			return command.Rejected(e, "CONSENT_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.consent_write_failed", nil)
 		}
 	} else {
-		if err := s.repository.WithdrawPurposeConsent(ctx, e.Actor.ID, p.Purpose, PurposePolicyVersion, now); err != nil {
+		if err := s.repository.WithdrawPurposeConsent(ctx, e.Actor.ID, p.Purpose, policyVersion, now); err != nil {
 			return command.Rejected(e, "CONSENT_WRITE_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.consent_write_failed", nil)
 		}
 	}
@@ -3014,12 +3040,12 @@ func (s *Service) recordPurposeConsent(ctx context.Context, e command.Envelope) 
 	// 只是跟其它 handler 保持一致的返回形状，别把它当审计。
 	domainEvents := []event.DomainEvent{event.New("PURPOSE_CONSENT_"+action, "PurposeConsent", e.Actor.ID, 1, e.Principal.ID, e.CorrelationID, e.CommandID, now, map[string]any{
 		"purpose":       p.Purpose,
-		"policyVersion": PurposePolicyVersion,
+		"policyVersion": policyVersion,
 		"source":        source,
 	})}
 	return acceptedWithPayload(e, "PurposeConsent", e.Actor.ID, 1, action, map[string]any{
 		"purpose":       p.Purpose,
-		"policyVersion": PurposePolicyVersion,
+		"policyVersion": policyVersion,
 		"action":        action,
 		"active":        p.Granted,
 	}, domainEvents)
@@ -3041,13 +3067,17 @@ func (s *Service) getPurposeConsent(ctx context.Context, e command.Envelope) com
 	if !decode(e.Payload, &p) || p.Purpose == "" {
 		return command.Rejected(e, "INVALID_CONSENT", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_consent", nil)
 	}
-	consent, found, err := s.repository.PurposeConsentState(ctx, e.Actor.ID, p.Purpose, PurposePolicyVersion)
+	if _, registered := consentpkg.Lookup(p.Purpose); !registered {
+		return command.Rejected(e, "CONSENT_PURPOSE_NOT_AVAILABLE", "VALIDATION", "AFTER_USER_ACTION", "localnet.consent_purpose_not_available", map[string]any{"purpose": p.Purpose})
+	}
+	policyVersion := consentpkg.PolicyVersion(p.Purpose)
+	consent, found, err := s.repository.PurposeConsentState(ctx, e.Actor.ID, p.Purpose, policyVersion)
 	if err != nil {
 		return command.Rejected(e, "CONSENT_STATE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "localnet.consent_state_unavailable", nil)
 	}
 	body := map[string]any{
 		"purpose":       p.Purpose,
-		"policyVersion": PurposePolicyVersion,
+		"policyVersion": policyVersion,
 		"found":         found,
 		"active":        found && consent.Active(),
 	}
@@ -3059,7 +3089,7 @@ func (s *Service) getPurposeConsent(ctx context.Context, e command.Envelope) com
 	}
 	// 历史一并返回：用户说「我从没同意过」时，这一串就是平台的证据。
 	// 它是 append-only 的，所以长度本身也有意义（授予→撤回→再授予 = 3 条）。
-	history, err := s.repository.PurposeConsentHistory(ctx, e.Actor.ID, p.Purpose, PurposePolicyVersion)
+	history, err := s.repository.PurposeConsentHistory(ctx, e.Actor.ID, p.Purpose, policyVersion)
 	if err != nil {
 		return command.Rejected(e, "CONSENT_STATE_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "localnet.consent_state_unavailable", nil)
 	}

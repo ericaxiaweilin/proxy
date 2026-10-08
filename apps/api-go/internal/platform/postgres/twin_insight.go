@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"github.com/proxy-app/proxy-api/internal/consent"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +49,7 @@ func (r *TwinInsightRepository) ListFacts(ctx context.Context, ownerID string, s
 			SELECT actor_id, event_type, target_type, target_id, watch_ms, created_at
 			FROM localnet.interaction_events
 			WHERE created_at >= $2
+			  AND `+consent.ValidAtSQL("actor_id", "created_at", consent.TwinInsight)+`
 		),
 		views AS (
 			SELECT actor_id, COUNT(*) AS n, MAX(created_at) AS last_at
@@ -139,6 +141,7 @@ func (r *TwinInsightRepository) ListFacts(ctx context.Context, ownerID string, s
 			FROM localnet.interaction_events
 			WHERE created_at >= $2 AND event_type = 'PROFILE_OPEN'
 				AND target_type = 'PROFILE' AND target_id = $1
+				AND `+consent.ValidAtSQL("actor_id", "created_at", consent.TwinInsight)+`
 			UNION ALL
 			SELECT r.actor_id, 'LIKE', r.created_at, false
 			FROM engagement.reactions r

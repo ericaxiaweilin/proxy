@@ -2,6 +2,7 @@ package gravity
 
 import (
 	"context"
+	"github.com/proxy-app/proxy-api/internal/consent"
 	"sort"
 	"strings"
 	"sync"
@@ -79,7 +80,11 @@ func (p *Postgres) Occurrences(ctx context.Context, since time.Time) ([]Occurren
 		SELECT sender_id, 'CHAT_ACTIVE', created_at FROM conversation.messages
 			WHERE created_at >= $1 AND deleted_at IS NULL AND COALESCE(authored_by, '') = '' AND message_type <> 'SYSTEM_CONTEXT'
 		UNION ALL
-		SELECT actor_id, 'BROWSE_ACTIVE', created_at FROM localnet.interaction_events WHERE created_at >= $1
+		SELECT e.actor_id, 'BROWSE_ACTIVE', e.created_at FROM localnet.interaction_events e
+			WHERE e.created_at >= $1
+			  -- COMP-CONSENT-PIPELINE-001：浏览行为是敏感个人数据，只有「事件发生那一刻、对这个用途的同意有效，
+			  -- 并且用户现在也没撤回」的事件才参与计算。判定规则全平台只有 consent.ValidAtSQL 这一份。
+			  AND `+consent.ValidAtSQL("e.actor_id", "e.created_at", consent.Recommendation)+`
 		UNION ALL
 		SELECT actor_id, 'SCENE_VISIT', declared_at FROM reality.scene_checkins WHERE declared_at >= $1
 		UNION ALL
