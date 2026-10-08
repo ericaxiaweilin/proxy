@@ -30,7 +30,7 @@ func TestGravityBrowseSignalOnlyCountsEventsWithValidConsent(t *testing.T) {
 	now := time.Now().UTC()
 	consent := func(user, action string, at time.Time) {
 		exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source)
-			VALUES ($1,$2,'BEHAVIOR_ANALYTICS','test',$3,$4,'TEST')`, "pc_"+user+"_"+action+"_"+at.Format("150405.000000"), user, action, at)
+			VALUES ($1,$2,'RECOMMENDATION','2026-10-08',$3,$4,'TEST')`, "pc_"+user+"_"+action+"_"+at.Format("150405.000000"), user, action, at)
 	}
 	event := func(user string, at time.Time) {
 		exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at)

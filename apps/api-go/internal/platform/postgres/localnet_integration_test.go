@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/consent"
 	"github.com/proxy-app/proxy-api/internal/localnet"
 )
 
@@ -178,7 +179,7 @@ func TestLocalNetPostgresLifecycle(t *testing.T) {
 func grantBehaviorAnalyticsPG(t *testing.T, pool *pgxpool.Pool, svc *localnet.Service, ctx context.Context, actorID string) {
 	t.Helper()
 	res := svc.HandleContext(ctx, lnEnvelope("RecordPurposeConsent", map[string]any{
-		"purpose": localnet.PurposeBehaviorAnalytics, "granted": true, "source": "INTEGRATION_TEST",
+		"purpose": consent.Recommendation, "granted": true, "source": "INTEGRATION_TEST",
 	}, actorID))
 	if res.Outcome != "ACCEPTED" {
 		t.Fatalf("grant consent for %s: got %s (%+v)", actorID, res.Outcome, res.Error)

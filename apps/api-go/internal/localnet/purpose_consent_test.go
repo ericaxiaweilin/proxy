@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/clock"
+	consentpkg "github.com/proxy-app/proxy-api/internal/consent"
 )
 
 // COMP-PURPOSE-CONSENT-001（2026-09-27 越南合规扫描）。
@@ -26,7 +27,7 @@ func grantBehaviorAnalytics(t *testing.T, s *Service, actors ...string) {
 	t.Helper()
 	for _, actor := range actors {
 		res := as(s, actor, "RecordPurposeConsent", map[string]any{
-			"purpose": PurposeBehaviorAnalytics, "granted": true, "source": "TEST",
+			"purpose": consentpkg.Recommendation, "granted": true, "source": "TEST",
 		})
 		if res.Outcome != "ACCEPTED" {
 			t.Fatalf("grant consent for %s: got %s (%+v)", actor, res.Outcome, res.Error)
@@ -39,7 +40,7 @@ func grantBehaviorAnalytics(t *testing.T, s *Service, actors ...string) {
 // localnet-client.ts 也只有这一条解析路径），所以这里跟着解码。
 func purposeConsentStateOf(t *testing.T, s *Service, actor string) map[string]any {
 	t.Helper()
-	res := as(s, actor, "GetPurposeConsent", map[string]any{"purpose": PurposeBehaviorAnalytics})
+	res := as(s, actor, "GetPurposeConsent", map[string]any{"purpose": consentpkg.Recommendation})
 	if res.Outcome != "ACCEPTED" {
 		t.Fatalf("GetPurposeConsent(%s): got %s (%+v)", actor, res.Outcome, res.Error)
 	}
@@ -79,9 +80,9 @@ func TestEveryGatedEventTypeHasAnEndToEndCase(t *testing.T) {
 		if !listed[eventType] {
 			t.Errorf("事件类型 %q 被闸住了，但测试里没有对应命令 —— 补一个端到端用例", eventType)
 		}
-		if purpose != PurposeBehaviorAnalytics {
-			t.Errorf("事件类型 %q 挂到了目的 %q；目前只有 %q 有同意写入口，挂别的目的等于挂了个没人能给的同意",
-				eventType, purpose, PurposeBehaviorAnalytics)
+		if purpose != capturePurposeAny {
+			t.Errorf("事件类型 %q 挂到了目的 %q；采集闸的规则是「至少一个采集用途的同意有效」（%q），挂单个用途等于让别的用途的用户全被拒",
+				eventType, purpose, capturePurposeAny)
 		}
 	}
 }
@@ -133,7 +134,7 @@ func TestConsentCanBeGrantedAndWithdrawn(t *testing.T) {
 	}
 
 	withdraw := as(s, "viewer_a", "RecordPurposeConsent", map[string]any{
-		"purpose": PurposeBehaviorAnalytics, "granted": false, "source": "TEST",
+		"purpose": consentpkg.Recommendation, "granted": false, "source": "TEST",
 	})
 	if withdraw.Outcome != "ACCEPTED" {
 		t.Fatalf("撤回应当成功: %+v", withdraw.Error)
@@ -177,7 +178,7 @@ func TestConsentStateDistinguishesNeverSetFromWithdrawn(t *testing.T) {
 
 	grantBehaviorAnalytics(t, s, "user_seen")
 	as(s, "user_seen", "RecordPurposeConsent", map[string]any{
-		"purpose": PurposeBehaviorAnalytics, "granted": false, "source": "TEST",
+		"purpose": consentpkg.Recommendation, "granted": false, "source": "TEST",
 	})
 
 	withdrawn := purposeConsentStateOf(t, s, "user_seen")
@@ -202,7 +203,7 @@ func TestConsentIsScopedToTheActor(t *testing.T) {
 
 // 同意按 (purpose, policy_version) 绑定：换一个版本 = 旧同意失效，必须重新同意。
 //
-// 这是「同意与所述目的绑定」的机制本身 —— 服务端改 PurposePolicyVersion 时，
+// 这是「同意与所述目的绑定」的机制本身 —— 服务端改 consentpkg.PolicyVersion(consentpkg.Recommendation) 时，
 // 用户看到的说明文案必须同步改，否则就是「用户同意的是一段他没见过的话」。
 func TestConsentIsScopedToThePolicyVersion(t *testing.T) {
 	repo := NewMemoryRepository()
@@ -210,12 +211,12 @@ func TestConsentIsScopedToThePolicyVersion(t *testing.T) {
 	grantBehaviorAnalytics(t, s, "viewer_v")
 
 	// 当前版本有活跃同意。
-	active, err := s.hasActivePurposeConsent(context.Background(), "viewer_v", PurposeBehaviorAnalytics)
+	active, err := s.hasActivePurposeConsent(context.Background(), "viewer_v", consentpkg.Recommendation)
 	if err != nil || !active {
 		t.Fatalf("当前版本应当有活跃同意: active=%v err=%v", active, err)
 	}
 	// 换一个版本号去问，就查不到 —— 也就是说改常量会让所有人重新同意。
-	other, found, err := repo.PurposeConsentState(context.Background(), "viewer_v", PurposeBehaviorAnalytics, "1999-01-01")
+	other, found, err := repo.PurposeConsentState(context.Background(), "viewer_v", consentpkg.Recommendation, "1999-01-01")
 	if err != nil {
 		t.Fatalf("read other version: %v", err)
 	}
@@ -238,12 +239,12 @@ func TestConsentActionsArePersistedAsAnAppendOnlyLog(t *testing.T) {
 
 	grantBehaviorAnalytics(t, s, "user_audit")
 	as(s, "user_audit", "RecordPurposeConsent", map[string]any{
-		"purpose": PurposeBehaviorAnalytics, "granted": false, "source": "TEST",
+		"purpose": consentpkg.Recommendation, "granted": false, "source": "TEST",
 	})
 	// 再授予一次：必须是**追加第三行**，不是把第二行改回去。
 	grantBehaviorAnalytics(t, s, "user_audit")
 
-	history, err := repo.PurposeConsentHistory(ctx, "user_audit", PurposeBehaviorAnalytics, PurposePolicyVersion)
+	history, err := repo.PurposeConsentHistory(ctx, "user_audit", consentpkg.Recommendation, consentpkg.PolicyVersion(consentpkg.Recommendation))
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
@@ -258,7 +259,7 @@ func TestConsentActionsArePersistedAsAnAppendOnlyLog(t *testing.T) {
 		}
 	}
 	// 最新一条是 GRANT ⇒ 当前有效。
-	active, err := s.hasActivePurposeConsent(ctx, "user_audit", PurposeBehaviorAnalytics)
+	active, err := s.hasActivePurposeConsent(ctx, "user_audit", consentpkg.Recommendation)
 	if err != nil || !active {
 		t.Fatalf("重新授予之后应当恢复采集: active=%v err=%v", active, err)
 	}
@@ -306,5 +307,73 @@ func TestConsentRequiresAnExplicitPurpose(t *testing.T) {
 	res := as(s, "user_p", "RecordPurposeConsent", map[string]any{"granted": true})
 	if res.Outcome != "REJECTED" || res.Error.ErrorCode != "INVALID_CONSENT" {
 		t.Fatalf("缺 purpose 应当被拒，实际 %s (%+v)", res.Outcome, res.Error)
+	}
+}
+
+
+// ---- COMP-CONSENT-PIPELINE-001：分开同意、统一管线 ----
+
+func TestConsentsAreSeparatePerPurposeAndOneDoesNotStandInForAnother(t *testing.T) {
+	s := NewWithRepository(NewMemoryRepository())
+	grant := func(actor, purpose string) {
+		t.Helper()
+		if res := as(s, actor, "RecordPurposeConsent", map[string]any{"purpose": purpose, "granted": true, "source": "TEST"}); res.Outcome != "ACCEPTED" {
+			t.Fatalf("grant %s/%s: %+v", actor, purpose, res.Error)
+		}
+	}
+	grant("u1", consentpkg.TwinInsight)
+	ctx := context.Background()
+	if on, _ := s.hasActivePurposeConsent(ctx, "u1", consentpkg.TwinInsight); !on {
+		t.Fatal("the purpose she granted is active")
+	}
+	for _, other := range []string{consentpkg.Recommendation, consentpkg.OperatorAudienceDetail} {
+		if on, _ := s.hasActivePurposeConsent(ctx, "u1", other); on {
+			t.Fatalf("consenting to TWIN_INSIGHT must not consent to %s", other)
+		}
+	}
+	// 采集闸：至少一个采集用途有效就能存（她只同意了分身洞察，事件可以入库 —— 但只有分身洞察能读它，见 PG 测试）。
+	if res := as(s, "u1", "RecordPostImpression", map[string]any{"targetId": "post_1"}); res.Outcome != "ACCEPTED" {
+		t.Fatalf("one capture purpose is enough to store the event: %+v", res)
+	}
+	if res := as(s, "u_none", "RecordPostImpression", map[string]any{"targetId": "post_1"}); res.Outcome == "ACCEPTED" {
+		t.Fatal("no consent for any capture purpose: refused")
+	}
+	// 撤回她唯一的采集用途 ⇒ 立刻不能再存。
+	if res := as(s, "u1", "RecordPurposeConsent", map[string]any{"purpose": consentpkg.TwinInsight, "granted": false, "source": "TEST"}); res.Outcome != "ACCEPTED" {
+		t.Fatalf("withdraw: %+v", res.Error)
+	}
+	if res := as(s, "u1", "RecordPostImpression", map[string]any{"targetId": "post_2"}); res.Outcome == "ACCEPTED" {
+		t.Fatal("after withdrawing her only capture purpose nothing more is stored")
+	}
+}
+
+func TestOnlyRegisteredAndOfferedPurposesCanBeGrantedButAnythingRegisteredCanBeWithdrawn(t *testing.T) {
+	s := NewWithRepository(NewMemoryRepository())
+	for _, purpose := range []string{"MADE_UP", consentpkg.LegacyBehaviorAnalytics, consentpkg.AdTargeting} {
+		res := as(s, "u1", "RecordPurposeConsent", map[string]any{"purpose": purpose, "granted": true, "source": "TEST"})
+		if res.Outcome != "REJECTED" || res.Error == nil || res.Error.ErrorCode != "CONSENT_PURPOSE_NOT_AVAILABLE" {
+			t.Fatalf("granting %s must be refused (unknown / retired / not offered): %+v", purpose, res)
+		}
+	}
+	for _, purpose := range []string{consentpkg.LegacyBehaviorAnalytics, consentpkg.AdTargeting} {
+		if res := as(s, "u1", "RecordPurposeConsent", map[string]any{"purpose": purpose, "granted": false, "source": "TEST"}); res.Outcome != "ACCEPTED" {
+			t.Fatalf("withdrawal is never blocked (%s): %+v", purpose, res.Error)
+		}
+	}
+	if res := as(s, "u1", "GetPurposeConsent", map[string]any{"purpose": "MADE_UP"}); res.Outcome != "REJECTED" {
+		t.Fatal("reading the state of a purpose that does not exist is refused, not answered with a made-up 'not consented'")
+	}
+}
+
+func TestTheRetiredOneSwitchConsentNoLongerOpensTheCaptureGate(t *testing.T) {
+	repo := NewMemoryRepository()
+	s := NewWithRepository(repo)
+	// 老库里 2026-09-27 的单一大开关同意：直接写仓储（现在已经不能再经命令授予）。
+	if err := repo.GrantPurposeConsent(context.Background(), PurposeConsent{UserID: "legacy", Purpose: consentpkg.LegacyBehaviorAnalytics,
+		PolicyVersion: consentpkg.PolicyVersion(consentpkg.LegacyBehaviorAnalytics), Action: ConsentActionGrant, ActedAt: time.Now().UTC(), Source: "APP_SETTINGS"}); err != nil {
+		t.Fatal(err)
+	}
+	if res := as(s, "legacy", "RecordPostImpression", map[string]any{"targetId": "post_1"}); res.Outcome == "ACCEPTED" {
+		t.Fatal("a bundled consent from the old single switch is not a consent to any of the separate purposes: the user is asked again")
 	}
 }

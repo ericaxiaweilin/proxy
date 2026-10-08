@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/proxy-app/proxy-api/internal/consent"
 	"strings"
 	"time"
 
@@ -740,10 +741,12 @@ func (r *LocalNetRepository) ListPostAudience(ctx context.Context, postID string
 		), ev AS (
 			SELECT actor_id, event_type, watch_ms, created_at FROM localnet.interaction_events
 			WHERE target_type = 'POST' AND target_id = $1 AND event_type = 'POST_IMPRESSION'
+				AND `+consent.ValidAtSQL("actor_id", "created_at", consent.OperatorAudienceDetail)+`
 			UNION ALL
 			SELECT actor_id, event_type, watch_ms, created_at FROM localnet.interaction_events
 			WHERE target_type = 'MEDIA' AND target_id IN (SELECT media_asset_id FROM media)
 				AND event_type IN ('MEDIA_IMPRESSION', 'MEDIA_ZOOM')
+				AND `+consent.ValidAtSQL("actor_id", "created_at", consent.OperatorAudienceDetail)+`
 		)
 		SELECT actor_id,
 			COUNT(*) FILTER (WHERE event_type = 'POST_IMPRESSION'),
@@ -785,6 +788,7 @@ func (r *LocalNetRepository) ListMediaActivityForViewer(ctx context.Context, aut
 		JOIN localnet.interaction_events ev
 			ON ev.target_type = 'MEDIA' AND ev.target_id = m.media_asset_id
 			AND ev.event_type = 'MEDIA_IMPRESSION' AND ev.actor_id = $2
+			AND `+consent.ValidAtSQL("ev.actor_id", "ev.created_at", consent.OperatorAudienceDetail)+`
 		WHERE p.author_id = $1
 		GROUP BY p.id, m.media_asset_id
 		ORDER BY last_opened_at DESC
