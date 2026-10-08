@@ -134,3 +134,46 @@ export async function recordMediaZoom(
     // 埋点永远不抛。
   }
 }
+
+// TAG-PIPELINE：屏幕停留 / 前台会话，同一套采集闸（fail-closed）。<1s 不记（点进去立刻切走不算停留）；
+// 单段封顶 30 分钟（服务端同样封顶）。
+const MIN_USAGE_MS = 1000;
+const MAX_USAGE_MS = 30 * 60 * 1000;
+
+export async function endScreenView(
+  localNet: Pick<LocalNetClient, "recordScreenView">,
+  screenId: string,
+  startedAt: number,
+  store?: BehaviorAnalyticsStore
+): Promise<void> {
+  if (!screenId) return;
+  if (!(await behaviorAnalyticsEnabled(store))) return;
+  const watchMs = Math.min(Math.max(0, Date.now() - startedAt), MAX_USAGE_MS);
+  if (watchMs < MIN_USAGE_MS) return;
+  try {
+    await localNet.recordScreenView(screenId, watchMs);
+  } catch {
+    // 埋点永远不抛。
+  }
+}
+
+export async function endAppSession(
+  localNet: Pick<LocalNetClient, "recordAppSession">,
+  startedAt: number,
+  store?: BehaviorAnalyticsStore
+): Promise<void> {
+  if (!(await behaviorAnalyticsEnabled(store))) return;
+  const watchMs = Math.min(Math.max(0, Date.now() - startedAt), MAX_USAGE_MS);
+  if (watchMs < MIN_USAGE_MS) return;
+  try {
+    await localNet.recordAppSession(watchMs);
+  } catch {
+    // 埋点永远不抛。
+  }
+}
+
+/** 页面 id → 服务端接受的 screen id（小写字母数字下划线连字符，≤40）。 */
+export function screenIdOf(page: string): string {
+  return page.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 40);
+}
+

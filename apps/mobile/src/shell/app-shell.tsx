@@ -3,6 +3,7 @@
 // EXPERIENCE 仅作历史路由别名，新 UI 不展示体验货架。
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
+import { useUsageTracker } from "../usage-tracker";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { AccessibilityInfo } from "react-native";
@@ -358,6 +359,8 @@ export function AppShell({
     if (tab === "MESSAGES") return "MSG_FRIENDS";
     return "ME";
   })();
+  // TAG-PIPELINE：页面停留 / 前台会话（需用户同意，没同意不发请求）。
+  useUsageTracker(localNet, currentPage);
   const goToPage = (page: PageId): void => {
     setPageOverride(page);
     const root = PAGE_TO_ROOT[page];

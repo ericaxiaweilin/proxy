@@ -506,6 +506,29 @@ export class LocalNetClient {
     }
   }
 
+  // TAG-PIPELINE：屏幕停留 / 前台会话。形状同 recordActivityView（访客不发、失败静默、不重试）；
+  // screenId 会变成标签取值，只能是小写字母数字下划线连字符（服务端同样拒绝别的）。
+  public async recordScreenView(screenId: string, watchMs: number): Promise<void> {
+    try {
+      if (!/^[a-z0-9_-]{1,40}$/.test(screenId)) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(session, "RecordScreenView", { type: "Screen", id: screenId }, { targetType: "SCREEN", targetId: screenId, watchMs: Math.max(0, Math.floor(watchMs)) });
+    } catch {
+      // 埋点失败静默。
+    }
+  }
+
+  public async recordAppSession(watchMs: number): Promise<void> {
+    try {
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(session, "RecordAppSession", { type: "App", id: "app" }, { targetType: "APP", targetId: "app", watchMs: Math.max(0, Math.floor(watchMs)) });
+    } catch {
+      // 埋点失败静默。
+    }
+  }
+
   // 粗略位置上报 —— 同 recordPostImpression 的三条（访客不发、失败静默、不重试）。
   // 服务端把坐标收敛到 ~1km 网格后丢弃原始定位，所以客户端这边**不存、不写日志**：
   // 那一次网格化之后原值不该在别处再留一份。行为采集同意 + 实时位置同意
