@@ -354,3 +354,52 @@ func DefaultTaxonomy() (*Taxonomy, error) {
 	defaultTaxonomyOnce.Do(func() { defaultTaxonomy, defaultTaxonomyErr = LoadTaxonomy() })
 	return defaultTaxonomy, defaultTaxonomyErr
 }
+
+// Summary 是词典概况（运营页用）：总数、按类目的节点数、关键词冲突。
+type Summary struct {
+	Version    string         `json:"version"`
+	Active     int            `json:"activeNodes"`
+	Derived    int            `json:"derivedNodes"`
+	ByCategory []CategoryStat `json:"byCategory"`
+	Conflicts  []string       `json:"keywordConflicts"`
+}
+
+type CategoryStat struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Nodes int    `json:"nodes"`
+}
+
+func (t *Taxonomy) Summary() Summary {
+	s := Summary{Version: TaxonomyVersion, Conflicts: append([]string{}, t.Conflicts...)}
+	if len(s.Conflicts) > 30 {
+		s.Conflicts = s.Conflicts[:30]
+	}
+	perCat := map[string]int{}
+	for _, id := range t.order {
+		n := t.nodes[id]
+		if n.Status != "ACTIVE" {
+			continue
+		}
+		if n.Kind == "DERIVED" {
+			s.Derived++
+		} else {
+			s.Active++
+		}
+		parts := strings.Split(id, "/")
+		if len(parts) >= 2 {
+			perCat[parts[0]+"/"+parts[1]]++
+		} else {
+			perCat[id]++
+		}
+	}
+	ids := make([]string, 0, len(perCat))
+	for id := range perCat {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		s.ByCategory = append(s.ByCategory, CategoryStat{ID: id, Label: t.Label(id), Nodes: perCat[id]})
+	}
+	return s
+}

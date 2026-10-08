@@ -276,3 +276,15 @@ func TestMatchEvalCasesQueryReturnsOnlyMultiApplicantSelectedPublicOpportunities
 		t.Fatalf("the multi-applicant selected opportunity is a case with the chosen applicant: %+v", got)
 	}
 }
+
+// 管线健康度的 SQL 对真库：每个源都能数出来（表和列名没写错），不报错。
+func TestTagPipelineSourcesQueriesAllRun(t *testing.T) {
+	pool := testPool(t)
+	got, err := insight.NewPostgres(pool).Sources(context.Background(), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("every source query must run: %v", err)
+	}
+	if len(got) < 15 {
+		t.Fatalf("expected all sources, got %d", len(got))
+	}
+}

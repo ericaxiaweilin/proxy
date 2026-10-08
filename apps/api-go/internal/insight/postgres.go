@@ -379,3 +379,39 @@ func (p *Postgres) EvalCases(ctx context.Context, since time.Time, limit int) ([
 	}
 	return out, rows.Err()
 }
+
+func (p *Postgres) Sources(ctx context.Context, now time.Time) ([]SourceCount, error) {
+	week := now.Add(-7 * 24 * time.Hour)
+	type q struct{ source, label, consent, table, col, where string }
+	list := []q{
+		{"POST_VIEW", "浏览帖子", "PASSIVE", "localnet.interaction_events", "created_at", "event_type = 'POST_IMPRESSION'"},
+		{"MEDIA_VIEW", "浏览图片", "PASSIVE", "localnet.interaction_events", "created_at", "event_type IN ('MEDIA_IMPRESSION','MEDIA_ZOOM')"},
+		{"ACTIVITY_VIEW", "看活动页", "PASSIVE", "localnet.interaction_events", "created_at", "event_type = 'ACTIVITY_VIEW'"},
+		{"SCREEN_VIEW", "屏幕停留", "PASSIVE", "localnet.interaction_events", "created_at", "event_type = 'SCREEN_VIEW'"},
+		{"APP_SESSION", "前台会话", "PASSIVE", "localnet.interaction_events", "created_at", "event_type = 'APP_SESSION'"},
+		{"CHAT_META", "聊天（仅元数据）", "PASSIVE", "conversation.messages", "created_at", "deleted_at IS NULL AND COALESCE(authored_by,'') = ''"},
+		{"COARSE_LOCATION", "粗粒度位置", "PASSIVE", "tag.coarse_locations", "observed_at", "true"},
+		{"POSTS", "发帖", "ACTIVE", "localnet.posts", "created_at", "author_type = 'USER' AND status = 'PUBLISHED'"},
+		{"LIKES", "点赞", "ACTIVE", "engagement.reactions", "created_at", "true"},
+		{"REPLIES", "评论", "ACTIVE", "engagement.replies", "created_at", "true"},
+		{"REPOSTS", "转发", "ACTIVE", "engagement.reposts", "created_at", "true"},
+		{"BOOKMARKS", "收藏帖子", "ACTIVE", "engagement.bookmarks", "created_at", "true"},
+		{"ACTIVITY_INTEREST", "活动感兴趣", "ACTIVE", "activity.interests", "created_at", "true"},
+		{"ACTIVITY_JOIN", "活动报名", "ACTIVE", "activity.participants", "joined_at", "true"},
+		{"MARKET_PUBLISH", "发市场需求", "ACTIVE", "marketplace.opportunities", "created_at", "true"},
+		{"MARKET_APPLY", "报名需求", "ACTIVE", "marketplace.applications", "created_at", "true"},
+		{"VENUE_STATE", "收藏 / 去过的店", "ACTIVE", "reality.user_scene_states", "updated_at", "true"},
+		{"VENUE_CHECKIN", "打卡", "ACTIVE", "reality.scene_checkins", "declared_at", "true"},
+		{"ORDERS", "下单", "ACTIVE", "fulfillment.orders", "created_at", "true"},
+	}
+	out := make([]SourceCount, 0, len(list))
+	for _, x := range list {
+		var c SourceCount
+		c.Source, c.Label, c.Consent = x.source, x.label, x.consent
+		if err := p.pool.QueryRow(ctx, "SELECT COUNT(*) FILTER (WHERE "+x.col+" >= $1), COUNT(*) FROM "+x.table+" WHERE "+x.where, week).Scan(&c.Last7d, &c.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}

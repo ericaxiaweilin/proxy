@@ -276,6 +276,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/providers/profile", s.operatorConsoleGated(http.MethodGet, ScopeMarketplace, s.operatorProviderProfile))
 	mux.HandleFunc("/v1/operator/matching-eval", s.operatorConsole(s.operatorMatchingEval))
 	mux.HandleFunc("/v1/operator/match-preview", s.operatorConsoleGated(http.MethodGet, ScopeMarketplace, s.operatorMatchPreview))
+	mux.HandleFunc("/v1/operator/tag-pipeline", s.operatorConsole(s.operatorTagPipeline))
 	mux.HandleFunc("/v1/operator/demand-gap", s.operatorConsole(s.operatorDemandGap))
 	mux.HandleFunc("/v1/operator/insights", s.operatorConsole(s.operatorInsights))
 	mux.HandleFunc("/v1/operator/context-field", s.operatorConsole(s.operatorContextField))

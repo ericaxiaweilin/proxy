@@ -21,6 +21,9 @@ type fakeInsight struct {
 func (f *fakeInsight) TopInterests(context.Context, time.Time, int) ([]insight.InterestRow, error) {
 	return []insight.InterestRow{{Tag: "话题·摄影", Axis: "INTEREST_TOPIC", Value: "摄影", Users: 7, Score: .6, Confidence: .7}}, nil
 }
+func (f *fakeInsight) Sources(context.Context, time.Time) ([]insight.SourceCount, error) {
+	return []insight.SourceCount{{Source: "POSTS", Label: "发帖", Consent: "ACTIVE", Last7d: 3, Total: 9}}, nil
+}
 func (f *fakeInsight) Providers(context.Context, int) ([]insight.ProviderRow, error) { return nil, nil }
 func (f *fakeInsight) Provider(context.Context, string) (insight.ProviderRow, bool, error) {
 	return insight.ProviderRow{}, false, nil
@@ -201,5 +204,20 @@ func TestMatchingEvalEndpointIsOperatorOnlyAndHonestWhenUnwired(t *testing.T) {
 	rec := consoleGet(server, "matching-eval", "ops_token")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "样本不足") || strings.Contains(rec.Body.String(), `"top1Agreement":0`) {
 		t.Fatalf("one case is not enough and must say so, with no percentage: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTagPipelineShowsEverySourceAndTheTaxonomyAndDoesNotCallZeroNormal(t *testing.T) {
+	server := operatorConsoleServer()
+	if rec := consoleGet(server, "tag-pipeline", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no session: %d", rec.Code)
+	}
+	if rec := consoleGet(server, "tag-pipeline", "ops_token"); !strings.Contains(rec.Body.String(), OperatorNotConnectedSource) {
+		t.Fatalf("unwired: %s", rec.Body.String())
+	}
+	server.Insight = &fakeInsight{}
+	rec := consoleGet(server, "tag-pipeline", "ops_token")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"source":"POSTS"`) || !strings.Contains(rec.Body.String(), `"taxonomy"`) || !strings.Contains(rec.Body.String(), "不替它说正常") {
+		t.Fatalf("pipeline: %d %s", rec.Code, rec.Body.String())
 	}
 }

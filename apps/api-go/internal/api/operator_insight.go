@@ -86,3 +86,37 @@ func (s *Server) operatorInsights(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+// OPS-TAG-PIPELINE-001：标签管线的健康度——词典多大、各行为源在不在吃数据、哪些词有歧义。
+//
+//	GET /v1/operator/tag-pipeline
+//
+// 回答「这条管线是不是真的在跑」：每个行为源近 7 天 / 累计的量，区分被动（要采集同意）与主动（用户自己做的事）。
+// 量为 0 的源就是还没接上或还没人用——不画成"正常"。
+func (s *Server) operatorTagPipeline(w http.ResponseWriter, r *http.Request) {
+	if s.Insight == nil {
+		notConnected("标签管线（没有配数据库）", personalizationSpec+" §2 §3")(w, r)
+		return
+	}
+	sources, err := s.Insight.Sources(r.Context(), time.Now().UTC())
+	if err != nil {
+		log.Printf("operator tag pipeline: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "tag_pipeline_failed"})
+		return
+	}
+	body := map[string]any{"dataSource": OperatorLiveSource, "sources": sources}
+	notes := []string{
+		"被动源要用户同意采集才会进画像；主动源是用户自己做的事。「近 7 天」为 0 的源要么还没接上，要么还没人用——这里不替它说正常。",
+	}
+	if tx, err := tagging.DefaultTaxonomy(); err == nil {
+		body["taxonomy"] = tx.Summary()
+		if tx.Size() < 200 {
+			notes = append(notes, "词典还只有根类目：兴趣标签现在走旧的小词表（32 个主题）。词典扩充合入后会自动切换。")
+		}
+	} else {
+		body["taxonomyError"] = err.Error()
+		notes = append(notes, "词典加载失败，标签管线退回旧词表："+err.Error())
+	}
+	body["notes"] = notes
+	writeJSON(w, http.StatusOK, body)
+}

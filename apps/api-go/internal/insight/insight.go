@@ -130,7 +130,18 @@ type ProviderRow struct {
 	Services []string `json:"services"`
 }
 
+// SourceCount 是一个行为源在窗口内的真实量：管线有没有在吃数据，一眼可见。
+type SourceCount struct {
+	Source   string `json:"source"`
+	Label    string `json:"label"`
+	Consent  string `json:"consent"` // PASSIVE（要采集同意）| ACTIVE（用户主动做的事）
+	Last7d   int64  `json:"last7d"`
+	Total    int64  `json:"total"`
+}
+
 type Source interface {
+	// Sources：各行为源的量（OPS-TAG-PIPELINE-001）。
+	Sources(ctx context.Context, now time.Time) ([]SourceCount, error)
 	// Providers 列出服务方（limit 上限 500）；Provider 取一个（不存在返回 false）。
 	Providers(ctx context.Context, limit int) ([]ProviderRow, error)
 	Provider(ctx context.Context, userID string) (ProviderRow, bool, error)
