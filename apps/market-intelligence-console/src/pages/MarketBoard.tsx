@@ -78,7 +78,7 @@ export function MarketBoard() {
       <div className="controls">
         {WINDOWS.map((d) => (
           <button key={d} onClick={() => setDays(d)}
-            style={days === d ? { background: "#fff", color: "#17131d", borderColor: "#17131d" } : undefined}>近 {d} 天</button>
+            style={days === d ? { fontWeight: 700, borderColor: "#2f7de1" } : undefined}>近 {d} 天</button>
         ))}
       </div>
 
