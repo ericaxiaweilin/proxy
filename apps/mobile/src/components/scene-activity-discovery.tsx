@@ -331,6 +331,16 @@ export function SceneActivityDiscovery({
   const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个"; momentId?: string }>();
   // 「更多」里选中的子路线（海边散步…）：点卡 = 选中并高亮，底部「选择场景」才进列表。
   const [pickedMomentId, setPickedMomentId] = useState<string | undefined>();
+  // 「更多」是一个全屏 Modal，场景列表也是一个 Modal：同级的第二个 Modal 在 iOS 上会在第一个
+  // 还在时被无声吞掉（点「选择场景」没反应的原因）。从「更多」进列表 = 先收起「更多」，等它收完
+  // 再开列表；列表关闭时回到「更多」，选中的动作 / 子路线还在。
+  const [returnToPicker, setReturnToPicker] = useState(false);
+  const openDirectory = (entry: { actionId: string; label: string; unit: "家" | "个"; momentId?: string }): void => {
+    if (!pickerOpen) { setDirectoryEntry(entry); return; }
+    setReturnToPicker(true);
+    setPickerOpen(false);
+    setTimeout(() => setDirectoryEntry(entry), 450);
+  };
   // SPORT-BADMINTON-001：运动 · 羽毛球那张卡。整页是全屏 Modal，自己管三屏切换。
   const [badmintonOpen, setBadmintonOpen] = useState(false);
   const [assets, setAssets] = useState<SceneAssetCatalog>();
@@ -432,7 +442,7 @@ export function SceneActivityDiscovery({
   const renderEntryCard = (entry: (typeof entries)[number]): React.JSX.Element => {
         const photo = absoluteNetworkURL(apiBaseUrl ?? "", entry.imageUrl);
         const sub = [entry.visitedTotal > 0 ? `${entry.visitedTotal} 人去过` : "", ...entry.areas].filter(Boolean).join(" · ");
-        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => setDirectoryEntry(entry)} style={styles.entryCard}>
+        return <Pressable accessibilityLabel={`场景分类 ${entry.label} · ${entry.count} ${entry.unit}`} key={entry.actionId} onPress={() => openDirectory(entry)} style={styles.entryCard}>
           {photo ? <Image contentFit="cover" source={{ uri: photo }} style={styles.entryPhoto} /> : <View style={[styles.photoPending, styles.entryPhoto]} />}
           <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
             <Defs>
@@ -720,7 +730,7 @@ export function SceneActivityDiscovery({
                 ? scenes.filter((scene) => scenesForAction([scene], base.actionId).length > 0 && sceneMatches(scene, moment.scene)).length
                 : entriesForAction[0]?.count;
               const target = moment ? { ...base, label: moment.title, momentId: moment.id } : base;
-              return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => setDirectoryEntry(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{count === undefined ? "选择场景" : count === 0 ? "选择场景 · 暂无" : `选择场景 · ${count} ${base.unit}`}</Text></Pressable>;
+              return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => openDirectory(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{count === undefined ? "选择场景" : count === 0 ? "选择场景 · 暂无" : `选择场景 · ${count} ${base.unit}`}</Text></Pressable>;
             })() : null}</View>
         </View>
       </Modal>
@@ -733,7 +743,7 @@ export function SceneActivityDiscovery({
         label={directoryEntry.label}
         unit={directoryEntry.unit}
         apiBaseUrl={apiBaseUrl}
-        onClose={() => setDirectoryEntry(undefined)}
+        onClose={() => { setDirectoryEntry(undefined); if (returnToPicker) { setReturnToPicker(false); setPickerOpen(true); } }}
         {...(onOpenScene ? { onOpenScene } : {})}
       /> : null}
 
