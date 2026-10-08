@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTION_SCENE_KEYWORDS, ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries, type SceneCategoryAction, type SceneCategoryBrief } from "./scene-category-entries";
+import { actionsOfMoreCategory, moreCategoryOfAction, MORE_CATEGORIES, ACTION_SCENE_KEYWORDS, ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, sceneCategoryEntries, type SceneCategoryAction, type SceneCategoryBrief } from "./scene-category-entries";
 
 // SCENE-HOME-ENTRY-001：首页入口卡上那些数字是**用户会当成事实读的**（「23 家」
 // 「12 人去过」），所以这块不能只靠 grep 文本钉守着 —— 下面全是真行为断言。
@@ -138,5 +138,16 @@ describe("sceneCategoryEntries: 首页场景入口卡的计数只有真实来源
   it("运动场地只归运动，名字里的 Park 不会把它算进 City Walk", () => {
     const arena = scene({ name: "Khu Thể thao · Ocean Park", type: "运动 · 综合体育馆", category: "其他" });
     expect(sceneCategoryEntries([arena], [{ id: "city-walk", label: "City Walk" }, { id: "sport", label: "运动" }]).map((e) => e.actionId)).toEqual(["sport"]);
+  });
+
+  it("更多页四档与发布需求同口径：热门 = 娱乐 ∪ 运动，专业另算，每个动作只属一档", () => {
+    expect(MORE_CATEGORIES.map((c) => c.label)).toEqual(["热门", "娱乐", "运动", "专业"]);
+    const hot = new Set(actionsOfMoreCategory("all"));
+    for (const a of [...actionsOfMoreCategory("fun"), ...actionsOfMoreCategory("sport")]) expect(hot.has(a)).toBe(true);
+    for (const a of actionsOfMoreCategory("pro")) expect(hot.has(a)).toBe(false);
+    expect(moreCategoryOfAction("dining")).toBe("fun");
+    expect(moreCategoryOfAction("cycling")).toBe("sport");
+    expect(moreCategoryOfAction("translation")).toBe("pro");
+    expect(moreCategoryOfAction("nope")).toBeUndefined();
   });
 });

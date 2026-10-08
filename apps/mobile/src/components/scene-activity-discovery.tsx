@@ -7,7 +7,7 @@ import { ProxyIcon } from "./proxy-icon";
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { createSceneFavoritesStore, type SavedSceneEntry } from "../scene-favorites";
-import { ENTRY_ACTION_IDS, PRIMARY_ACTION_IDS, scenesForAction, sceneCategoryEntries } from "../scene-category-entries";
+import { actionsOfMoreCategory, ENTRY_ACTION_IDS, MORE_CATEGORIES, moreCategoryOfAction, type MoreCategoryId, PRIMARY_ACTION_IDS, scenesForAction, sceneCategoryEntries } from "../scene-category-entries";
 // SCENE-SHOP-DIRECTORY-001：入口卡点进去是原型第 2/3 屏（分类列表 → 单店
 // 详情）。两屏在同一个全屏 Modal 里，返回逐层收。
 import { SceneShopDirectory } from "./scene-shop-directory";
@@ -330,6 +330,7 @@ export function SceneActivityDiscovery({
   // 这些派生字段本来就没有真实值，不编占位）。
   const [directoryEntry, setDirectoryEntry] = useState<{ actionId: string; label: string; unit: "家" | "个"; momentId?: string }>();
   // 「更多」里选中的子路线（海边散步…）：点卡 = 选中并高亮，底部「选择场景」才进列表。
+  const [moreCategory, setMoreCategory] = useState<MoreCategoryId>("all");
   const [pickedMomentId, setPickedMomentId] = useState<string | undefined>();
   // 「更多」是一个全屏 Modal，场景列表也是一个 Modal：同级的第二个 Modal 在 iOS 上会在第一个
   // 还在时被无声吞掉（点「选择场景」没反应的原因）。从「更多」进列表 = 先收起「更多」，等它收完
@@ -409,14 +410,16 @@ export function SceneActivityDiscovery({
 
   const filtered = useMemo(() => MOMENTS.filter((moment) =>
     (!actionId || moment.action === actionMatchId(actionId))
+    && actionsOfMoreCategory(moreCategory).includes(moment.action)
     && matchesRefine(moment)
-  ), [actionId, occasionId, timeId, priceId]);
+  ), [actionId, moreCategory, occasionId, timeId, priceId]);
 
   const liveSceneFor = (semanticSceneId: string): SceneDiscoveryBrief | undefined =>
     scenes.find((scene) => sceneMatches(scene, semanticSceneId));
 
   const resetAll = (): void => {
     setActionId(undefined);
+    setMoreCategory("all");
     setPickedMomentId(undefined);
     setOccasionId(undefined);
     setTimeId(undefined);
@@ -520,7 +523,7 @@ export function SceneActivityDiscovery({
 
   return (
     <View style={styles.root}>
-      <SectionHead label="动作" onAll={() => setPickerOpen(true)} />
+      <SectionHead label="动作" onAll={() => { setMoreCategory(actionId ? (moreCategoryOfAction(actionMatchId(actionId) ?? "") ?? "all") : "all"); setPickerOpen(true); }} />
       {/* SCENE-HOME-ENTRY-001：原型首页那一行是 6 个等宽主动作，平铺不横滑
           —— 横滑那一版在真机上还会跟 iOS 系统 tab 切换手势打架（见那个横滑
           rail 组件自己的注释）。8 个次要动作 + 17 个细分动作仍然从右上
@@ -679,22 +682,24 @@ export function SceneActivityDiscovery({
 
             <View style={styles.waimaiRow}>
               <ScrollView showsVerticalScrollIndicator={false} style={styles.waimaiRail}>
-                <Pressable accessibilityLabel="全部动作" onPress={() => setActionId(undefined)} style={[styles.waimaiRailItem, actionId === undefined && styles.waimaiRailItemActive]}>
-                  <Text selectable style={[styles.waimaiRailLabel, actionId === undefined && styles.waimaiRailLabelActive]}>全部</Text>
-                  <Text selectable style={styles.waimaiRailCount}>{MOMENTS.filter(matchesRefine).length}</Text>
-                </Pressable>
-                {ACTIONS.map((action) => {
-                  const active = actionMatchId(actionId) === action.id;
-                  const count = MOMENTS.filter((m) => m.action === action.id && matchesRefine(m)).length;
-                  return <Pressable accessibilityLabel={`动作 ${action.label}`} key={action.id} onPress={() => setActionId(active ? undefined : action.id)} style={[styles.waimaiRailItem, active && styles.waimaiRailItemActive]}>
-                    <Image contentFit="contain" source={action.icon} style={styles.waimaiRailIcon} />
-                    <Text selectable numberOfLines={1} style={[styles.waimaiRailLabel, active && styles.waimaiRailLabelActive]}>{action.label}</Text>
+                {MORE_CATEGORIES.map((category) => {
+                  const active = moreCategory === category.id;
+                  const count = MOMENTS.filter((m) => actionsOfMoreCategory(category.id).includes(m.action) && matchesRefine(m)).length;
+                  return <Pressable accessibilityLabel={`分类 ${category.label}`} key={category.id} onPress={() => { setMoreCategory(category.id); setPickedMomentId(undefined); setActionId(category.id === "sport" ? "sport" : undefined); }} style={[styles.waimaiRailItem, active && styles.waimaiRailItemActive]}>
+                    <Text selectable numberOfLines={1} style={[styles.waimaiRailLabel, active && styles.waimaiRailLabelActive]}>{category.label}</Text>
                     {count > 0 ? <Text selectable style={styles.waimaiRailCount}>{count}</Text> : null}
                   </Pressable>;
                 })}
               </ScrollView>
 
               <ScrollView contentContainerStyle={styles.sceneList} showsVerticalScrollIndicator={false} style={styles.waimaiList}>
+                {/* 档内的动作筛选（咖啡 / 用餐 / City Walk…）：左栏是四档，动作退到这一行；点已选的取消。 */}
+                <View style={styles.detailChipGrid}>{actionsOfMoreCategory(moreCategory).map((id) => {
+                  const active = actionMatchId(actionId) === id;
+                  return <Pressable accessibilityLabel={`动作 ${taxon(ACTIONS, id).label}`} key={id} onPress={() => { setActionId(active ? undefined : id); setPickedMomentId(undefined); }} style={[styles.detailChip, active && styles.detailChipActive]}>
+                    <Text selectable style={[styles.detailChipText, active && styles.detailChipTextActive]}>{taxon(ACTIONS, id).label}</Text>
+                  </Pressable>;
+                })}</View>
                 {actionFamily(actionId) ? <View style={styles.detailGroup}>
                   <Text selectable style={styles.detailGroupTitle}>{ACTION_FAMILY_LABELS[actionFamily(actionId)!]}</Text>
                   <View style={styles.detailChipGrid}>{ACTION_DETAILS.filter((detailAction) => detailAction.familyId === actionFamily(actionId)).map((detailAction) => {

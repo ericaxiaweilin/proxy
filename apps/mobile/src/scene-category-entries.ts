@@ -131,3 +131,35 @@ export function sceneCategoryEntries(
     }];
   });
 }
+
+/**
+ * 「更多」页左栏：与发布需求向导的 rail 同一套四档（热门 / 娱乐 / 运动 / 专业）。
+ * 热门 = 娱乐 ∪ 运动（专业另算），与向导 demand-wizard 的口径一致。
+ * 动作 → 档位是固定表，不从场景数据猜；不在表里的动作不属于任何档（不会混进热门）。
+ */
+export const MORE_CATEGORIES = [
+  { id: "all", label: "热门" },
+  { id: "fun", label: "娱乐" },
+  { id: "sport", label: "运动" },
+  { id: "pro", label: "专业" },
+] as const;
+export type MoreCategoryId = (typeof MORE_CATEGORIES)[number]["id"];
+
+const FUN_ACTIONS = ["coffee", "dining", "city-walk", "photo", "exhibition", "shopping", "movie", "music", "explore-store", "travel"] as const;
+const SPORT_ACTIONS = ["sport", "cycling"] as const;
+const PRO_ACTIONS = ["translation", "urban-support"] as const;
+
+export function actionsOfMoreCategory(category: MoreCategoryId): readonly string[] {
+  if (category === "fun") return FUN_ACTIONS;
+  if (category === "sport") return SPORT_ACTIONS;
+  if (category === "pro") return PRO_ACTIONS;
+  return [...FUN_ACTIONS, ...SPORT_ACTIONS];
+}
+
+/** 动作所属的具体档（热门是并集，不会作为归属返回）；未知动作回 undefined。 */
+export function moreCategoryOfAction(actionId: string): Exclude<MoreCategoryId, "all"> | undefined {
+  if ((FUN_ACTIONS as readonly string[]).includes(actionId)) return "fun";
+  if ((SPORT_ACTIONS as readonly string[]).includes(actionId)) return "sport";
+  if ((PRO_ACTIONS as readonly string[]).includes(actionId)) return "pro";
+  return undefined;
+}
