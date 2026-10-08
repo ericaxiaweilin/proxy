@@ -335,6 +335,13 @@ export function SceneActivityDiscovery({
   // 还在时被无声吞掉（点「选择场景」没反应的原因）。从「更多」进列表 = 先收起「更多」，等它收完
   // 再开列表；列表关闭时回到「更多」，选中的动作 / 子路线还在。
   const [returnToPicker, setReturnToPicker] = useState(false);
+  // 子路线只在真的有命中场景时才收窄：moment 带的语义场景（lake / beach…）是设计稿词，
+  // 真实场景的名字里常常没有（日落咖啡 → 湖，咖啡店名字里没有「湖」），硬收窄就是一页「暂无」。
+  // 没命中 = 退回整个动作的列表，标题也用动作名，不假装按子路线筛过。
+  const resolveMomentTarget = (moment: MomentSeed, base: { actionId: string; label: string; unit: "家" | "个" }): { actionId: string; label: string; unit: "家" | "个"; momentId?: string } => {
+    const hits = scenes.filter((scene) => scenesForAction([scene], base.actionId).length > 0 && sceneMatches(scene, moment.scene)).length;
+    return hits > 0 ? { ...base, label: moment.title, momentId: moment.id } : base;
+  };
   const openDirectory = (entry: { actionId: string; label: string; unit: "家" | "个"; momentId?: string }): void => {
     if (!pickerOpen) { setDirectoryEntry(entry); return; }
     setReturnToPicker(true);
@@ -478,7 +485,7 @@ export function SceneActivityDiscovery({
     // 没有真实的商家占比，不编）。列表进去自己会说"附近还没有接入的 X 场景"。
     const picked = !home && pickedMomentId === moment.id;
     const base = directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: "个" as const };
-    return <Pressable accessibilityLabel={`Moment ${moment.title}${picked ? " 已选" : ""}`} key={moment.id} onPress={() => (home ? setDirectoryEntry({ ...base, label: moment.title, momentId: moment.id }) : setPickedMomentId(picked ? undefined : moment.id))} style={[styles.sceneCard, picked && styles.sceneCardPicked]}>
+    return <Pressable accessibilityLabel={`Moment ${moment.title}${picked ? " 已选" : ""}`} key={moment.id} onPress={() => (home ? setDirectoryEntry(resolveMomentTarget(moment, base)) : setPickedMomentId(picked ? undefined : moment.id))} style={[styles.sceneCard, picked && styles.sceneCardPicked]}>
       {absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) || networkSource("moments", moment.id) ? <Image contentFit="cover" source={(absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl) ? { uri: absoluteNetworkURL(apiBaseUrl ?? "", live?.imageUrl)! } : networkSource("moments", moment.id))!} style={styles.sceneCardPhoto} /> : <View style={[styles.photoPending, styles.sceneCardPhoto]} />}
       <Svg height="100%" pointerEvents="none" style={styles.sceneCardShade} width="100%">
         <Defs>
@@ -726,10 +733,10 @@ export function SceneActivityDiscovery({
             {actionId ? (() => {
               const moment = pickedMomentId ? MOMENTS.find((m) => m.id === pickedMomentId && m.action === actionMatchId(actionId)) : undefined;
               const base = entriesForAction[0] ?? { actionId: actionMatchId(actionId) ?? actionId, label: taxon(ACTIONS, actionMatchId(actionId) ?? actionId).label, unit: "个" as const };
-              const count = moment
+              const target: { actionId: string; label: string; unit: "家" | "个"; momentId?: string } = moment ? resolveMomentTarget(moment, base) : base;
+              const count = target.momentId && moment
                 ? scenes.filter((scene) => scenesForAction([scene], base.actionId).length > 0 && sceneMatches(scene, moment.scene)).length
                 : entriesForAction[0]?.count;
-              const target = moment ? { ...base, label: moment.title, momentId: moment.id } : base;
               return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => openDirectory(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{count === undefined ? "选择场景" : count === 0 ? "选择场景 · 暂无" : `选择场景 · ${count} ${base.unit}`}</Text></Pressable>;
             })() : null}</View>
         </View>

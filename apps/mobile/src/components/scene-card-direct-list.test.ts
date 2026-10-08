@@ -26,7 +26,7 @@ describe("SCENE-CARD-DIRECT-LIST-001 every scene card opens the real list direct
   it("a moment card always calls setDirectoryEntry on press, with no fallback branch", () => {
     // 首页卡直接开列表（带上子路线 momentId）；「更多」里点卡 = 选中，底部「选择场景」才开。
     expect(code).toContain("const base = directoryTarget ?? { actionId: actionMatchId(moment.action) ?? moment.action, label: action.label, unit: \"个\" as const };");
-    expect(code).toContain("home ? setDirectoryEntry({ ...base, label: moment.title, momentId: moment.id }) : setPickedMomentId(");
+    expect(code).toContain("home ? setDirectoryEntry(resolveMomentTarget(moment, base)) : setPickedMomentId(");
     // 反向臂：旧的双分支写法（真命中开列表，没命中弹 sheet）不能悄悄回来。
     expect(code).not.toMatch(/if\s*\(directoryTarget\)\s*setDirectoryEntry\(directoryTarget\);\s*else\s*setDetail\(moment\)/);
   });
