@@ -55,7 +55,7 @@ import { SafetyEventCard } from "../components/safety-event-card";
 // 一致：getCurrentFix + expoLocationApi。
 import { LanguageSheet } from "../components/language-sheet";
 // I18N-SETTINGS-001：设置页与「位置与隐私」子页的文案。见 useI18n() 那行注释。
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
 import { getCurrentFix } from "../device-location";
 // SETTINGS-BLOCKLIST-001：本机黑名单（服务端没有「列出黑名单」的命令，见 store 头注释）。
 import { blockUser, getBlocklist, subscribeBlocklist, unblockUser } from "../blocked-users-store";
@@ -113,8 +113,9 @@ import { sessionAuthClient, localApiBaseUrl, nativeSecureSessionStore, nativeTra
 import { createSocialSettingsStore } from "../social-settings-store";
 import {
   BEHAVIOR_ANALYTICS_CONSENT_SOURCE,
-  BEHAVIOR_ANALYTICS_PURPOSE,
-  createBehaviorAnalyticsStore
+  CONSENT_PURPOSES,
+  createBehaviorAnalyticsStore,
+  type ConsentPurpose
 } from "../behavior-analytics-settings";
 
 // Extracted modules
@@ -141,6 +142,29 @@ const OTTER_LOGO = require("../../assets/otter-logo.png");
 const lastSignInStore = createLastSignInStore(nativeSecureStorageDriver);
 const socialSettingsStore = createSocialSettingsStore(nativeSecureStorageDriver);
 const behaviorAnalyticsStore = createBehaviorAnalyticsStore(nativeSecureStorageDriver);
+
+// COMP-CONSENT-PIPELINE-001（2026-10-08，用户 + 法务）：动态浏览统计从**一个**
+// 总闸拆成**三个各自独立**的同意开关 —— 每个目的一行、自己的标题、自己的
+// 说明、自己的开关、自己的错误行。
+//
+// 为什么不能继续用「一个开关 + 一段说三个用途的话」：Nghị định 356/2025
+// Art. 6.3 禁止用含糊、误导的指示让数据主体分不清自己同意了什么。一个开关
+// 只能回出一声「同意」，而那一声无法对应到服务端**按目的**的同意检查
+// （RECOMMENDATION / TWIN_INSIGHT / OPERATOR_AUDIENCE_DETAIL 各自独立）。
+// 于是只能只开一个用途的用户被逼着全开或全关 —— 全开就是没有同意，全关就是
+// 功能不能用。
+//
+// 三行顺序固定：推荐 → 分身洞察 → 运营明细，从「对我有用的」到「对我没用的
+// 但对平台有用的」，也是敏感度递增的顺序。
+const CONSENT_PURPOSE_ROWS: ReadonlyArray<{
+  purpose: ConsentPurpose;
+  titleKey: MessageKey;
+  descKey: MessageKey;
+}> = [
+  { purpose: "RECOMMENDATION", titleKey: "consent.reco.title", descKey: "consent.reco.desc" },
+  { purpose: "TWIN_INSIGHT", titleKey: "consent.twin.title", descKey: "consent.twin.desc" },
+  { purpose: "OPERATOR_AUDIENCE_DETAIL", titleKey: "consent.ops.title", descKey: "consent.ops.desc" }
+];
 
 const PROFILE_AVATAR_DIR = new Directory(Paths.document, "proxy-profile");
 function avatarScope(accountId?: string): string {
@@ -1073,58 +1097,72 @@ export function MeSurface({
   useEffect(() => { if (!socialSettingsHydrated.current) return; const value = { accounts: socialAccounts, ...socialSettings, collaborationEnabled: collaboration.enabled, collaborationTypes: collaboration.types, collaborationRate: collaboration.rate, collaborationContact: collaboration.contact }; void socialSettingsStore.write(value); if (!socialSettingsClient) return; const timer = setTimeout(() => { void socialSettingsClient.write(value).catch(() => undefined); }, 250); return () => clearTimeout(timer); }, [socialAccounts, socialSettings, collaboration, socialSettingsClient]);
   const [securityRetention, setSecurityRetention] = useState<7 | 30 | 90 | 365>(30);
   const [screenshotWarn, setScreenshotWarn] = useState(true);
-  // TWIN-SIGNALS-001 合规修正（2026-09-27）：动态浏览统计总闸**默认关**。
+  // TWIN-SIGNALS-001 合规修正（2026-09-27）：动态浏览统计**默认全关**。
   // 采的是敏感个人数据（NĐ 356/2025 Art. 4.1(l)：社交网络上的行为与活动追踪
   // 数据），而同法令 Art. 6.3 **禁止默认同意机制** ⇒ 未显式开过一律不采集，
   // 读失败也不采集（fail-closed，见 behavior-analytics-settings）。
   //
   // COMP-PURPOSE-CONSENT-001（同日，架构层）：**服务端才是同意的来源**。
-  // 本地这个布尔只是缓存（让埋点不必每次往返）；真正的闸在服务端
+  // 本地这一组布尔只是缓存（让埋点不必每次往返）；真正的闸在服务端
   // （localnet 的 appendInteraction 按目的查同意，没有就拒收）。
   // 所以：
-  //   * 挂载时以**服务端状态**为准，本地缓存跟着它走；
+  //   * 挂载时**每一个目的**都以服务端状态为准，本地缓存跟着它走；
   //   * 拨开关时先写服务端，**成功了才改本地状态** —— 不能出现
   //     「界面显示已关、服务端没收到」这种状态（那等于用户撤回了一个
   //     不存在的同意，而服务端继续采）。
-  const [behaviorAnalytics, setBehaviorAnalytics] = useState(false);
-  const [behaviorAnalyticsError, setBehaviorAnalyticsError] = useState<string | undefined>(undefined);
+  //
+  // COMP-CONSENT-PIPELINE-001（2026-10-08）：按 purpose 分开存，每个目的
+  // 三个来源各管各的 —— 旧版是一次读一次写、一个错误字符串；现在一次读三个、
+  // 一次写三个、三个错误各归各的。把它们混回一个布尔就是这次要修的 bug。
+  const [behaviorAnalyticsByPurpose, setBehaviorAnalyticsByPurpose] = useState<Record<ConsentPurpose, boolean>>({
+    RECOMMENDATION: false,
+    TWIN_INSIGHT: false,
+    OPERATOR_AUDIENCE_DETAIL: false
+  });
+  const [behaviorAnalyticsError, setBehaviorAnalyticsError] = useState<Partial<Record<ConsentPurpose, string>>>({});
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      // 先按本地缓存显示，避免闪烁；随后用服务端状态覆盖。
-      try {
-        const stored = await behaviorAnalyticsStore.read();
-        if (!cancelled && stored !== undefined) setBehaviorAnalytics(stored);
-      } catch { /* 读不到 = 未同意，保持关 */ }
-      try {
-        const state = await localNet.getPurposeConsentState(BEHAVIOR_ANALYTICS_PURPOSE);
-        if (cancelled) return;
-        // 服务端说了算：active 才叫同意。found=false（从未表过态）也是没同意。
-        setBehaviorAnalytics(state.active);
-        await behaviorAnalyticsStore.write(state.active).catch(() => undefined);
-      } catch {
-        // 服务端读不出来：**保持关**（fail-closed），并把本地缓存也压成关，
-        // 免得本地缓存显示"开"而服务端拒收，用户以为在采。
-        if (cancelled) return;
-        setBehaviorAnalytics(false);
-        await behaviorAnalyticsStore.write(false).catch(() => undefined);
+      for (const purpose of CONSENT_PURPOSES) {
+        // 先按本地缓存显示，避免闪烁；随后用服务端状态覆盖。
+        try {
+          const stored = await behaviorAnalyticsStore.read(purpose);
+          if (!cancelled && stored !== undefined) {
+            setBehaviorAnalyticsByPurpose((prev) => ({ ...prev, [purpose]: stored }));
+          }
+        } catch { /* 读不到 = 未同意，保持关 */ }
+        try {
+          const state = await localNet.getPurposeConsentState(purpose);
+          if (cancelled) return;
+          // 服务端说了算：active 才叫同意。found=false（从未表过态）也是没同意。
+          setBehaviorAnalyticsByPurpose((prev) => ({ ...prev, [purpose]: state.active }));
+          await behaviorAnalyticsStore.write(purpose, state.active).catch(() => undefined);
+        } catch {
+          // 服务端读不出来：**这一项**保持关（fail-closed），并把它的本地缓存也
+          // 压成关，免得本地缓存显示"开"而服务端拒收，用户以为在采。别的目的
+          // 不受牵连 —— 它们各自有各自的读结果。
+          if (cancelled) return;
+          setBehaviorAnalyticsByPurpose((prev) => ({ ...prev, [purpose]: false }));
+          await behaviorAnalyticsStore.write(purpose, false).catch(() => undefined);
+        }
       }
     })();
     return () => { cancelled = true; };
   }, [localNet]);
-  function toggleBehaviorAnalytics(): void {
-    const next = !behaviorAnalytics;
-    setBehaviorAnalyticsError(undefined);
+  // 一个目的一个入口：这一声同意只对 purpose 自己成立，绝不连带另外两项。
+  function toggleBehaviorAnalytics(purpose: ConsentPurpose): void {
+    const next = !behaviorAnalyticsByPurpose[purpose];
+    setBehaviorAnalyticsError((prev) => ({ ...prev, [purpose]: undefined }));
     void (async () => {
       try {
         // 先落服务端（这是法律意义上的同意动作），成功了再改本地。
-        await localNet.recordPurposeConsent(BEHAVIOR_ANALYTICS_PURPOSE, next, BEHAVIOR_ANALYTICS_CONSENT_SOURCE);
-        await behaviorAnalyticsStore.write(next);
-        setBehaviorAnalytics(next);
+        await localNet.recordPurposeConsent(purpose, next, BEHAVIOR_ANALYTICS_CONSENT_SOURCE);
+        await behaviorAnalyticsStore.write(purpose, next);
+        setBehaviorAnalyticsByPurpose((prev) => ({ ...prev, [purpose]: next }));
       } catch {
-        // 写失败 = 同意没有生效。**不改本地状态**，并明确告诉用户 ——
-        // 静默失败在这里是最坏的结果：用户以为关掉了，服务端还在采。
-        setBehaviorAnalyticsError(next ? "开启失败，请重试" : "关闭失败，请重试");
+        // 写失败 = 同意没有生效。**不改本地状态**，并把失败挂在这**一个**目的
+        // 上 —— 静默失败在这里是最坏的结果：用户以为关掉了，服务端还在采。
+        setBehaviorAnalyticsError((prev) => ({ ...prev, [purpose]: next ? "开启失败，请重试" : "关闭失败，请重试" }));
       }
     })();
   }
@@ -2114,26 +2152,47 @@ export function MeSurface({
                 是他看到的用途，所以用途必须说全 —— NĐ 330/2026
                 Điều 39.1(a) 对「处理与已同意目的不符」罚 2,000–4,000 万。
                 还要点明这是**敏感**数据：NĐ 356 要求征求敏感数据同意时明确告知。 */}
-            <View style={styles.socialSettingRow}>
-              <View style={styles.socialAccountCopy}>
-                <Text selectable style={styles.socialSettingName}>动态浏览统计 · 敏感数据</Text>
-                <Text selectable style={styles.socialSettingDesc}>默认关闭。开启后记录你看过哪些动态、多图动态里具体看了哪张照片多久，用于：① 给你推更对味的内容；② 生成「AI 分身 · 好友洞察」的浏览统计；③ 你自己的帖子显示浏览数据，平台运营侧可查看逐人明细（谁、看了几秒、放大几次），用于内容运营。依据越南个人数据保护法与 356/2025/NĐ-CP，这类行为数据属于敏感个人数据，须由你主动开启。随时可关，关掉后不再记录。</Text>
-              </View>
-              <Pressable
-                accessibilityRole="switch"
-                accessibilityState={{ checked: behaviorAnalytics }}
-                accessibilityLabel="动态浏览统计开关"
-                onPress={toggleBehaviorAnalytics}
-                style={[styles.socialSwitch, behaviorAnalytics ? styles.socialSwitchOn : null]}
-              >
-                <View style={[styles.socialSwitchDot, behaviorAnalytics ? styles.socialSwitchDotOn : null]} />
-              </Pressable>
-            </View>
-            {/* COMP-PURPOSE-CONSENT-001：同意写服务端失败时必须说出来。
-                「用户以为关掉了、服务端还在采」是这里最坏的失败模式。 */}
-            {behaviorAnalyticsError ? (
-              <Text selectable style={styles.socialSettingDesc}>{behaviorAnalyticsError} —— 开关没有生效，服务端仍在按上一次的同意状态处理。</Text>
-            ) : null}
+            {/* COMP-CONSENT-PIPELINE-001（2026-10-08）：上面那段「用途必须说全」
+                的修法有个副作用 —— 一段话里塞三个用途，用户答的那一声「同意」
+                仍然无法对应到**某一个**用途，而服务端是按用途分别记同意的。
+                所以这里不再用「说全」换「捆在一起」，而是拆成三个开关：每个
+                目的自己的标题、自己的说明、自己的状态、自己的错误行。
+                标题 + 一行说明在**上面**，说清三者独立；正文走字典，六种语言
+                各自可读（这一段是知情表示，写死中文就等于让非中文用户在同意
+                一件自己没读过的用途）。 */}
+            <Text selectable style={styles.socialSettingName}>{t("consent.heading")}</Text>
+            <Text selectable style={styles.socialSettingDesc}>{t("consent.note")}</Text>
+            {CONSENT_PURPOSE_ROWS.map((row) => {
+              const purpose = row.purpose;
+              const enabled = behaviorAnalyticsByPurpose[purpose];
+              const rowError = behaviorAnalyticsError[purpose];
+              return (
+                <View key={purpose}>
+                  <View style={styles.socialSettingRow}>
+                    <View style={styles.socialAccountCopy}>
+                      <Text selectable style={styles.socialSettingName}>{t(row.titleKey)}</Text>
+                      <Text selectable style={styles.socialSettingDesc}>{t(row.descKey)}</Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="switch"
+                      accessibilityState={{ checked: enabled }}
+                      accessibilityLabel={t(row.titleKey)}
+                      onPress={() => toggleBehaviorAnalytics(purpose)}
+                      style={[styles.socialSwitch, enabled ? styles.socialSwitchOn : null]}
+                    >
+                      <View style={[styles.socialSwitchDot, enabled ? styles.socialSwitchDotOn : null]} />
+                    </Pressable>
+                  </View>
+                  {/* COMP-PURPOSE-CONSENT-001：同意写服务端失败时必须说出来，且
+                      只挂在**这一个**目的上。「用户以为关掉了、服务端还在采」
+                      是这里最坏的失败模式 —— 而别的两项开关并没有失败，
+                      在旁边挂一条全局错误会让用户去重拨没问题的开关。 */}
+                  {rowError ? (
+                    <Text selectable style={styles.socialSettingDesc}>{rowError} —— 开关没有生效，服务端仍在按上一次的同意状态处理。</Text>
+                  ) : null}
+                </View>
+              );
+            })}
             <PrivacySettings
               client={resolvePrivacyRequestClient({ authClient: sessionAuthClient })}
             />
