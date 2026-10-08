@@ -28,11 +28,12 @@ import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
 import { Access } from "./pages/Access";
 import { Moderation } from "./pages/Moderation";
+import { Appeals } from "./pages/Appeals";
 import { MatchPreview } from "./pages/MatchPreview";
 import { DemandGap } from "./pages/DemandGap";
 import { Insights } from "./pages/Insights";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "matchpreview" | "demandgap" | "insights";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "appeals" | "matchpreview" | "demandgap" | "insights";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -63,6 +64,7 @@ const TITLES: Record<Page, string> = {
   workbench: "交叉分析工作台",
   access: "运营权限",
   moderation: "举报处置",
+  appeals: "申诉复核",
   matchpreview: "撮合预览",
   demandgap: "需求缺口",
   insights: "用户洞察",
@@ -87,7 +89,7 @@ export function App() {
         {/* DISPATCH-LOOP-001：运营每天真正在用的那一页，放最上面。 */}
         <div className="navgroup">工作台</div>
         <div className="nav">
-          {(["dispatch", "marketboard", "storeboard", "moderation", "matchpreview"] as Page[]).map((p) => (
+          {(["dispatch", "marketboard", "storeboard", "moderation", "appeals", "matchpreview"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -182,6 +184,8 @@ export function App() {
           {page === "storeboard" && <StoreBoard />}
           {/* OPS-MODERATION-001：举报队列与处置（处置只记录，不执行下架 / 封号） */}
           {page === "moderation" && <Moderation />}
+          {/* OPS-APPEALS-001：申诉复核（复核只记录，不真的恢复账号 / 撤销下架） */}
+          {page === "appeals" && <Appeals />}
           {/* OPS-MATCH-PREVIEW-001：撮合预览 —— 这张单此刻会邀谁、为什么（只读） */}
           {page === "matchpreview" && <MatchPreview key={previewId} initialId={previewId} />}
           {/* OPS-INSIGHT-001：需求缺口（供需并排、不给比值）与用户洞察（标签分群，小格子抑制） */}
@@ -194,7 +198,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "matchpreview", "demandgap", "insights"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "appeals", "matchpreview", "demandgap", "insights"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
