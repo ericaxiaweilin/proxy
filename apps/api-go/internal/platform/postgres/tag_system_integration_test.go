@@ -38,7 +38,7 @@ func TestTagLayerOnlyBuildsFromConsentedFactsAndClearsOnWithdrawal(t *testing.T)
 		}
 	}
 	now := time.Now().UTC()
-	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, scene_type) VALUES ($1,'USER','someone','x',$2,'COFFEE')`, posts[0], now)
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, scene_type) VALUES ($1,'USER','someone','新发现一家咖啡店',$2,'UNKNOWN')`, posts[0], now)
 	exec(`INSERT INTO activity.activities (id, payload) VALUES ($1, '{"category":"HIKING"}'::jsonb)`, activity)
 
 	consent := func(user, action string, at time.Time) {
@@ -87,13 +87,13 @@ func TestTagLayerOnlyBuildsFromConsentedFactsAndClearsOnWithdrawal(t *testing.T)
 		}
 		return false
 	}
-	if !has(granted, tagging.AxisInterestScene, "COFFEE") {
+	if !has(granted, tagging.AxisInterestTopic, "咖啡") {
 		t.Fatal("six consented, long-dwell impressions on COFFEE posts must give an interest tag")
 	}
-	if has(never, tagging.AxisInterestScene, "COFFEE") {
+	if has(never, tagging.AxisInterestTopic, "咖啡") {
 		t.Fatal("events without any consent must never become a tag")
 	}
-	if !has(withdrawn, tagging.AxisInterestScene, "COFFEE") {
+	if !has(withdrawn, tagging.AxisInterestTopic, "咖啡") {
 		t.Fatal("before withdrawal she has the tag")
 	}
 	if !has(explicit, tagging.AxisInterestActivity, "HIKING") {
@@ -111,10 +111,10 @@ func TestTagLayerOnlyBuildsFromConsentedFactsAndClearsOnWithdrawal(t *testing.T)
 	if _, err := tagging.Recompute(ctx, store, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("Recompute after withdrawal: %v", err)
 	}
-	if has(withdrawn, tagging.AxisInterestScene, "COFFEE") {
+	if has(withdrawn, tagging.AxisInterestTopic, "咖啡") {
 		t.Fatal("withdrawn consent must clear the tag on the next recompute")
 	}
-	if !has(granted, tagging.AxisInterestScene, "COFFEE") {
+	if !has(granted, tagging.AxisInterestTopic, "咖啡") {
 		t.Fatal("the other user's tag must survive")
 	}
 	stats, err := store.Stats(ctx, now.Add(2*time.Second))
@@ -134,7 +134,7 @@ func TestAccountErasureDeletesTagsAndCoarseLocations(t *testing.T) {
 	})
 	now := time.Now().UTC()
 	store := tagging.NewPostgres(pool)
-	if err := store.ReplaceUserTags(ctx, user, []tagging.Tag{{Axis: tagging.AxisInterestScene, Value: "COFFEE", Strength: .5, Confidence: .5, Source: tagging.SourceBehavior,
+	if err := store.ReplaceUserTags(ctx, user, []tagging.Tag{{Axis: tagging.AxisInterestTopic, Value: "COFFEE", Strength: .5, Confidence: .5, Source: tagging.SourceBehavior,
 		EvidenceCount: 5, SourceDiversity: 1, FirstSeen: now, LastSeen: now, ExpiresAt: now.Add(time.Hour), ComputedAt: now, RuleVersion: tagging.RuleVersion}}); err != nil {
 		t.Fatal(err)
 	}

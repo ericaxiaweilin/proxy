@@ -27,7 +27,9 @@ import (
 //	supply.agent_services.service_type      服务类型  CITY_COMPANION
 //	supply.agent_services.vertical_tags     垂类      RESTAURANT / TOUR
 //	supply.agent_profiles.languages         语种      vi / en / zh（大小写没归一）
-//	localnet.posts.scene_type               场景      COFFEE / BRUNCH / OUTDOOR …
+//
+// （帖子没有「场景类型」这种分类——用户 2026-10-08：帖文有主题，但不跟随场景——所以 posts.scene_type 不在盘点里。）
+//
 //	localnet.posts.context_refs[].contextType  语境类型  GENERAL / VENUE / ACTIVITY …
 //	localnet.posts.context_refs[].contextId    语境值    自由文本（"日常"、"Minh"、店名带地址）
 //
@@ -52,7 +54,7 @@ type TagTerm struct {
 //
 // Vocabulary 是这一页最该被看见的字段 —— 它回答「这个轴能不能直接当标签用」：
 //
-//	controlled  有限枚举，可以直接当词典（capability / service / vertical / scene / context_type）
+//	controlled  有限枚举，可以直接当词典（capability / service / vertical / context_type）
 //	dirty       本该受控但没管住：语种 vi 和 VI 今天算两个词
 //	free_text   不是词典，是自由文本：contextId 里既有「日常」也有「岚庭餐厅 @Hanoi Train Street」
 type TagAxis struct {
@@ -79,10 +81,8 @@ type TagVocabulary struct {
 	CaseCollisions    []string `json:"case_collisions"` // 形如 "vi/VI"，仅大小写不同的词
 
 	// 内容侧两个脏信号：
-	//   SceneUnknown   —— scene_type 被打成 UNKNOWN 的帖子数（分类器没打上）
 	//   ContextPosts   —— 至少带 1 条 context_ref 的帖子数（1426 个是数组，绝大多数是空的）
 	//   ContextIdTerms —— 不同 contextId 的个数（27）—— 它是自由文本，不是 8 个受控类型
-	SceneUnknown   int64 `json:"scene_unknown"`
 	ContextPosts   int64 `json:"context_posts"`
 	ContextIdTerms int64 `json:"context_id_terms"`
 
@@ -126,7 +126,6 @@ func (p *Postgres) TagVocabulary(ctx context.Context, _ time.Time) (TagVocabular
 			(SELECT COUNT(DISTINCT upper(t.lang)) FROM supply.agent_profiles s
 			   CROSS JOIN LATERAL jsonb_array_elements_text(s.languages) AS t(lang)
 			   WHERE `+langCond+` > 0),
-			(SELECT COUNT(*) FROM localnet.posts WHERE scene_type = 'UNKNOWN'),
 			(SELECT COUNT(*) FROM localnet.posts p WHERE `+ctxCond+` > 0),
 			(SELECT COUNT(DISTINCT r->>'contextId') FROM localnet.posts p
 			   CROSS JOIN LATERAL jsonb_array_elements(p.context_refs) AS r
@@ -134,7 +133,7 @@ func (p *Postgres) TagVocabulary(ctx context.Context, _ time.Time) (TagVocabular
 			(SELECT COUNT(*) FROM activity.interests)`).
 		Scan(&out.Agents, &out.Posts,
 			&out.LanguageRawTerms, &out.LanguageNormTerms,
-			&out.SceneUnknown, &out.ContextPosts, &out.ContextIdTerms, &out.InterestRows)
+			&out.ContextPosts, &out.ContextIdTerms, &out.InterestRows)
 	if err != nil {
 		return TagVocabulary{}, err
 	}
@@ -176,10 +175,6 @@ func (p *Postgres) tagAxes(ctx context.Context) ([]TagAxis, error) {
 		FROM supply.agent_profiles s
 		CROSS JOIN LATERAL jsonb_array_elements_text(s.languages) AS t(lang)
 		WHERE `+condLanguages+` > 0
-		UNION ALL
-		SELECT 'scene', 'content', 'controlled', COUNT(DISTINCT scene_type), COUNT(*),
-		       (SELECT COUNT(*) FROM localnet.posts)
-		FROM localnet.posts WHERE COALESCE(scene_type, '') <> ''
 		UNION ALL
 		SELECT 'context_type', 'content', 'controlled', COUNT(DISTINCT r->>'contextType'), COUNT(DISTINCT p.id),
 		       (SELECT COUNT(*) FROM localnet.posts)
@@ -228,9 +223,6 @@ func (p *Postgres) tagTerms(ctx context.Context) ([]TagTerm, error) {
 		FROM supply.agent_profiles s
 		CROSS JOIN LATERAL jsonb_array_elements_text(s.languages) AS t(lang)
 		WHERE `+condLanguages+` > 0 GROUP BY 2
-		UNION ALL
-		SELECT 'scene', scene_type, COUNT(*), 'posts'
-		FROM localnet.posts WHERE COALESCE(scene_type, '') <> '' GROUP BY 2
 		UNION ALL
 		SELECT 'context_type', r->>'contextType', COUNT(*), 'refs'
 		FROM localnet.posts p

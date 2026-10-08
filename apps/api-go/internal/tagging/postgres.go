@@ -27,53 +27,49 @@ func (p *Postgres) LoadEvidence(ctx context.Context, since time.Time) (map[strin
 	get := func(id string) Evidence {
 		ev, ok := out[id]
 		if !ok {
-			ev = Evidence{UserID: id, Scenes: map[string]SceneEvidence{}, Activities: map[string]ActivityEvidence{}, Cities: map[string]int{}, Cells: map[string]CellEvidence{}}
+			ev = Evidence{UserID: id, TopicViews: map[string]TopicEvidence{}, Activities: map[string]ActivityEvidence{}, Cities: map[string]int{}, Cells: map[string]CellEvidence{}}
 		}
 		return ev
 	}
 	// 所有被动证据都过同一条同意规则：事件那一刻、对该用途的同意有效，并且用户现在没撤回。
 	valid := consent.ValidAtSQL("e.actor_id", "e.created_at", consent.Recommendation)
 
-	// 1) 场景：帖子曝光的停留。watch_ms = 0 表示客户端没报停留，不是「划走」，不参与。
-	//    按帖子分组取回，场景类型在 Go 里定：帖子自带的；没带（UNKNOWN）就从正文推断；
-	//    夜生活 / SPA 不进画像（ProfilableScene）。
+	// 1) 内容主题：帖子曝光的停留，按**正文里的主题**归（帖文没有「场景类型」这种分类）。
+	//    watch_ms = 0 表示客户端没报停留，不是「划走」，不参与。只用来判断「回避」
+	//    （看了很多次、几乎都一眼划走）；兴趣由 2b 的亲和路径出。
 	rows, err := p.pool.Query(ctx, `
-		SELECT e.actor_id, p.scene_type, p.body, COUNT(*), COALESCE(SUM(e.watch_ms), 0),
+		SELECT e.actor_id, p.body, COUNT(*), COALESCE(SUM(e.watch_ms), 0),
 		       COUNT(*) FILTER (WHERE e.watch_ms < $2), MIN(e.created_at), MAX(e.created_at)
 		FROM localnet.interaction_events e
 		JOIN localnet.posts p ON p.id = e.target_id
 		WHERE e.event_type = 'POST_IMPRESSION' AND e.target_type = 'POST'
-		  AND e.created_at >= $1 AND e.watch_ms > 0
+		  AND e.created_at >= $1 AND e.watch_ms > 0 AND p.body <> ''
 		  AND `+valid+`
-		GROUP BY e.actor_id, p.id, p.scene_type, p.body`, since, QuickSkipMs)
+		GROUP BY e.actor_id, p.id, p.body`, since, QuickSkipMs)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var id, scene, body string
-		var s SceneEvidence
-		if err := rows.Scan(&id, &scene, &body, &s.Events, &s.DwellMs, &s.QuickSkips, &s.First, &s.Last); err != nil {
+		var id, body string
+		var s TopicEvidence
+		if err := rows.Scan(&id, &body, &s.Events, &s.DwellMs, &s.QuickSkips, &s.First, &s.Last); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		if scene == "" || scene == "UNKNOWN" {
-			scene = InferScene(body)
-		}
-		if !ProfilableScene(scene) {
-			continue
-		}
 		ev := get(id)
-		prev := ev.Scenes[scene]
-		prev.Events += s.Events
-		prev.DwellMs += s.DwellMs
-		prev.QuickSkips += s.QuickSkips
-		if prev.First.IsZero() || s.First.Before(prev.First) {
-			prev.First = s.First
+		for _, topic := range ExtractTopics(body) {
+			prev := ev.TopicViews[topic]
+			prev.Events += s.Events
+			prev.DwellMs += s.DwellMs
+			prev.QuickSkips += s.QuickSkips
+			if prev.First.IsZero() || s.First.Before(prev.First) {
+				prev.First = s.First
+			}
+			if s.Last.After(prev.Last) {
+				prev.Last = s.Last
+			}
+			ev.TopicViews[topic] = prev
 		}
-		if s.Last.After(prev.Last) {
-			prev.Last = s.Last
-		}
-		ev.Scenes[scene] = prev
 		out[id] = ev
 	}
 	rows.Close()

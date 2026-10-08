@@ -218,7 +218,6 @@ func TestOperatorTagsServesVocabularyInventoryAndRefusesAHeatmap(t *testing.T) {
 			LanguageRawTerms  int64    `json:"languageRawTerms"`
 			LanguageNormTerms int64    `json:"languageNormTerms"`
 			CaseCollisions    []string `json:"caseCollisions"`
-			SceneUnknown      int64    `json:"sceneUnknown"`
 			ContextPosts      int64    `json:"contextPosts"`
 			ContextIdTerms    int64    `json:"contextIdTerms"`
 			InterestRows      int64    `json:"interestRows"`
@@ -234,8 +233,8 @@ func TestOperatorTagsServesVocabularyInventoryAndRefusesAHeatmap(t *testing.T) {
 	if p.Totals.Agents != 107 || p.Totals.Posts != 1461 {
 		t.Errorf("agents=%d posts=%d, want 107/1461", p.Totals.Agents, p.Totals.Posts)
 	}
-	if len(p.Axes) != 7 {
-		t.Fatalf("axes = %d, want 7（4 供给侧 + 3 内容侧）", len(p.Axes))
+	if len(p.Axes) != 6 {
+		t.Fatalf("axes = %d, want 6（4 供给侧 + 2 内容侧：语境类型 / 语境值；帖子没有场景类型）", len(p.Axes))
 	}
 	// 两个词表质量信号必须是轴的**属性**，不是散文：谁治理了它们，值会跟着变。
 	byAxis := map[string]string{}
@@ -445,7 +444,7 @@ func TestOperatorTagsShowsTheUserTagLayerWhenWired(t *testing.T) {
 		t.Fatalf("an empty tag layer must say so: %s", rec.Body.String())
 	}
 	now := time.Now().UTC()
-	_ = store.ReplaceUserTags(context.Background(), "u1", []tagging.Tag{{Axis: tagging.AxisInterestScene, Value: "COFFEE", Strength: 0.7, Confidence: 0.8, ExpiresAt: now.Add(time.Hour), ComputedAt: now}})
+	_ = store.ReplaceUserTags(context.Background(), "u1", []tagging.Tag{{Axis: tagging.AxisInterestTopic, Value: "COFFEE", Strength: 0.7, Confidence: 0.8, ExpiresAt: now.Add(time.Hour), ComputedAt: now}})
 	rec = consoleGet(server, "tags", "ops_token")
 	var body struct {
 		UserTags *tagging.Stats `json:"userTags"`

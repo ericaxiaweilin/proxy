@@ -90,7 +90,7 @@ func Vectorize(tags []Tag, now time.Time) map[string]float64 {
 			w *= 0.5
 		case "NEGATIVE":
 			w = -w
-			v[AxisInterestScene+":"+t.Value] += w
+			v[AxisInterestTopic+":"+t.Value] += w
 			continue
 		}
 		v[t.ID()] += w

@@ -22,30 +22,30 @@ func TestNoEvidenceNoTagsAndTooLittleEvidenceNoTags(t *testing.T) {
 	if got := Derive(Evidence{UserID: "u"}, now); len(got) != 0 {
 		t.Fatalf("no evidence must give no tags, got %v", got)
 	}
-	thin := Evidence{UserID: "u", Scenes: map[string]SceneEvidence{"COFFEE": {Events: 4, DwellMs: 200000, First: ago(time.Hour), Last: ago(time.Hour)}}}
+	thin := Evidence{UserID: "u", TopicViews: map[string]TopicEvidence{"桌游": {Events: 4, QuickSkips: 4, First: ago(time.Hour), Last: ago(time.Hour)}}}
 	if got := Derive(thin, now); len(got) != 0 {
-		t.Fatalf("4 impressions is below the floor, got %v", got)
+		t.Fatalf("4 impressions is below the aversion floor, got %v", got)
 	}
 }
 
-func TestSceneInterestGrowsWithDwellAndNeverReachesOne(t *testing.T) {
-	mk := func(ms int64) Tag {
-		ev := Evidence{UserID: "u", Scenes: map[string]SceneEvidence{"COFFEE": {Events: 8, DwellMs: ms, First: ago(48 * time.Hour), Last: ago(time.Hour)}}}
-		tag, ok := find(Derive(ev, now), AxisInterestScene, "COFFEE")
+func TestTopicInterestGrowsWithWeightAndNeverReachesOne(t *testing.T) {
+	mk := func(weight float64) Tag {
+		ev := Evidence{UserID: "u", Signals: []Signal{{Axis: AxisInterestTopic, Value: "咖啡", Weight: weight, N: 8, First: ago(48 * time.Hour), Last: ago(time.Hour)}}}
+		tag, ok := find(Derive(ev, now), AxisInterestTopic, "咖啡")
 		if !ok {
-			t.Fatalf("expected an interest tag at %dms", ms)
+			t.Fatalf("expected an interest tag at weight %v", weight)
 		}
 		return tag
 	}
-	low, mid, huge := mk(20_000), mk(90_000), mk(100_000_000)
+	low, mid, huge := mk(0.7), mk(4), mk(10_000)
 	if !(low.Strength < mid.Strength && mid.Strength < huge.Strength) {
-		t.Fatalf("strength must grow with dwell: %v %v %v", low.Strength, mid.Strength, huge.Strength)
+		t.Fatalf("strength must grow with weight: %v %v %v", low.Strength, mid.Strength, huge.Strength)
 	}
 	if huge.Strength >= 1.0001 || huge.Strength < 0.99 {
 		t.Fatalf("saturating strength should approach but not exceed 1, got %v", huge.Strength)
 	}
 	if mid.Strength < 0.6 || mid.Strength > 0.66 {
-		t.Fatalf("90s of dwell is the documented ~0.63, got %v", mid.Strength)
+		t.Fatalf("the topic scale is 4: weight 4 gives ~0.63, got %v", mid.Strength)
 	}
 	if mid.Source != SourceBehavior || mid.SourceDiversity != 1 || mid.RuleVersion != RuleVersion {
 		t.Fatalf("provenance fields wrong: %+v", mid)
@@ -53,21 +53,21 @@ func TestSceneInterestGrowsWithDwellAndNeverReachesOne(t *testing.T) {
 }
 
 func TestQuickSkipsBecomeAversionNotInterest(t *testing.T) {
-	ev := Evidence{UserID: "u", Scenes: map[string]SceneEvidence{"SPA": {Events: 10, DwellMs: 4000, QuickSkips: 9, First: ago(24 * time.Hour), Last: ago(time.Hour)}}}
+	ev := Evidence{UserID: "u", TopicViews: map[string]TopicEvidence{"桌游": {Events: 10, DwellMs: 4000, QuickSkips: 9, First: ago(24 * time.Hour), Last: ago(time.Hour)}}}
 	tags := Derive(ev, now)
-	if _, ok := find(tags, AxisAversionScene, "SPA"); !ok {
+	if _, ok := find(tags, AxisAversionTopic, "桌游"); !ok {
 		t.Fatalf("9/10 quick skips must be an aversion tag: %v", tags)
 	}
-	if _, ok := find(tags, AxisInterestScene, "SPA"); ok {
-		t.Fatal("a scene cannot be both an interest and an aversion")
+	if _, ok := find(tags, AxisInterestTopic, "桌游"); ok {
+		t.Fatal("a topic cannot be both an interest and an aversion")
 	}
 }
 
 func TestExplicitActionsOutweighPassiveViewingAndMarkTheSource(t *testing.T) {
-	passive := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"HIKING": {Views: 3, DwellMs: 30_000, First: ago(time.Hour), Last: ago(time.Hour)}}}
-	explicit := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"HIKING": {Views: 3, DwellMs: 30_000, Interested: 1, Joined: 1, First: ago(time.Hour), Last: ago(time.Hour)}}}
-	p, _ := find(Derive(passive, now), AxisInterestActivity, "HIKING")
-	e, _ := find(Derive(explicit, now), AxisInterestActivity, "HIKING")
+	passive := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"徒步": {Views: 3, DwellMs: 30_000, First: ago(time.Hour), Last: ago(time.Hour)}}}
+	explicit := Evidence{UserID: "u", Activities: map[string]ActivityEvidence{"徒步": {Views: 3, DwellMs: 30_000, Interested: 1, Joined: 1, First: ago(time.Hour), Last: ago(time.Hour)}}}
+	p, _ := find(Derive(passive, now), AxisInterestActivity, "徒步")
+	e, _ := find(Derive(explicit, now), AxisInterestActivity, "徒步")
 	if e.Strength <= p.Strength {
 		t.Fatalf("explicit interest/join must raise strength: passive=%v explicit=%v", p.Strength, e.Strength)
 	}
@@ -124,11 +124,11 @@ func TestCityAndAreaRules(t *testing.T) {
 }
 
 func TestExpiredEvidenceDoesNotBecomeATagAndGarbageValuesAreRefused(t *testing.T) {
-	old := Evidence{UserID: "u", Scenes: map[string]SceneEvidence{"COFFEE": {Events: 9, DwellMs: 200000, First: ago(90 * 24 * time.Hour), Last: ago(60 * 24 * time.Hour)}}}
+	old := Evidence{UserID: "u", TopicViews: map[string]TopicEvidence{"桌游": {Events: 9, QuickSkips: 9, First: ago(90 * 24 * time.Hour), Last: ago(60 * 24 * time.Hour)}}}
 	if got := Derive(old, now); len(got) != 0 {
 		t.Fatalf("evidence older than the ttl must not produce a tag: %v", got)
 	}
-	dirty := Evidence{UserID: "u", Scenes: map[string]SceneEvidence{"咖啡 店 \n 你好": {Events: 9, DwellMs: 200000, First: ago(time.Hour), Last: ago(time.Hour)}}}
+	dirty := Evidence{UserID: "u", TopicViews: map[string]TopicEvidence{"咖啡 店 \n 你好!!": {Events: 9, QuickSkips: 9, First: ago(time.Hour), Last: ago(time.Hour)}}}
 	if got := Derive(dirty, now); len(got) != 0 {
 		t.Fatalf("free text is not a controlled value: %v", got)
 	}
@@ -145,11 +145,11 @@ func TestCoarseCellNeverKeepsTheRawFix(t *testing.T) {
 }
 
 func TestReadingRequiresAnAllowedUseAndSkipsExpired(t *testing.T) {
-	live := Tag{Axis: AxisInterestScene, Value: "COFFEE", ExpiresAt: now.Add(time.Hour)}
-	dead := Tag{Axis: AxisInterestScene, Value: "SPA", ExpiresAt: now.Add(-time.Hour)}
+	live := Tag{Axis: AxisInterestTopic, Value: "咖啡", ExpiresAt: now.Add(time.Hour)}
+	dead := Tag{Axis: AxisInterestTopic, Value: "摄影", ExpiresAt: now.Add(-time.Hour)}
 	unknown := Tag{Axis: "MERCHANT_AUDIENCE", Value: "X", ExpiresAt: now.Add(time.Hour)}
 	got := FilterForUse([]Tag{live, dead, unknown}, UseMatching, now)
-	if len(got) != 1 || got[0].Value != "COFFEE" {
+	if len(got) != 1 || got[0].Value != "咖啡" {
 		t.Fatalf("only the live, registered tag may be read: %v", got)
 	}
 	if len(FilterForUse([]Tag{live}, Use("merchant_targeting"), now)) != 0 {
@@ -158,15 +158,15 @@ func TestReadingRequiresAnAllowedUseAndSkipsExpired(t *testing.T) {
 }
 
 func TestOverlapRewardsSharedInterestAndPenalisesAversion(t *testing.T) {
-	a := []Tag{{Axis: AxisInterestScene, Value: "COFFEE", Strength: 0.8}, {Axis: AxisInterestScene, Value: "HIKING", Strength: 0.4}}
-	b := []Tag{{Axis: AxisInterestScene, Value: "COFFEE", Strength: 0.6}}
+	a := []Tag{{Axis: AxisInterestTopic, Value: "咖啡", Strength: 0.8}, {Axis: AxisInterestTopic, Value: "徒步", Strength: 0.4}}
+	b := []Tag{{Axis: AxisInterestTopic, Value: "咖啡", Strength: 0.6}}
 	if got := Overlap(a, b); got != 0.6 {
 		t.Fatalf("min strength of the shared tag, got %v", got)
 	}
-	if got := Overlap(a, []Tag{{Axis: AxisInterestScene, Value: "SPA", Strength: 0.9}}); got != 0 {
+	if got := Overlap(a, []Tag{{Axis: AxisInterestTopic, Value: "摄影", Strength: 0.9}}); got != 0 {
 		t.Fatalf("nothing shared must be 0, got %v", got)
 	}
-	avoids := append(append([]Tag{}, a...), Tag{Axis: AxisAversionScene, Value: "COFFEE", Strength: 0.8})
+	avoids := append(append([]Tag{}, a...), Tag{Axis: AxisAversionTopic, Value: "咖啡", Strength: 0.8})
 	if Overlap(avoids, b) >= Overlap(a, b) {
 		t.Fatal("an aversion to the shared scene must lower the score")
 	}

@@ -201,7 +201,7 @@ func (stubOpsMetrics) TagVocabulary(context.Context, time.Time) (opsmetrics.TagV
 		},
 		LanguageRawTerms: 5, LanguageNormTerms: 3,
 		CaseCollisions: []string{"VI/vi", "ZH/zh"},
-		SceneUnknown:   90, ContextPosts: 50, ContextIdTerms: 27,
+		ContextPosts:   50, ContextIdTerms: 27,
 		InterestRows: 1,
 	}, nil
 }

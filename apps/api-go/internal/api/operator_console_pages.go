@@ -294,10 +294,6 @@ func (s *Server) operatorTags(w http.ResponseWriter, r *http.Request) {
 		notes = append(notes, fmt.Sprintf("语种大小写没归一：%s —— 同一个语种在库里算两个词（原始 %d 个 / 归一后 %d 个）。合并前别拿语种数做筛选。",
 			strings.Join(v.CaseCollisions, "、"), v.LanguageRawTerms, v.LanguageNormTerms))
 	}
-	if v.SceneUnknown > 0 {
-		notes = append(notes, fmt.Sprintf("%d 条帖子没有场景类型（UNKNOWN）：场景类型是发帖时客户端选填的，没选就是未知——这里没有任何分类器。"+
-			"标签层会用正文里的话题做一次兜底推断（咖啡、徒步、摄影…），正文里没有话题词的仍然是未知，不猜。", v.SceneUnknown))
-	}
 	if v.Posts > 0 && v.ContextPosts > 0 {
 		notes = append(notes, fmt.Sprintf("只有 %d/%d 条帖子带语境标签（%.1f%%）—— context_refs 绝大多数是空数组，内容侧的覆盖率还很低。",
 			v.ContextPosts, v.Posts, float64(v.ContextPosts)/float64(v.Posts)*100))
@@ -318,7 +314,6 @@ func (s *Server) operatorTags(w http.ResponseWriter, r *http.Request) {
 		"自由文本轴":     countAxes(v.Axes, "free_text"),
 		"未归一轴":      countAxes(v.Axes, "dirty"),
 		"带语境标签的帖子":  v.ContextPosts,
-		"场景未识别":     v.SceneUnknown,
 		"兴趣事件":      v.InterestRows,
 		"语种(原始/归一)": v.LanguageRawTerms,
 	}
@@ -341,7 +336,6 @@ func (s *Server) operatorTags(w http.ResponseWriter, r *http.Request) {
 			"languageRawTerms":  v.LanguageRawTerms,
 			"languageNormTerms": v.LanguageNormTerms,
 			"caseCollisions":    v.CaseCollisions,
-			"sceneUnknown":      v.SceneUnknown,
 			"contextPosts":      v.ContextPosts,
 			"contextIdTerms":    v.ContextIdTerms,
 			"interestRows":      v.InterestRows,

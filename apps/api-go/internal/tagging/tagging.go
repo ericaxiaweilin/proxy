@@ -29,8 +29,9 @@ const RuleVersion = "2026-10-08"
 
 // 轴（词表）。取值来自事实，轴本身是受控的。
 const (
-	AxisInterestScene    = "INTEREST_SCENE"
-	AxisAversionScene    = "AVERSION_SCENE"
+	// 帖子没有「场景类型」这种分类（用户 2026-10-08）：帖文就是帖文，有主题但不跟随场景。
+	// 兴趣只看内容主题（INTEREST_TOPIC，见下），「回避」同样按主题：连续快速划走某个主题的帖子。
+	AxisAversionTopic    = "AVERSION_TOPIC"
 	AxisInterestActivity = "INTEREST_ACTIVITY"
 	AxisRhythm           = "RHYTHM"
 	AxisCity             = "CITY"
@@ -87,8 +88,7 @@ type Axis struct {
 }
 
 var axes = []Axis{
-	{AxisInterestScene, "场景兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
-	{AxisAversionScene, "场景回避", "NEGATIVE", 14 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	{AxisAversionTopic, "主题回避", "NEGATIVE", 14 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
 	{AxisInterestActivity, "活动兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
 	{AxisRhythm, "活跃节律", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
 	{AxisCity, "常在城市", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
@@ -195,8 +195,8 @@ func ValidValue(v string) bool { return utf8.RuneCountInString(v) <= 48 && value
 
 // ---------------------------------------------------------------- 证据
 
-// SceneEvidence：某类场景内容上的行为证据。
-type SceneEvidence struct {
+// TopicEvidence：某个内容主题上的被动浏览证据（只用来判断「回避」；兴趣走通用亲和路径）。
+type TopicEvidence struct {
 	Events     int
 	DwellMs    int64
 	QuickSkips int // 停留 < QuickSkipMs 的曝光
@@ -237,7 +237,7 @@ type Signal struct {
 type Evidence struct {
 	Signals    []Signal
 	UserID     string
-	Scenes     map[string]SceneEvidence
+	TopicViews map[string]TopicEvidence
 	Activities map[string]ActivityEvidence
 	// HourCounts[weekday*24+hour] = 该时段的事件数（越南时间）。
 	HourCounts [168]int
@@ -251,8 +251,6 @@ const (
 	// QuickSkipMs：停留不到 1 秒算「快速划走」。
 	QuickSkipMs = 1000
 	// 场景兴趣：至少 5 次曝光才出标签；停留 90 秒时强度约 0.63。
-	minSceneEvents  = 5
-	sceneDwellScale = 90_000.0
 	// 回避：至少 5 次曝光，且快速划走占比 ≥ 70%。
 	minAversionEvents = 5
 	aversionRatio     = 0.70
@@ -292,14 +290,12 @@ func Derive(ev Evidence, now time.Time) []Tag {
 		out = append(out, t)
 	}
 
-	for scene, s := range ev.Scenes {
-		if s.Events >= minSceneEvents {
-			skipRatio := float64(s.QuickSkips) / float64(s.Events)
-			if skipRatio >= aversionRatio {
-				add(Tag{Axis: AxisAversionScene, Value: scene, Strength: round3(skipRatio), Confidence: confidence(s.Events, 1),
-					Source: SourceBehavior, EvidenceCount: s.Events, SourceDiversity: 1, FirstSeen: s.First, LastSeen: s.Last})
-			} else if s.DwellMs > 0 {
-				add(Tag{Axis: AxisInterestScene, Value: scene, Strength: saturate(float64(s.DwellMs), sceneDwellScale), Confidence: confidence(s.Events, 1),
+	// 主题回避：某个主题的帖子至少看过 5 次、且 ≥70% 一眼划走。兴趣不在这里——兴趣由
+	// INTEREST_TOPIC 的通用亲和路径出（看得久 + 自己发过），这里只负责「明显不喜欢」。
+	for topic, s := range ev.TopicViews {
+		if s.Events >= minAversionEvents {
+			if skipRatio := float64(s.QuickSkips) / float64(s.Events); skipRatio >= aversionRatio {
+				add(Tag{Axis: AxisAversionTopic, Value: topic, Strength: round3(skipRatio), Confidence: confidence(s.Events, 1),
 					Source: SourceBehavior, EvidenceCount: s.Events, SourceDiversity: 1, FirstSeen: s.First, LastSeen: s.Last})
 			}
 		}
@@ -573,10 +569,10 @@ func Overlap(a, b []Tag) float64 {
 	}
 	score := sum / count
 	for _, ta := range a {
-		if ta.Axis != AxisAversionScene {
+		if ta.Axis != AxisAversionTopic {
 			continue
 		}
-		if tb, ok := ib[AxisInterestScene+":"+ta.Value]; ok {
+		if tb, ok := ib[AxisInterestTopic+":"+ta.Value]; ok {
 			score -= 0.5 * math.Min(ta.Strength, tb.Strength)
 		}
 	}

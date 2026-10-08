@@ -25,9 +25,9 @@ func TestAffinityIsFinerThanOverlapMoreSharedTagsMeansCloser(t *testing.T) {
 }
 
 func TestAversionCancelsInterestInTheVector(t *testing.T) {
-	a := []Tag{tg(AxisInterestScene, "SPA", .9), tg(AxisInterestTopic, "摄影", .5)}
-	b := []Tag{tg(AxisInterestScene, "SPA", .9), tg(AxisInterestTopic, "摄影", .5)}
-	withAversion := append(append([]Tag{}, a...), tg(AxisAversionScene, "SPA", .9))
+	a := []Tag{tg(AxisInterestTopic, "桌游", .9), tg(AxisInterestTopic, "摄影", .5)}
+	b := []Tag{tg(AxisInterestTopic, "桌游", .9), tg(AxisInterestTopic, "摄影", .5)}
+	withAversion := append(append([]Tag{}, a...), tg(AxisAversionTopic, "桌游", .9))
 	if Affinity(withAversion, b, now) >= Affinity(a, b, now) {
 		t.Fatal("someone who flicks past SPA must not match someone who loves it as well as a neutral person does")
 	}
@@ -81,8 +81,8 @@ func TestPriceBandAndTimeSlotAreCoarseOnPurposeAndNeverInvented(t *testing.T) {
 }
 
 func TestSharedTagsAreTheReasonsForAMatchStrongestFirstAndNeverAversions(t *testing.T) {
-	me := []Tag{tg(AxisInterestTopic, "摄影", .9), tg(AxisInterestTopic, "徒步", .4), tg(AxisDistrict, "Hoàn_Kiếm", .9), tg(AxisAversionScene, "SPA", .9)}
-	her := []Tag{tg(AxisInterestTopic, "摄影", .6), tg(AxisInterestTopic, "徒步", .8), tg(AxisDistrict, "Hoàn_Kiếm", .9), tg(AxisAversionScene, "SPA", .9), tg(AxisInterestTopic, "桌游", 1)}
+	me := []Tag{tg(AxisInterestTopic, "摄影", .9), tg(AxisInterestTopic, "徒步", .4), tg(AxisDistrict, "Hoàn_Kiếm", .9), tg(AxisAversionTopic, "桌游", .9)}
+	her := []Tag{tg(AxisInterestTopic, "摄影", .6), tg(AxisInterestTopic, "徒步", .8), tg(AxisDistrict, "Hoàn_Kiếm", .9), tg(AxisAversionTopic, "桌游", .9), tg(AxisInterestTopic, "桌游", 1)}
 	got := SharedTags(me, her, now, 10)
 	if len(got) != 3 {
 		t.Fatalf("摄影, 徒步, 区 are shared; 桌游 is hers alone; the aversion is not a shared reason: %+v", got)

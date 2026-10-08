@@ -274,7 +274,7 @@ func (p *Postgres) Segments(ctx context.Context, now time.Time, axis, withAxis, 
 }
 
 var interestAxes = map[string]string{
-	"INTEREST_TOPIC": "话题", "INTEREST_SCENE": "场景", "INTEREST_ACTIVITY": "活动", "VENUE_KIND": "场所",
+	"INTEREST_TOPIC": "话题", "INTEREST_ACTIVITY": "活动", "VENUE_KIND": "场所",
 }
 
 func (p *Postgres) TopInterests(ctx context.Context, now time.Time, limit int) ([]InterestRow, error) {
@@ -284,7 +284,7 @@ func (p *Postgres) TopInterests(ctx context.Context, now time.Time, limit int) (
 	rows, err := p.pool.Query(ctx, `
 		SELECT axis, value, COUNT(DISTINCT user_id), AVG(strength)::float8, AVG(confidence)::float8
 		  FROM tag.user_tags
-		 WHERE expires_at > $1 AND axis IN ('INTEREST_TOPIC','INTEREST_SCENE','INTEREST_ACTIVITY','VENUE_KIND')
+		 WHERE expires_at > $1 AND axis IN ('INTEREST_TOPIC','INTEREST_ACTIVITY','VENUE_KIND')
 		 GROUP BY axis, value HAVING COUNT(DISTINCT user_id) >= $2
 		 ORDER BY 3 DESC, 4 DESC, 1, 2 LIMIT $3`, now, MinCell, limit)
 	if err != nil {

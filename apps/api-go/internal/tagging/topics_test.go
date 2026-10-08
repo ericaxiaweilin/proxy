@@ -51,27 +51,3 @@ func TestEveryTopicIsAValidControlledValue(t *testing.T) {
 		}
 	}
 }
-
-func TestSceneIsInferredFromTheBodyOnlyWhenTheClientDidNotSetOneAndNightlifeNeverProfiles(t *testing.T) {
-	if InferScene("新发现一家咖啡店") != "COFFEE" || InferScene("周末去西湖徒步") != "OUTDOOR" || InferScene("拍了好多照片 #摄影") != "PHOTO" {
-		t.Fatal("coffee / outdoor / photo posts are recognised from the text")
-	}
-	if InferScene("今天心情不错") != "" || InferScene("") != "" {
-		t.Fatal("a body with no topic stays unknown — never guessed")
-	}
-	for _, scene := range []string{"NIGHTLIFE", "SPA", "UNKNOWN", ""} {
-		if ProfilableScene(scene) {
-			t.Errorf("%q must not become an interest/aversion tag", scene)
-		}
-	}
-	for _, scene := range []string{"COFFEE", "OUTDOOR", "PHOTO", "BRUNCH"} {
-		if !ProfilableScene(scene) {
-			t.Errorf("%q is a normal scene", scene)
-		}
-	}
-	for topic, scene := range topicToScene {
-		if !ValidValue(scene) || !ValidValue(topic) {
-			t.Errorf("mapping %s→%s has an invalid tag value", topic, scene)
-		}
-	}
-}
