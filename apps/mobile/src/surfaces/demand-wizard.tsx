@@ -58,6 +58,8 @@ import { formatReferencePrice } from "../creator-pricing";
 import { baseKFromTemplatePrice, demandPriceQuote, demandPriceToWire, engineTemplateId, tierUpliftLabel } from "../demand-price";
 import type { ListOpportunityTemplatesPayload } from "@proxy/contracts";
 import { localApiBaseUrl } from "../native-clients";
+import { WeatherAdviceBanner } from "../components/weather-chip";
+import { nextOccurrence } from "../weather";
 // 卡面右下角的距离（用户选「接真实距离」）：真实定位 + 真实场景目录。
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
@@ -1184,6 +1186,14 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
               <Text selectable style={styles.infoArrow}>▾</Text>
             </View>
           </Pressable>
+          {/* WEATHER-001：见面地点（选了场景用场景坐标，否则用我的位置）那个时段的天气；雨提醒，暴雨建议改期。 */}
+          <WeatherAdviceBanner
+            at={nextOccurrence(normalizeTimeSlot(specs.time), new Date())}
+            hours={Number.parseInt(normalizeDuration(specs.duration), 10) || 2}
+            lat={specs.lat ?? origin?.latitude}
+            lng={specs.lng ?? origin?.longitude}
+            onPickSlot={(slot) => setSpecs((prev) => ({ ...prev, time: slot }))}
+          />
           {timeOpen ? (
             <WheelSheet
               closeLabel="关闭时间选择"

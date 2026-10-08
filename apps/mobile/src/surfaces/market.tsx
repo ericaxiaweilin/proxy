@@ -43,6 +43,7 @@ import { clusterPins } from "../cluster-pins";
 import { ProxyIcon } from "../components/proxy-icon";
 import { ProxyBackGlyph, ProxyLoading, ProxyTabs } from "../components/proxy-foundation";
 import { sessionAuthClient } from "../native-clients";
+import { WeatherChip } from "../components/weather-chip";
 import { fetchProviderApplication } from "../provider-application-client";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
@@ -511,7 +512,10 @@ export function MarketSurface({
       {wizardMapOpen ? null : (
       <>
       <View style={styles.marketHead}>
-        <Text selectable style={styles.marketTitle}>市场</Text>
+        <View>
+          <Text selectable style={styles.marketTitle}>市场</Text>
+          <WeatherChip city={effectiveMarketLabel} lat={userFix?.lat} lng={userFix?.lng} />
+        </View>
         <View style={styles.headActions}>
           <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
             {/* MAP-FOOTPRINT-LOGO-001：去地图用原型「折叠地图」logo，不再用通用 route。
