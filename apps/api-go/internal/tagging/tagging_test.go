@@ -276,19 +276,20 @@ func TestDwellCreditIsPerObjectClassNotOneThreshold(t *testing.T) {
 		ms    int
 		want  float64
 	}{
-		{DwellPost, 700, 0},       // 一眼划过
-		{DwellPost, 2000, 0.10},   // 扫了一眼
-		{DwellPost, 16000, 0.80},  // 认真看
+		{DwellPost, 2000, 0},      // 一眼划过
+		{DwellPost, 4000, 0.30},   // 看过
+		{DwellPost, 12000, 1.00},  // 认真看
 		{DwellPost, 300000, 1.00}, // 挂机不会超过 1
-		{DwellActivity, 2000, 0},  // 活动详情页要 3 秒才算
-		{DwellActivity, 12000, 0.70},
+		{DwellActivity, 4000, 0},  // 活动详情页要 5 秒才算
+		{DwellActivity, 8000, 0.50},
+		{DwellActivity, 20000, 1.00},
 		{DwellClass("PERSON"), 60000, 0}, // 人物（和任何不认识的类型）被动停留不给分
 	} {
 		if got := DwellCredit(c.class, c.ms); got != c.want {
 			t.Fatalf("%s %dms = %v, want %v", c.class, c.ms, got, c.want)
 		}
 	}
-	if sql := dwellCreditSQL(DwellActivity, "x"); !strings.Contains(sql, "WHEN x >= 30000 THEN 1.00") || !strings.Contains(sql, "ELSE 0 END") {
+	if sql := dwellCreditSQL(DwellActivity, "x"); !strings.Contains(sql, "WHEN x >= 15000 THEN 1.00") || !strings.Contains(sql, "ELSE 0 END") {
 		t.Fatalf("sql and go share one table: %s", sql)
 	}
 }

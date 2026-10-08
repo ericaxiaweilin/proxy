@@ -28,10 +28,11 @@ type dwellTier struct {
 	Credit float64
 }
 
+// 我们的数据量和算力比不上大平台：只分两档（看过 / 认真看），门槛偏高偏粗，宁可少记也不记噪声。
 // 每档「停留 ≥ AtMs 毫秒，记 Credit」，AtMs 升序；低于第一档 = 0（一眼划过 / 误触）。
 var dwellTiers = map[DwellClass][]dwellTier{
-	DwellPost:     {{1500, 0.10}, {5000, 0.40}, {15000, 0.80}, {30000, 1.00}},
-	DwellActivity: {{3000, 0.30}, {10000, 0.70}, {30000, 1.00}},
+	DwellPost:     {{3000, 0.30}, {10000, 1.00}},
+	DwellActivity: {{5000, 0.50}, {15000, 1.00}},
 }
 
 // DwellCredit：一次停留（毫秒）折成的信用。未知对象类型 = 0（不认识的不给分）。
