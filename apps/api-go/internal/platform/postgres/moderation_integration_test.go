@@ -28,7 +28,11 @@ import (
 func TestModerationReportQueueRoundTrip(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
-	repo := NewModerationRepository(pool)
+	// 带 outbox 的构造（ORDER-DISPUTE-001）：处置留痕与通知事件同事务，所以没有
+	// outbox 的仓储**不能**服务 moderation.Service —— 类型系统会直接拒绝。
+	// 这个测试以前用的是不带 outbox 的构造，那是生产上已经不可能存在的配置：
+	// 它测的是「处置能被记录」，而现在这条记录必须和事件一起成功才算数。
+	repo := NewModerationRepositoryWithOutbox(pool, NewOutboxRepository(pool))
 
 	tag := "rpt_q_" + itoa(time.Now().UnixNano())
 	reportID := tag + "_solicit"

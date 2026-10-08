@@ -50,6 +50,18 @@ type SupplyHealth struct {
 	CityCompanionNeeds int64 `json:"cityCompanionNeeds"`
 }
 
+// 核验口径抽成常量，因为**两个页面**都要它：供给健康度页和信任与风险页
+// （OPS-TRUST-EVIDENCE-001）。两份 SQL 各写一遍一定会漂 —— 一边改了过期判定、
+// 另一边没改，运营就会在两页看到互相矛盾的「已核验 / 已过期」。
+// $2 = now：$1 是窗口起点，核验是状态不是事件，所以只跟 now 比。
+const (
+	realNameVerifiedCount = `(SELECT COUNT(DISTINCT agent_id) FROM supply.seller_real_name_verifications
+			 WHERE status = 'VERIFIED' AND (expires_at IS NULL OR expires_at > $2))`
+	realNameExpiredCount = `(SELECT COUNT(DISTINCT agent_id) FROM supply.seller_real_name_verifications
+			 WHERE status = 'EXPIRED' OR (status = 'VERIFIED' AND expires_at IS NOT NULL AND expires_at <= $2))`
+	capabilityVerifiedCount = `(SELECT COUNT(DISTINCT agent_id) FROM supply.capability_verifications)`
+)
+
 func (p *Postgres) SupplyHealth(ctx context.Context, now time.Time) (SupplyHealth, error) {
 	since := now.Add(-Window)
 	var out SupplyHealth
@@ -65,11 +77,9 @@ func (p *Postgres) SupplyHealth(ctx context.Context, now time.Time) (SupplyHealt
 			 WHERE jsonb_typeof(languages) = 'array' AND jsonb_array_length(languages) > 0),
 			(SELECT COUNT(DISTINCT agent_id) FROM supply.availability_windows),
 			(SELECT COUNT(DISTINCT agent_id) FROM supply.availability_windows WHERE end_at > $2),
-			(SELECT COUNT(DISTINCT agent_id) FROM supply.seller_real_name_verifications
-			 WHERE status = 'VERIFIED' AND (expires_at IS NULL OR expires_at > $2)),
-			(SELECT COUNT(DISTINCT agent_id) FROM supply.seller_real_name_verifications
-			 WHERE status = 'EXPIRED' OR (status = 'VERIFIED' AND expires_at IS NOT NULL AND expires_at <= $2)),
-			(SELECT COUNT(DISTINCT agent_id) FROM supply.capability_verifications),
+			(`+realNameVerifiedCount+`),
+			(`+realNameExpiredCount+`),
+			(`+capabilityVerifiedCount+`),
 			(SELECT COUNT(DISTINCT o.agent_id) FROM fulfillment.orders o
 				JOIN supply.agent_profiles a ON a.agent_id = o.agent_id
 			 WHERE o.created_at >= $1),

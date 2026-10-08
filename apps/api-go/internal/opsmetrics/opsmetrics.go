@@ -84,6 +84,13 @@ type Source interface {
 	Merchants(ctx context.Context, now time.Time) (Merchants, error)
 	Retention(ctx context.Context, now time.Time) (Retention, error)
 	SupplyHealth(ctx context.Context, now time.Time) (SupplyHealth, error)
+	NorthStar(ctx context.Context, now time.Time) (NorthStar, error)
+	DecisionEligibility(ctx context.Context, now time.Time) (DecisionEligibility, error)
+	TrustEvidence(ctx context.Context, now time.Time) (TrustEvidence, error)
+	ClarificationFunnel(ctx context.Context, now time.Time) (ClarificationFunnel, error)
+	TagVocabulary(ctx context.Context, now time.Time) (TagVocabulary, error)
+	DataQuality(ctx context.Context, now time.Time) (DataQuality, error)
+	AttributionAudit(ctx context.Context, now time.Time) (AttributionAudit, error)
 }
 
 type Postgres struct {

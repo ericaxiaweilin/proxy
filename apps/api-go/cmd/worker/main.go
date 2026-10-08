@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -221,6 +222,31 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		return creator, "收到 Offer", "客户已发 Offer，5分钟内有效", "/offers/" + e.AggregateID, true
 	// 真实事件名是 OrderCreatedFromOffer（Aggregate 是 order，所以 /orders/<ord_…> 是对的）。
 	// 别再加回 "OrderCreated" / "OfferAccepted" —— 见函数头注释第 3、4 条。
+	case "AppealDecisionRecorded":
+		// ORDER-DISPUTE-001：申诉有结果了。
+		//
+		// 这条通知之前根本不存在 —— 整条申诉链不产生任何领域事件，所以运营复核完，
+		// 提交申诉的用户**永远**不知道结果。一件没有回音的事，人就不会有第二次。
+		//
+		// 只说结论，不复述 note：那是运营的内部措辞，不该出现在用户推送里。
+		decided := "你的申诉有新结果"
+		if payloadString("decision") == "REJECTED" {
+			decided = "你的申诉未通过"
+		} else {
+			decided = "你的申诉已受理"
+		}
+		return fallbackRecipient(""), "申诉结果", decided, "/appeals/" + e.AggregateID, true
+	case "ReportDispositionRecorded":
+		// ORDER-DISPUTE-001：举报被处理了。
+		//
+		// 举报提交是**同步**拿得到回执的，但处置是运营之后做的 —— 不通知的话，
+		// 用户会默认「举报被忽略了」，而那比明确告诉他「不成立」更伤。所以
+		// DISMISS（不成立）同样要发。
+		outcome := "你举报的事已有处理结果"
+		if strings.EqualFold(payloadString("outcome"), "NO_ACTION") || strings.EqualFold(payloadString("action"), "DISMISS") {
+			outcome = "你举报的事经核查未成立"
+		}
+		return fallbackRecipient(""), "举报结果", outcome, "/reports/" + e.AggregateID, true
 	case "OrderCreatedFromOffer":
 		return fallbackRecipient(""), "订单已成立", orderCancellationNotice(e.Payload), "/orders/" + e.AggregateID, true
 	case "InvitationCreated":

@@ -97,6 +97,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # 撮合引擎 / 市场情报控制台（apps/market-intelligence-console）。
+  # 只端静态产物：dist 在开发机上 build 好再同步过来，服务器上不跑 npm ——
+  # 这个 app 没有 lockfile，服务器 install 会解析到不同的 vite/react 次版本，
+  # 而控制台里摆的数是要跟引擎对账的，产物不可复现就是账本不可复现。
+  # 重建：开发机 npx vite build → rsync dist → up -d --build console。
+  console:
+    build:
+      context: ../../apps/market-intelligence-console
+      dockerfile: Dockerfile
+    image: proxy-console:local
+    ports:
+      # 与 api 同一口径：只绑 Tailscale 网口，LAN 与公网都进不来。
+      - "${PROXY_BIND_IP}:5175:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   # 一次性核对工具：docker compose run --rm migrate -status（不常驻，不参与 up）。
   migrate:
     image: proxy-server-api:local

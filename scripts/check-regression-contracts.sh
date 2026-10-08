@@ -883,6 +883,223 @@ if ! grep -q '不算' apps/market-intelligence-console/src/pages/SupplyActivatio
   exit 1
 fi
 echo "    OPS-SUPPLY-HEALTH-001: PASS (核验按 agent_id 数 · 两种时间窗口径分开 · 比值结构上不存在 · SQL 对真库跑过)"
+# OPS-NORTH-STAR-001（2026-10-07）：North Star 落地页那四个格子。
+# 这四个格子（有效意图 / 成功撮合 / 完成履约 / 负反馈率）以前是 Overview.tsx 里一个
+# 写死的常量，永远「未接入」—— 而它是**默认落地页**。它们不是「还没画」，是后端根本没有
+# 对应的读模型，所以页面在任何数据量下都是同一个样子。
+#
+# 接上真读模型之后，这一页的**新**风险是反过来的：格子的名字都很响，有人会顺手把它
+# 填成看起来完整的数。今天真给得出完整含义的只有两个（有效意图、负反馈率），另外两个
+# 只能给一半：
+#   - 成功撮合：撮合批次是真的（supply.candidate_batches 有真写入方），
+#     成交归因不是（outcome.* 五张表从建表起没有写入方，且 candidate_batches.need_id
+#     与 fulfillment.orders.need_id 不是同一套键，回连命中 0 —— 算转化率得到的是断链的 0）；
+#   - 完成履约：单量是真的，成交额不是（支付未接入，payment.* 全是 0 行）。
+# 所以这里钉五件事：
+#   ① 路由接的是**方法**，不是 NOT_CONNECTED 桩（MERCHANT 那条钉的教训：同名桩能骗过
+#      所有「路由是否接线」的判据）；
+#   ② SQL 对真库跑过（内存桩证明不了列名，也证明不了 jsonb_typeof/jsonb_array_length
+#      能跑 —— 空候选数组被算成「找到供给」是这一页最会骗人的地方）；
+#   ③ 读模型结构上没有金额 / 转化率这类字段 —— 谁要加回来，先回答来源在哪；
+#   ④ 负反馈率必须有**分母门槛**，低于门槛只给计数不给率（0/0 和「0.0% 看起来一切正常」
+#      是同一个事故的两头）；
+#   ⑤ 落地页真的去取这四个格子，且不再写死常量。
+require_test "OPS-NORTH-STAR-001" "./internal/api" "TestOperatorNorthStarServesFourTilesAndNamesEveryGap" \
+  "apps/api-go/internal/api/operator_north_star_test.go" || exit $?
+require_test "OPS-NORTH-STAR-001" "./internal/api" "TestOperatorNorthStarWithholdsTheRateBelowTheExposureFloor" \
+  "apps/api-go/internal/api/operator_north_star_test.go" || exit $?
+require_test "OPS-NORTH-STAR-001" "./internal/platform/postgres" "TestOperatorNorthStarCountsEachTileFromTheRealSchema" \
+  "apps/api-go/internal/platform/postgres/operator_north_star_integration_test.go" || exit $?
+require_test "OPS-NORTH-STAR-001" "./internal/platform/postgres" "TestOperatorNorthStarOnAnEmptyWindow" \
+  "apps/api-go/internal/platform/postgres/operator_north_star_integration_test.go" || exit $?
+if ! grep -qE '"/v1/operator/north-star", s\.operatorConsole\(s\.operatorNorthStar\)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-NORTH-STAR-001]: /v1/operator/north-star 没接真读模型（又变回 NOT_CONNECTED 桩了？）" >&2
+  exit 1
+fi
+if grep -qE 'json:"(gmv|revenue|amount|conversionRate|matchSuccessRate|successRate)"' apps/api-go/internal/opsmetrics/northstar.go; then
+  echo "  FAIL [OPS-NORTH-STAR-001]: North Star 读模型里出现了金额/转化率字段 —— 支付未接入、归因断链，给不出事实来源。" >&2
+  exit 1
+fi
+if ! grep -q 'negativeRateMinExposures' apps/api-go/internal/api/operator_north_star.go; then
+  echo "  FAIL [OPS-NORTH-STAR-001]: 负反馈率没有分母门槛 —— 曝光 40 次里 2 次举报不是「5%」，而 0/0 会给出 0.0%。" >&2
+  exit 1
+fi
+if ! grep -q '/v1/operator/north-star' apps/market-intelligence-console/src/pages/Overview.tsx; then
+  echo "  FAIL [OPS-NORTH-STAR-001]: 落地页不再取 North Star —— 四个格子又变回写死的常量了。" >&2
+  exit 1
+fi
+# 「未接入」四个字作为**常量数组**不该还在这一页里：那正是「空得没有原因」的样子。
+if grep -q 'const NOT_CONNECTED' apps/market-intelligence-console/src/pages/Overview.tsx; then
+  echo "  FAIL [OPS-NORTH-STAR-001]: 落地页还在用写死的 NOT_CONNECTED 常量 —— 空着的格子必须来自后端的口径与缺口说明。" >&2
+  exit 1
+fi
+echo "    OPS-NORTH-STAR-001: PASS (四格接真读模型 · SQL 对真库跑过 · 无金额/转化率字段 · 率有分母门槛 · 落地页真去取)"
+# OPS-CONSOLE-PAGES-001（2026-10-07）：运营后台里那四页**打不开**的页面。
+#
+# 控制台原有 9 个端点是 notConnected 桩，只发 {dataSource, missing, spec}。其中四页的
+# JSX 直接读桩根本不发的字段（Engine.tsx 读 data.engine.evaluate_calls_30d、Trust.tsx 读
+# d.safety / d.risk_scores、Clarification.tsx 读 data.gates、IntentOrchestration.tsx 读
+# d.intent_funnel）⇒ **一打开就 TypeError，整页崩掉**。运营后台里它们是死的，而且看不出原因。
+#
+# 修法不是「给桩补上假字段让它不崩」—— 那会让页面显示一排看起来正常的零，正是
+# OPS-REAL-001 要禁的。所以把真有数据的那四页接上真读模型，剩下的五页把 missing 文案
+# 从「模块名」换成**可以当场验证的事实**（哪张表没有写入方、哪个键对不上、哪个端点没注册）。
+#
+# 钉四件事：
+#   ① 四页接的是**方法**不是桩（MERCHANT 那条的教训：同名桩能骗过所有路由判据）；
+#   ② SQL 对真库跑过，且澄清漏斗的回连数**能变成非 0**（写死 0 的话，键接好了也看不出来）；
+#   ③ 旧的假遥测字段（evaluate_calls_30d / p99_ms / lineage_complete…）不许回来 ——
+#      它们从来没被查过，回来一次就会有人拿它判断引擎规模；
+#   ④ 不许有风险分（risk_scores）—— 没有风险模型，摆一个分数会让人以为系统在评估风险。
+for t in TestOperatorDecisionEngineServesEligibilityAndRefusesFakeThroughput TestOperatorTrustRefusesToInventARiskScore TestOperatorClarificationReportsTheBrokenLinksAsNumbers TestOperatorOrchestrationServesTheTwoRealLayers TestOperatorConsolePagesWithoutADBAreNotConnected; do
+  require_test "OPS-CONSOLE-PAGES-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_console_pages_test.go" || exit $?
+done
+for t in TestOperatorDecisionEligibilityReadsTheRealStateMachine TestOperatorTrustEvidenceFlagsTheDispositionGap TestOperatorClarificationFunnelCountsTheDownstreamLinks; do
+  require_test "OPS-CONSOLE-PAGES-001" "./internal/platform/postgres" "$t" \
+    "apps/api-go/internal/platform/postgres/operator_console_pages_integration_test.go" || exit $?
+done
+for route in "decision-engine:operatorDecisionEngine" "clarification-gate:operatorClarificationGate" "intent-orchestration:operatorIntentOrchestration" "trust:operatorTrust"; do
+  path="${route%%:*}"; fn="${route##*:}"
+  if ! grep -qE "\"/v1/operator/$path\", s\.operatorConsole\(s\.$fn\)" apps/api-go/internal/api/server.go; then
+    echo "  FAIL [OPS-CONSOLE-PAGES-001]: /v1/operator/$path 没接真读模型（又变回 NOT_CONNECTED 桩了？）" >&2
+    exit 1
+  fi
+done
+if grep -qE 'evaluate_calls_30d|lineage_complete|p99_ms' apps/market-intelligence-console/src/pages/Engine.tsx; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-001]: 决策引擎页又出现了假遥测字段 —— 那几个数从来没被查过。" >&2
+  exit 1
+fi
+if grep -q 'risk_scores' apps/market-intelligence-console/src/pages/Trust.tsx; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-001]: 信任页又要显示风险分 —— 没有风险模型，那个分数是编的。" >&2
+  exit 1
+fi
+# 剩下一页（research）的「未接入」必须是**具体的**：写「缺 outcome-service」等于什么都没说。
+# 这条盯的是措辞里出现了「查表名为 0 命中」这种可验证的事实。
+# （引擎 API 已建成：POST /v1/decisions/evaluate + 复用引力状态机，钉在 OPS-ENGINE-API-001；
+#   归因链 / 数据治理的钉在 OPS-CONSOLE-PAGES-002。）
+if ! grep -q '查表名为 0 命中' apps/api-go/internal/api/operator_console.go; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-001]: 未接入的页面不再写清具体缺什么（哪张表没写入方 / 哪个键对不上）—— 笼统的模块名等于没说。" >&2
+  exit 1
+fi
+echo "    OPS-CONSOLE-PAGES-001: PASS (四页接真读模型 · SQL 对真库跑过 · 回连数能变非 0 · 假遥测与风险分回不来 · 未接入文案具体可验证)"
+# OPS-CONSOLE-PAGES-002（2026-10-07）：数据治理 + 归因链。
+#
+# 「谱系完整率无从计算」这个拒绝本身就是错的 —— 谱系断不断恰恰是可数的；
+# 归因链的断点同理，做成**数**（三段键审计）而不是散文。
+# 钉四件事：
+#   ① 两页接的是方法不是桩（同名桩能骗过所有路由判据）；
+#   ② SQL 对真库跑过，且**键审计的数能变成非 0**（种 need_id 相同的批次+订单，
+#      joinedKeys 必须 +1；写死永 0 的话，将来键接好了也看不出来）；
+#   ③ 数据治理的谱系覆盖必须成对给（窗口内 + 全量），candidate_source 的 unknown 不算已填；
+#   ④ 旧的假字段（workbench / saved_queries / 逐单 delta_id 明细）一个都不许回来。
+for t in TestOperatorDataQualityNamesTheBrokenLineage TestOperatorAttributionAuditNamesEachBrokenSegment; do
+  require_test "OPS-CONSOLE-PAGES-002" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_console_pages_test.go" || exit $?
+done
+for t in TestOperatorDataQualityReadsTheRealLineage TestOperatorAttributionAuditCountsTheJoinedKeys; do
+  require_test "OPS-CONSOLE-PAGES-002" "./internal/platform/postgres" "$t" \
+    "apps/api-go/internal/platform/postgres/operator_data_quality_integration_test.go" || exit $?
+done
+for route in "quality:operatorDataQuality" "fulfillment-attribution:operatorAttributionAudit"; do
+  path="${route%%:*}"; fn="${route##*:}"
+  if ! grep -qE "\"/v1/operator/$path\", s\.operatorConsole\(s\.$fn\)" apps/api-go/internal/api/server.go; then
+    echo "  FAIL [OPS-CONSOLE-PAGES-002]: /v1/operator/$path 没接真读模型（又变回 NOT_CONNECTED 桩了？）" >&2
+    exit 1
+  fi
+done
+if ! grep -q '"/v1/operator/quality"' apps/market-intelligence-console/src/pages/Quality.tsx; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-002]: 数据治理页不再取 /v1/operator/quality。" >&2
+  exit 1
+fi
+if ! grep -q '"/v1/operator/fulfillment-attribution"' apps/market-intelligence-console/src/pages/FulfillmentAttr.tsx; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-002]: 归因链页不再取 /v1/operator/fulfillment-attribution。" >&2
+  exit 1
+fi
+if grep -qE 'workbench|saved_queries|cross_analysis' apps/market-intelligence-console/src/pages/Quality.tsx; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-002]: 数据治理页又出现了 workbench 假功能 —— 那是从来没存在过的东西。" >&2
+  exit 1
+fi
+if grep -qE 'delta_id|surface_plan_id' apps/market-intelligence-console/src/pages/FulfillmentAttr.tsx; then
+  echo "  FAIL [OPS-CONSOLE-PAGES-002]: 归因链页又出现了逐单明细列 —— 键没接上，明细今天造不出来。" >&2
+  exit 1
+fi
+echo "    OPS-CONSOLE-PAGES-002: PASS (治理+归因接真读模型 · SQL 对真库跑过 · joinedKeys 能变非 0 · 谱系覆盖成对给 · 假功能回不来)"
+# OPS-ENGINE-API-001（2026-10-08）：§20 引擎调用面。
+#
+# 「API / Runtime」页原来是 notConnected 桩，理由是「/v1/decisions/evaluate 没注册路由」。
+# 现在端点真的注册了（POST，接 experience/runtime.Decide 的暴雨规则内核），运营页
+# 从桩变成：真实端点清单 + 复用的引力状态机 + runtime 预算/通道策略。
+# 钉四件事：
+#   ① evaluate 是硬认证端点 —— 无会话 401，判定不能是匿名流量；
+#   ② 判定行为：heavy_rain 全条件 → intent，light_rain → NO_UI_CHANGE，且响应必须
+#      声明「内核只有暴雨规则」—— 不然 NO_UI_CHANGE 会被读成「引擎确定没事」；
+#   ③ 输入校验：weather 受控词表、0..1 区间 —— 400 而不是静默按 clear 处理；
+#   ④ 运营页的端点清单里 evaluate 必须标 LIVE；旧的假遥测（evaluate_calls_30d）
+#      与旧的失真声明（「没有注册路由」）都不许回来。
+for t in TestEngineEvaluateRequiresASession TestEngineEvaluateRunsTheRainRule TestEngineEvaluateValidatesTheInput TestOperatorEngineAPIServesTheRealInventory; do
+  require_test "OPS-ENGINE-API-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/decisions_evaluate_test.go" || exit $?
+done
+if ! grep -qE '"/v1/decisions/evaluate", s\.evaluateDecision' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-ENGINE-API-001]: /v1/decisions/evaluate 没注册路由 —— §20 引擎调用面又消失了。" >&2
+  exit 1
+fi
+if ! grep -qE '"/v1/operator/engine-api", s\.operatorConsole\(s\.operatorEngineAPI\)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-ENGINE-API-001]: /v1/operator/engine-api 没接真读模型（又变回 NOT_CONNECTED 桩了？）" >&2
+  exit 1
+fi
+if ! grep -q '"/v1/operator/engine-api"' apps/market-intelligence-console/src/pages/EngineAPI.tsx; then
+  echo "  FAIL [OPS-ENGINE-API-001]: API / Runtime 页不再取 /v1/operator/engine-api。" >&2
+  exit 1
+fi
+if grep -qE 'evaluate_calls_30d|没有注册路由' apps/market-intelligence-console/src/pages/EngineAPI.tsx; then
+  echo "  FAIL [OPS-ENGINE-API-001]: API / Runtime 页又出现假遥测或失真声明。" >&2
+  exit 1
+fi
+echo "    OPS-ENGINE-API-001: PASS (evaluate 已注册且硬认证 · 暴雨规则行为钉住 · 输入校验 400 · 运营页端点清单为真)"
+# OPS-TAG-VOCAB-001（2026-10-07）：标签中心。
+#
+# 标签体系（tag-service / tag-factory）不存在：全库只有 1 个名字带 tag 的列
+# （supply.agent_services.vertical_tags），0 张 tag / topic / category 表；
+# activity.interests 是「谁对哪个活动感兴趣」的**事件表**（本机 1 行），不是词典。
+# 但库里有 7 个轴今天在当标签用（能力 / 服务 / 垂类 / 语种 + 帖子场景 / 语境类型 / 语境值）。
+# 所以这一页给的是**已落库的标签词典盘点**（每轴词数 / 覆盖率 / 词表受不受控），
+# 不是热度榜 —— 没有标签体系，热度榜和兴趣画像都是编的。
+#
+# 钉五件事：
+#   ① 页面接的是方法不是桩（同 OPS-CONSOLE-PAGES-001 ①，同名桩能骗过所有路由判据）；
+#   ② SQL 对真库跑过，且**种进去的词必须被读回来**（jsonb 展开的判空写错就整轴漏词）；
+#   ③ 词表质量信号必须是轴的**属性**：language 轴 = dirty（vi/VI 没归一）、
+#      context_id 轴 = free_text —— 治理了它们，值会变；措辞改了，值不会动；
+#   ④ 大小写碰撞按**名字**逐个报（Th/th）—— 只报数量没法做归一；
+#   ⑤ 标签云每个词必须带 unit（capability 数人 / service 数条 / scene 数帖，
+#      混排不带单位就是误导）；热度榜 / 兴趣画像 / 标签关系的字段一个都不许有。
+for t in TestOperatorTagsServesVocabularyInventoryAndRefusesAHeatmap; do
+  require_test "OPS-TAG-VOCAB-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_console_pages_test.go" || exit $?
+done
+for t in TestOperatorTagVocabularyReadsAllSevenAxes TestOperatorTagVocabularySurvivesScalarContextRefs TestOperatorTagVocabularyTermsCarryInsertedWords; do
+  require_test "OPS-TAG-VOCAB-001" "./internal/platform/postgres" "$t" \
+    "apps/api-go/internal/platform/postgres/operator_tag_vocabulary_integration_test.go" || exit $?
+done
+if ! grep -qE '"/v1/operator/tags", s\.operatorConsole\(s\.operatorTags\)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-TAG-VOCAB-001]: /v1/operator/tags 没接真读模型（又变回 NOT_CONNECTED 桩了？）" >&2
+  exit 1
+fi
+if ! grep -q '"/v1/operator/tags"' apps/market-intelligence-console/src/pages/Tags.tsx; then
+  echo "  FAIL [OPS-TAG-VOCAB-001]: 标签中心页不再取 /v1/operator/tags —— 词典盘点又变回写死的常量了。" >&2
+  exit 1
+fi
+if grep -qE 'trending_tags|interest_profiles|tag_relations|tag_affinity' apps/market-intelligence-console/src/pages/Tags.tsx; then
+  echo "  FAIL [OPS-TAG-VOCAB-001]: 标签中心又出现了热度榜 / 兴趣画像 —— 标签体系不存在，那些是编的。" >&2
+  exit 1
+fi
+if ! grep -q 'caseCollisions' apps/market-intelligence-console/src/pages/Tags.tsx; then
+  echo "  FAIL [OPS-TAG-VOCAB-001]: 标签中心页不再显示大小写碰撞清单 —— 语种没归一是运营要动手治理的事，必须看得见。" >&2
+  exit 1
+fi
+echo "    OPS-TAG-VOCAB-001: PASS (词典盘点接真读模型 · SQL 对真库跑过 · 种进去的词能读回来 · 碰撞按名字报 · 热度榜编不出来)"
 # GRAVITY-001：引力状态（spec §6-§7 / §11 / §21）。规律的人在规律的时间点附近引力高；证据不足只学习；
 # 久不发生降回只观察；AI / 平台账号不建模；ACTIVE_ORCHESTRATE 不会自动给（§12 / §13 未建）；引力页只给运营。
 for t in TestRegularNoonChatterHasHighGravityBeforeNoonAndLowAtNight TestSparseOrStaleEvidenceDoesNotNudge TestNeverAutoActiveOrchestrate TestRecomputeSkipsNonHumansAndDowngradesPeopleWhoWentQuiet; do

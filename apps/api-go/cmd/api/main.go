@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/activity"
 	"github.com/proxy-app/proxy-api/internal/aipersona"
@@ -21,6 +23,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/experience"
+	"github.com/proxy-app/proxy-api/internal/experience/runtime"
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/gravity"
@@ -40,6 +43,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
+	"github.com/proxy-app/proxy-api/internal/research"
 	"github.com/proxy-app/proxy-api/internal/payment"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/policydecisions"
@@ -368,7 +372,7 @@ func main() {
 		notificationRepository := postgres.NewNotificationRepository(pool)
 		notificationService = notification.NewWithPushProvider(notificationRepository, configuredNotificationPush(notificationRepository))
 		safetyService = safety.NewWithRepository(postgres.NewSafetyRepository(pool))
-		moderationService = moderation.NewWithRepository(postgres.NewModerationRepository(pool))
+		moderationService = moderation.NewWithRepository(postgres.NewModerationRepositoryWithOutbox(pool, outboxRepository))
 		storeOnboardingService = storeonboarding.NewWithRepository(postgres.NewStoreOnboardingRepository(pool))
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
@@ -718,6 +722,22 @@ func main() {
 	if pool != nil {
 		server.OpsMetrics = opsmetrics.NewPostgres(pool)
 		server.Gravity = gravity.NewPostgres(pool)
+		// OPS-RESEARCH-001：实验注册 + 影子评估（控制台 /v1/operator/research）。
+		// 判定内核包 runtime.Decide —— 组合根做 map↔struct 适配，research 包不依赖 experience/runtime。
+		server.Research = research.NewService(postgres.NewResearchRepository(pool))
+		server.Research.Evaluate = func(snapshot map[string]any) (map[string]any, string) {
+			b, _ := json.Marshal(snapshot)
+			var snap runtime.ContextSnapshot
+			_ = json.Unmarshal(b, &snap)
+			intent, reason := runtime.Decide(snap)
+			if intent == nil {
+				return nil, reason
+			}
+			ib, _ := json.Marshal(intent)
+			var im map[string]any
+			_ = json.Unmarshal(ib, &im)
+			return im, reason
+		}
 		// OPS-AUDIT-001：运营动作审计（operator.action_log，migration 161，只追加）。
 		server.Audit = operatoraudit.NewRecorder(operatoraudit.NewPostgres(pool))
 		// OPS-MATCHING-TUNABLES-001：撮合引擎的旋钮与决策留痕（控制台 /v1/operator/matching）。

@@ -50,8 +50,7 @@ func marketBoardServer(t *testing.T, source DispatchStatsSource) *Server {
 	return server
 }
 
-func floatPtr(v float64) *float64 { return &v }
-func intPtr(v int) *int           { return &v }
+func intPtr(v int) *int { return &v }
 func near(got, want, tolerance float64) bool {
 	return math.Abs(got-want) <= tolerance
 }

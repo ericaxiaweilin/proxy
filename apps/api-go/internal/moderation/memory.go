@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"sync"
+
+	"github.com/proxy-app/proxy-api/internal/event"
 )
 
 // MemoryRepository 是进程内实现，供单测与未接数据库的开发模式使用。
@@ -17,6 +19,10 @@ type MemoryRepository struct {
 	authRequests    []AuthorityRequest
 	authResponses   []AuthorityResponse
 	fail            bool
+	// events 收住 WriteAndPublish 收到的事件。内存仓没有事务可谈，但两个实现对
+	// 「写和事件是否都发生了」必须回答一致 —— 否则测试用内存仓、线上跑 PG，
+	// 差异会藏在没人看的那一侧。
+	events []event.DomainEvent
 }
 
 func NewMemoryRepository() *MemoryRepository { return &MemoryRepository{} }
@@ -269,3 +275,28 @@ var (
 	ErrAuthorityResponseRequired            = errors.New("moderation authority response requires a request id and outcome")
 	ErrAuthorityResponseActorRequired       = errors.New("moderation authority response requires an actor")
 )
+
+// WriteAndPublish 内存实现：先跑 write，再把事件收起来（见 supply 的同名方法，
+// 注释里说明了为什么不能在这里 Lock 再调 write —— 那些方法自己取同一把锁，
+// 而 Go 的 mutex 不可重入）。
+func (r *MemoryRepository) WriteAndPublish(_ context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if len(domainEvents) == 0 {
+		return errors.New("WriteAndPublish requires at least one domain event")
+	}
+	if err := write(context.Background()); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, domainEvents...)
+	return nil
+}
+
+// Events 返回已发布的事件（测试断言用；生产不读）。
+func (r *MemoryRepository) Events() []event.DomainEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]event.DomainEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}

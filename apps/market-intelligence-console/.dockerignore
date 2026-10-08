@@ -1,0 +1,5 @@
+# 只把 dist 和 nginx.conf 送进 build context —— 没有这一份，node_modules（几十 MB）
+# 会被一起打包上传给 docker daemon，每次 build 都白传一遍。
+node_modules
+src
+prototype

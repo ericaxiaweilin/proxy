@@ -23,12 +23,14 @@ import (
 var operatorConsolePaths = []string{
 	"context-field", "surface-plans", "execution-runtime", "decision-engine", "clarification-gate", "supply-health",
 	"fulfillment-attribution", "behavior", "research", "population", "tags", "intent-orchestration", "engine-api",
-	"merchant", "retention", "trust", "quality", "matching", "matching/trace",
+	"merchant", "retention", "trust", "quality", "matching", "matching/trace", "north-star",
 }
 
+// OPS-CONSOLE-PAGES-001：决策引擎 / 澄清门 / 意图编排 / 信任与风险 四页接上了真读模型，
+// 从这里挪到下面 liveConsolePaths。剩下的五个是**真的没有数据源**的 —— 它们的
+// missing 文案写的是哪张表没写入方、哪个键对不上，不是笼统的模块名。
 var notConnectedConsolePaths = []string{
-	"decision-engine", "clarification-gate", "fulfillment-attribution", "research", "tags",
-	"intent-orchestration", "engine-api", "trust", "quality",
+	"research",
 }
 
 // merchant 曾经是桩，OPS-MERCHANT-001 把它换成真实读模型；这里断言它**不再**属于
@@ -37,7 +39,10 @@ var notConnectedConsolePaths = []string{
 //
 // matching / matching/trace 是 OPS-MATCHING-TUNABLES-001 接上去的：旋钮来自库
 // （没有行就是出厂默认），轨迹读的是 supply.candidate_batches 里存着的快照。
-var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace", "retention", "supply-health"}
+// OPS-NORTH-STAR-001 把 north-star 接上真读模型（四个格子各带口径与缺口说明）。
+var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace", "retention", "supply-health", "north-star",
+	"decision-engine", "clarification-gate", "intent-orchestration", "trust", "tags",
+	"fulfillment-attribution", "quality", "engine-api"}
 
 type stubOpsMetrics struct{}
 
@@ -69,10 +74,11 @@ func (stubOpsMetrics) Merchants(_ context.Context, _ time.Time) (opsmetrics.Merc
 func (stubOpsMetrics) Retention(_ context.Context, _ time.Time) (opsmetrics.Retention, error) {
 	return opsmetrics.Retention{
 		WindowDays: 30, Orders: 415, Requesters: 196, RepeatRequests: 117,
-		// OPS-DATA-ENV-001：比率是可空字段 —— null 是「这一轮不给比率」，不是 0%。
-		RepeatRequesterRate: ratePtr(59.7), SamePairRepeatGroups: 117, AgentsWithOrders: 191,
+		RepeatRequesterRate: ratePtr(22.9), SamePairRepeatGroups: 117, AgentsWithOrders: 191,
+		// 可归因口径：这台库里一半以上是集成测试留下的行（请求方不是真账号）。
+		OrdersAttributable: 268, OrdersUnattributed: 147, RealRequesters: 48, RealRepeatRequesters: 11,
 		Completed: 12, Cancelled: 12,
-		Lifecycle: map[string]int64{"CONFIRMED": 336, "OFFERED": 49, "EXECUTING": 6, "COMPLETED": 12, "CANCELLED": 12},
+		Lifecycle:     map[string]int64{"CONFIRMED": 336, "OFFERED": 49, "EXECUTING": 6, "COMPLETED": 12, "CANCELLED": 12},
 		ActiveLast14d: 9, ActivePrev14d: 1, ReturnedUsers: 1, PriorWindowRequesters: 0,
 	}, nil
 }
@@ -87,6 +93,154 @@ func (stubOpsMetrics) SupplyHealth(_ context.Context, _ time.Time) (opsmetrics.S
 		RealNameVerified: 7, RealNameExpired: 6, CapabilityVerified: 6,
 		AgentsWithOrders: 0, OrdersWindow: 355,
 		DemandTaskDrafts: 54, DemandTasks: 0, CityCompanionNeeds: 5,
+	}, nil
+}
+
+// NorthStar 用本机库的真实形状，且**刻意带上两个「对不上」**：
+//   - 45 条草案已 COMMITTED 但 demand.tasks 是 0 行（发布链路缺口）；
+//   - 撮合批次 5 批、找到供给 5 批，但 outcome.* 是 0 行、回连命中 0（归因断链）。
+//
+// 这两处正是「0 和 0 不是一回事」的样本：读模型把数给对了，handler 必须把话也说了。
+func (stubOpsMetrics) NorthStar(_ context.Context, _ time.Time) (opsmetrics.NorthStar, error) {
+	return opsmetrics.NorthStar{
+		WindowDays: 30,
+		Intent: opsmetrics.IntentFunnel{
+			Drafts: 54, DraftsOpen: 9, DraftsCommitted: 45, CanonicalTasks: 0,
+		},
+		Matching: opsmetrics.MatchAttempts{Batches: 5, BatchesWithSupply: 5, ShortageBatches: 0},
+		Fulfillment: opsmetrics.FulfillmentFunnel{
+			Orders: 819, Offered: 49, Confirmed: 739, Executing: 6, Completed: 13, Cancelled: 12,
+		},
+		Negative: opsmetrics.NegativeFeedback{Exposures: 1453, StrongNegative: 2, WeakNegative: 0},
+	}, nil
+}
+
+// DecisionEligibility 用本机库的真实形状：38 行，OBSERVE 24 / LEARN_ONLY 11 / PASSIVE 3，
+// **没有一个 ACTIVE_ORCHESTRATE**（§12/§13 不自动进入主动编排）。
+func (stubOpsMetrics) DecisionEligibility(context.Context, time.Time) (opsmetrics.DecisionEligibility, error) {
+	fresh := time.Now().UTC().Add(-time.Hour)
+	return opsmetrics.DecisionEligibility{
+		States: []opsmetrics.EligibilityStateRow{
+			{State: "OBSERVE", People: 24, AvgConfidence: 0.065, AvgEvidence: 0.219, AvgSampleEvents: 5.6},
+			{State: "LEARN_ONLY", People: 11, AvgConfidence: 0.042, AvgEvidence: 0.25, AvgSampleEvents: 2.1},
+			{State: "PASSIVE", People: 3, AvgConfidence: 0.687, AvgEvidence: 0.833, AvgSampleEvents: 539.7},
+		},
+		EventTypes: []opsmetrics.EligibilityEventRow{
+			{EventType: "CHAT_ACTIVE", People: 26},
+			{EventType: "BROWSE_ACTIVE", People: 11},
+			{EventType: "SCENE_VISIT", People: 1},
+		},
+		ActiveOrchestrate: 0,
+		ModelVersions:     []string{"gravity-hist-v1"},
+		LastComputedAt:    &fresh,
+		FirstComputedAt:   &fresh,
+		TotalPeople:       38,
+	}, nil
+}
+
+// TrustEvidence 用本机库的真实形状，刻意带上那条最有信息量的**不一致**：
+// 1 条举报、0 条处置 —— 「0 处置」不是「举报都处理完了」。
+func (stubOpsMetrics) TrustEvidence(context.Context, time.Time) (opsmetrics.TrustEvidence, error) {
+	return opsmetrics.TrustEvidence{
+		WindowDays:         30,
+		Agents:             107,
+		RealNameVerified:   7,
+		RealNameExpired:    6,
+		RealNameMissing:    94,
+		CapabilityVerified: 6,
+		Reports30d:         0,
+		ReportsAll:         1,
+		MutedAuthors30d:    0,
+		MutedAuthorsAll:    0,
+		PostReportsAll:     2,
+		Dispositions30d:    0,
+		DispositionsAll:    0,
+		AppealsAll:         0,
+		SafetyIncidentsAll: 0,
+		SafetyBlocksAll:    0,
+	}, nil
+}
+
+// ClarificationFunnel 用本机库的真实形状：54 条草案、45 条 COMMITTED、0 条 canonical task，
+// 且**下游两条回连都是 0** —— 那是键没接上，不是转化差。
+func (stubOpsMetrics) ClarificationFunnel(context.Context, time.Time) (opsmetrics.ClarificationFunnel, error) {
+	return opsmetrics.ClarificationFunnel{
+		WindowDays: 30,
+		Drafts:     54, DraftsOpen: 9, DraftsCommitted: 45, CanonicalTasks: 0,
+		DraftsWithBatch: 0, DraftsWithOrder: 0,
+		Needs: 5,
+	}, nil
+}
+
+// TagVocabulary 用本机库的真实形状：7 个轴、语种 5 个原始 token 归一后 3 个（vi/VI、zh/ZH）、
+// 90 条 scene_type=UNKNOWN、只有 50/1461 条帖子带语境标签、activity.interests 只有 1 行。
+func (stubOpsMetrics) TagVocabulary(context.Context, time.Time) (opsmetrics.TagVocabulary, error) {
+	return opsmetrics.TagVocabulary{
+		Agents: 107, Posts: 1461,
+		Axes: []opsmetrics.TagAxis{
+			{Axis: "capability", Side: "supply", Vocabulary: "controlled", Terms: 3, Carriers: 12, Universe: 107},
+			{Axis: "service", Side: "supply", Vocabulary: "controlled", Terms: 1, Carriers: 6, Universe: 107},
+			{Axis: "vertical", Side: "supply", Vocabulary: "controlled", Terms: 2, Carriers: 5, Universe: 107},
+			{Axis: "language", Side: "supply", Vocabulary: "dirty", Terms: 5, Carriers: 105, Universe: 107},
+			{Axis: "scene", Side: "content", Vocabulary: "controlled", Terms: 7, Carriers: 1461, Universe: 1461},
+			{Axis: "context_type", Side: "content", Vocabulary: "controlled", Terms: 8, Carriers: 50, Universe: 1461},
+			{Axis: "context_id", Side: "content", Vocabulary: "free_text", Terms: 27, Carriers: 50, Universe: 1461},
+		},
+		Terms: []opsmetrics.TagTerm{
+			{Tag: "COFFEE", Type: "scene", Count: 581, Unit: "posts"},
+			{Tag: "BRUNCH", Type: "scene", Count: 300, Unit: "posts"},
+			{Tag: "OUTDOOR", Type: "scene", Count: 283, Unit: "posts"},
+			{Tag: "NIGHTLIFE", Type: "scene", Count: 186, Unit: "posts"},
+			{Tag: "vi", Type: "language", Count: 100, Unit: "agents"},
+			{Tag: "UNKNOWN", Type: "scene", Count: 90, Unit: "posts"},
+			{Tag: "en", Type: "language", Count: 50, Unit: "agents"},
+			{Tag: "zh", Type: "language", Count: 50, Unit: "agents"},
+			{Tag: "日常", Type: "context_id", Count: 25, Unit: "refs"},
+			{Tag: "VI", Type: "language", Count: 5, Unit: "agents"},
+			{Tag: "ZH", Type: "language", Count: 5, Unit: "agents"},
+		},
+		LanguageRawTerms: 5, LanguageNormTerms: 3,
+		CaseCollisions: []string{"VI/vi", "ZH/zh"},
+		SceneUnknown:   90, ContextPosts: 50, ContextIdTerms: 27,
+		InterestRows: 1,
+	}, nil
+}
+
+// DataQuality 用本机库的真实形状：1453 条事件、谱系四列基本全空（req_id 0 / impression 0 /
+// session 1 / 已知通道 1）、1452 条 server 生成、1 条重复也没有、client_time 只有 1 条。
+func (stubOpsMetrics) DataQuality(context.Context, time.Time) (opsmetrics.DataQuality, error) {
+	cov := func(field string, filled, total int64) opsmetrics.FieldCoverage {
+		return opsmetrics.FieldCoverage{Field: field, Window: "all", Filled: filled, Total: total, Coverage: float64(filled) / float64(total)}
+	}
+	covW := func(field string, filled, total int64) opsmetrics.FieldCoverage {
+		return opsmetrics.FieldCoverage{Field: field, Window: "window", Filled: filled, Total: total, Coverage: float64(filled) / float64(total)}
+	}
+	return opsmetrics.DataQuality{
+		WindowDays: 30, EventsWindow: 1432, EventsAll: 1453,
+		Lineage: []opsmetrics.FieldCoverage{
+			cov("recommendation_request_id", 0, 1453), covW("recommendation_request_id", 0, 1432),
+			cov("impression_id", 0, 1453), covW("impression_id", 0, 1432),
+			cov("feed_session_id", 1, 1453), covW("feed_session_id", 1, 1432),
+			cov("candidate_source", 1, 1453), covW("candidate_source", 1, 1432),
+			cov("client_time", 1, 1453), covW("client_time", 1, 1432),
+			cov("need_id", 10, 1453), covW("need_id", 10, 1432),
+		},
+		CandidateSource:  []opsmetrics.Distribution{{Value: "unknown", Count: 1452}, {Value: "chronological_keyset", Count: 1}},
+		EventSource:      []opsmetrics.Distribution{{Value: "server", Count: 1452}, {Value: "client", Count: 1}},
+		EventTypes:       []opsmetrics.Distribution{{Value: "POST_IMPRESSION", Count: 1323}, {Value: "PROFILE_OPEN", Count: 106}},
+		ClientTimeFilled: 1, SkewOver5Min: 0, MaxSkewSeconds: 31.7,
+		DuplicateEventIds: 0,
+	}, nil
+}
+
+// AttributionAudit 用本机库的真实形状：三段键全是 0 —— 链没接，不是没有生意。
+func (stubOpsMetrics) AttributionAudit(context.Context, time.Time) (opsmetrics.AttributionAudit, error) {
+	return opsmetrics.AttributionAudit{
+		WindowDays: 30,
+		EventsAll:  1453, EventsAttributable: 0,
+		BatchesAll: 5, BatchesWithNeedId: 5,
+		OrdersAll: 819, OrdersWithNeedId: 819,
+		KeysJoined: 0, OutcomeRows: 0,
 	}, nil
 }
 

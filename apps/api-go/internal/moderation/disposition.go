@@ -5,11 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 // COMP-REPORT-003: 举报的处置留痕。
@@ -158,7 +158,8 @@ func (s *Service) recordDisposition(ctx context.Context, e command.Envelope) com
 	}
 	// 举报必须真实存在：给一条不存在的举报写处置，只能制造「看起来处理过」
 	// 的假象，比没有记录更糟。
-	if _, ok := s.repository.FindReport(ctx, p.ReportID); !ok {
+	report, ok := s.repository.FindReport(ctx, p.ReportID)
+	if !ok {
 		return command.Rejected(e, "DISPOSITION_REPORT_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "moderation.disposition_report_not_found", nil)
 	}
 	disposition := Disposition{
@@ -170,7 +171,28 @@ func (s *Service) recordDisposition(ctx context.Context, e command.Envelope) com
 		Note:      strings.TrimSpace(p.Note),
 		CreatedAt: s.clock.Now().UTC(),
 	}
-	if err := s.repository.AddDisposition(ctx, disposition); err != nil {
+	// ORDER-DISPUTE-001：处置结果必须**通知到举报人**。
+	//
+	// 同 AppealDecisionRecorded：用户提交举报是**同步**拿得到回执的（命令直接返回
+	// 结果），但处置是运营在几小时/几天之后做的，没有任何东西会告诉他「你举报的那
+	// 件事被怎么处理了」。不通知的结果是：举报渠道静默失效，而且用户**默认**举报被
+	// 忽略了 —— 那比明确告诉他「不成立」更伤。
+	//
+	// 这里只发「处置有结论」这一个事件。DISMISS（不成立）也发 —— 明确告诉用户
+	// 不成立，和让他一直等，是两种完全不同的体验。
+	//
+	// 载荷**不带 note**：运营的内部措辞不该出现在用户推送里。
+	domainEvents := []event.DomainEvent{
+		event.New("ReportDispositionRecorded", "Report", report.ID, 1, report.ReporterID, e.CorrelationID, e.CommandID, disposition.CreatedAt,
+			map[string]any{
+				"reportId": report.ID,
+				"action":   disposition.Action,
+				"outcome":  disposition.Outcome,
+			}),
+	}
+	if err := s.repository.WriteAndPublish(ctx, func(txCtx context.Context) error {
+		return s.repository.AddDisposition(txCtx, disposition)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "DISPOSITION_FAILED", "INTERNAL", "SAFE_RETRY", "moderation.disposition_failed", nil)
 	}
 	return command.Accepted(e, "ModerationDisposition", disposition.ID, 1, disposition.Action, nil)

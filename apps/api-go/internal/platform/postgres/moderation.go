@@ -2,10 +2,13 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 )
 
@@ -19,11 +22,44 @@ import (
 // 举报表是 append-only 的（见迁移 086 的 CHECK 与注释），因此这里只有
 // INSERT，没有 UPDATE / DELETE —— 举报记录是举证材料。
 type ModerationRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	outbox *OutboxRepository
 }
 
 func NewModerationRepository(pool *pgxpool.Pool) *ModerationRepository {
 	return &ModerationRepository{pool: pool}
+}
+
+// NewModerationRepositoryWithOutbox 带上事务性 outbox（ORDER-DISPUTE-001）。
+// 没有它就不能实现 moderation.TransactionalRepository —— 类型系统会拒绝，
+// 这是故意的：举报/申诉的留痕和「通知用户结果」必须同生共死。
+func NewModerationRepositoryWithOutbox(pool *pgxpool.Pool, outboxRepository *OutboxRepository) *ModerationRepository {
+	return &ModerationRepository{pool: pool, outbox: outboxRepository}
+}
+
+// WriteAndPublish 把 write 和 domainEvents 放进同一事务（ORDER-DISPUTE-001）。
+// 形状照抄 SupplyRepository.WriteAndPublish —— 这个域是第一个这么接的，别处不要
+// 再发明第二种。
+func (r *ModerationRepository) WriteAndPublish(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error {
+	if r.outbox == nil {
+		return errors.New("moderation transactional outbox is not configured")
+	}
+	if len(domainEvents) == 0 {
+		// 一个事件都不发还叫什么 AndPublish：直接报错，免得以后有人以为
+		// 「这里已经接上通知管线了」。
+		return errors.New("WriteAndPublish requires at least one domain event")
+	}
+	return runInTransaction(ctx, r.pool, func(transactionContext context.Context, transaction pgx.Tx) error {
+		if err := write(transactionContext); err != nil {
+			return err
+		}
+		for _, domainEvent := range domainEvents {
+			if err := r.outbox.publishWithExec(transactionContext, transaction, domainEvent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 const insertReportSQL = `
@@ -58,14 +94,14 @@ func (r *ModerationRepository) AddReport(ctx context.Context, report moderation.
 // COMP-REPORT-003 — 处置落库。与举报同规则：只有 INSERT，没有
 // UPDATE / DELETE。处置记录是「平台处理过」的举证材料。
 //
-// NULLIF($4,'') / NULLIF($6,'') 不是洁癖，是修一个真实故障：
+// NULLIF($4,”) / NULLIF($6,”) 不是洁癖，是修一个真实故障：
 // dispositions.outcome 的 CHECK 是「outcome IS NULL OR outcome IN (...)」，
 // 而 Service 对 TRIAGE / ESCALATE / DISMISS / REOPEN 这四种动作**允许不带
 // outcome**（只有 ACTION_TAKEN 强制要求）—— 于是 Outcome 为空串时，
-// 参数是 '' 而不是 NULL，INSERT 直接撞 CHECK：
+// 参数是 ” 而不是 NULL，INSERT 直接撞 CHECK：
 //
-//     ERROR: new row for relation "dispositions" violates check constraint
-//            "dispositions_outcome_check" (SQLSTATE 23514)
+//	ERROR: new row for relation "dispositions" violates check constraint
+//	       "dispositions_outcome_check" (SQLSTATE 23514)
 //
 // 也就是说生产路径上五种处置动作只有 ACTION_TAKEN 写得进去，其余四种
 // （接手 / 升级 / 判定不成立 / 重开）全部失败。内存仓储不校验 outcome，

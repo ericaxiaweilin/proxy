@@ -131,16 +131,24 @@ func notConnected(missing, spec string) http.HandlerFunc {
 
 const personalizationSpec = "docs/spec/personalization/Proxy_Personalization_Orchestration_Engineering_Spec_v1.md"
 
+// 这一个是**真的没有数据源**的页面（其余各页已建成真读模型，见
+// operator_console_pages.go 与 decisions_evaluate.go；引擎 API 页的
+// 后端 = POST /v1/decisions/evaluate + 复用的引力状态机）。
+//
+// 措辞从「模块名」换成了**具体的缺什么**：哪张表没有写入方、哪个键对不上、哪个端点没注册路由。
+// 「缺 outcome-service」这种写法看起来是说明，其实什么都没说 —— 运营既不知道差多少，
+// 也不知道能不能补。下面每一条都写的是可以**当场验证**的事实。
+//
+// 已经建起来的五页（决策引擎 / 信任与风险 / 澄清门 / 意图编排 / 标签中心）搬去了
+// internal/api/operator_console_pages.go，那里接的是真读模型。
+//
+// 标签中心是这里唯一「名不副实」的一页：标签体系确实不存在，但库里有 7 个轴今天在
+// 当标签用，盘点它们比留一句「未接入」有用 —— 详见那边 operatorTags 的注释。
 var (
-	operatorDecisionEngine      = notConnected("决策引擎（/v1/decisions/evaluate 未实现；runtime.Decide 只有一条暴雨规则）", personalizationSpec+" §11 §16 §20")
-	operatorClarificationGate   = notConnected("澄清门（intent-service）", personalizationSpec+" §16")
-	operatorFulfillmentAttr     = notConnected("决策 → 曝光 → 结果 归因链（outcome-service）", personalizationSpec+" §17 §18")
-	operatorResearch            = notConnected("Geometry Research / 影子流量（experiment-service）", personalizationSpec+" §18 §19")
-	operatorTags                = notConnected("标签体系（tag-service / tag-factory）", personalizationSpec+" §3")
-	operatorIntentOrchestration = notConnected("意图漏斗 + 引力 / 召回 / 排序 / 编排（gravity-service、retrieval、ranking、orchestration）", personalizationSpec+" §6 §7 §16")
-	operatorEngineAPI           = notConnected("引擎 API（/v1/decisions/evaluate 等尚未实现）", personalizationSpec+" §20")
-	operatorTrust               = notConnected("信任与风险评分（evidence-gate、negative-breaker）", personalizationSpec+" §9 §10")
-	operatorQuality             = notConnected("数据治理（曝光谱系 / 污染风险）", personalizationSpec+" §9.1 §9.4")
+	// 实验 / 影子流量：连表都没有。
+	operatorResearch = notConnected(
+		"Geometry Research / 影子流量（experiment-service）：库里没有任何实验或影子流量的表（按 experiment / shadow / abtest 全库查表名为 0 命中）",
+		personalizationSpec+" §18 §19")
 )
 
 // operatorMerchant：商家管理（OPS-MERCHANT-001）。原来是 notConnected 桩，控制台那页

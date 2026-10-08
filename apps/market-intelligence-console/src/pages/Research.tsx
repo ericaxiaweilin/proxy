@@ -1,12 +1,16 @@
 import { opFetch } from "../lib/api";
 import { useEffect, useState } from "react";
 
-type Payload = { stages: Array<{ stage: string; desc: string; count: number }>; field_flow: Array<{ k: string; v: string; d: string }> };
+type Payload = { dataSource?: string; missing?: string; stages: Array<{ stage: string; desc: string; count: number }>; field_flow: Array<{ k: string; v: string; d: string }> };
 
 export function Research() {
   const [data, setData] = useState<Payload | null>(null);
   useEffect(() => { opFetch("/v1/operator/research").then(setData).catch(() => {}); }, []);
   if (!data) return <div className="notice">加载 Research…</div>;
+  // notConnected 桩不发 stages / field_flow —— 不挡这里整页 TypeError。
+  if (data.dataSource !== "LIVE" || !data.stages) {
+    return <div className="notice"><b>未接入：</b>{data.missing ?? "没有数据源"}</div>;
+  }
   return (
     <>
       <div className="research-grid">

@@ -25,12 +25,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/proxy-app/proxy-api/internal/clock"
+	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/proxy-app/proxy-api/internal/clock"
-	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 // 举报目标类型。与法律文件 §38 列举的八类一一对应，顺序也一致 ——
@@ -43,6 +43,17 @@ const (
 	TargetOpportunity = "OPPORTUNITY"
 	TargetMerchant    = "MERCHANT"
 	TargetInvite      = "INVITE"
+	// TargetTransaction 在 ORDER-DISPUTE-001 里被用来指**订单**（真人服务里没有
+	// 支付，所以「交易」指的就是这笔订单本身）。
+	//
+	// ⚠️ 为什么不给订单单开一个 ORDER 类型：ReportableTargetTypes 被
+	// TestReportableTargetTypesMatchTermsSection38 钉死在**法律文件 §3.8 的八类**
+	// 上（"少了任何一类，法律文件就在说我们做不到的事" —— 反过来，加一类同样不能由
+	// 代码单方面决定：那要让条款先改）。所以订单纠纷先挂在已获条款背书的
+	// TRANSACTION 上。
+	//
+	// 如果条款里「交易」的定义并不包含订单，那要加 ORDER 就得先改条款 ——
+	// 那是产品/法务的事，不在这里顺手决定。
 	TargetTransaction = "TRANSACTION"
 )
 
@@ -69,14 +80,25 @@ const (
 	ReasonFraud         = "FRAUD"
 	ReasonImpersonation = "IMPERSONATION"
 	ReasonIP            = "IP_VIOLATION"
-	ReasonOther         = "OTHER"
+	// ReasonOrderDispute 真人服务里的订单纠纷（2026-10-05 加）。
+	//
+	// 之前只能塞 OTHER。OTHER 不是「中立」，是「没有信号」：运营在举报队列里看不出
+	// 该先看哪条，而订单纠纷恰恰是最有时效的一类 —— creator 放鸽子、爽约、
+	// 服务与描述不符，现场就那一次。
+	//
+	// 只加分类，不加钱：申诉/处置成立之后没有任何金额可以动（平台侧没有真实支付），
+	// 真正的退款只能线下人工走。这条分类的作用是让「这单被质疑了」变成能排队、
+	// 能优先处理的信号，不是让它自动退钱。
+	ReasonOrderDispute = "ORDER_DISPUTE"
+	ReasonOther        = "OTHER"
 )
 
 // ReportableReasons 返回受支持的举报理由（已排序）。
 func ReportableReasons() []string {
 	out := []string{
 		ReasonSpam, ReasonHarassment, ReasonUnsafe, ReasonMinorSafety,
-		ReasonSolicitation, ReasonFraud, ReasonImpersonation, ReasonIP, ReasonOther,
+		ReasonSolicitation, ReasonFraud, ReasonImpersonation, ReasonIP,
+		ReasonOrderDispute, ReasonOther,
 	}
 	sort.Strings(out)
 	return out
@@ -143,15 +165,33 @@ type reportPayload struct {
 }
 
 // Service 受理用户举报。
+// TransactionalRepository 由支持事务性 outbox 的存储实现。
+// ORDER-DISPUTE-001（MERCHANT-CREATOR-NOTIFY-001）：
+//
+// 之前 moderation 的写入**完全不经过 outbox**（Service 里连 publisher 都没有，
+// repository 直接写表），所以整条举报/申诉链不产生任何领域事件 —— 用户提交申诉、
+// 运营复核完，两头都是纯沉默。
+//
+// 为什么必须是 Transactional 而不是「先写库、再单独发事件」：分两次写就会出现
+// 「事件说有、记录没有」或「记录在、事件丢了」，而通知文案会照着事件讲
+// （比如告诉用户「你的申诉已受理」，而那条申诉其实根本没存下来）。
+// 所以用**类型系统**保证事件和留痕同事务：Service 拿不到只能单次写库的仓储。
+type TransactionalRepository interface {
+	Repository
+	// WriteAndPublish 把 write 回调和 domainEvents 放进同一事务。write 里用普通
+	// 仓储方法即可（runInTransaction 把事务放进 ctx，queryerForContext 会认）。
+	WriteAndPublish(ctx context.Context, write func(context.Context) error, domainEvents []event.DomainEvent) error
+}
+
 type Service struct {
 	mu         sync.Mutex
-	repository Repository
+	repository TransactionalRepository
 	clock      clock.Clock
 }
 
 func New() *Service { return NewWithRepository(NewMemoryRepository()) }
 
-func NewWithRepository(repository Repository) *Service {
+func NewWithRepository(repository TransactionalRepository) *Service {
 	if repository == nil {
 		repository = NewMemoryRepository()
 	}

@@ -5,11 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/proxy-app/proxy-api/internal/command"
 )
 
 // COMP-REPORT-004: 申诉机制。
@@ -170,7 +170,8 @@ func (s *Service) recordAppealDecision(ctx context.Context, e command.Envelope) 
 		return command.Rejected(e, "APPEAL_DECISION_FAILED", "INTERNAL", "SAFE_RETRY", "moderation.appeal_decision_failed", nil)
 	}
 	// 复核必须挂在真实存在的申诉上。
-	if _, ok := s.repository.FindAppeal(ctx, p.AppealID); !ok {
+	appeal, ok := s.repository.FindAppeal(ctx, p.AppealID)
+	if !ok {
 		return command.Rejected(e, "APPEAL_DECISION_APPEAL_NOT_FOUND", "VALIDATION", "AFTER_USER_ACTION", "moderation.appeal_decision_appeal_not_found", nil)
 	}
 	decision := AppealDecision{
@@ -181,7 +182,24 @@ func (s *Service) recordAppealDecision(ctx context.Context, e command.Envelope) 
 		ActorID:   e.Actor.ID,
 		CreatedAt: s.clock.Now().UTC(),
 	}
-	if err := s.repository.AddAppealDecision(ctx, decision); err != nil {
+	// ORDER-DISPUTE-001：申诉结果必须**通知到申诉人**。
+	//
+	// 之前这条链一个领域事件都不发，所以运营复核完，用户**永远不知道结果** ——
+	// 他提交了申诉，然后就没有然后了。这不是「少一条通知」，这是让申诉渠道
+	// 在事实上失效：没人会为一件没有回音的事回来第二次。
+	//
+	// 载荷刻意**不带 note**：那是运营的内部措辞（可能有内部术语/人名），不该出现在
+	// 用户的推送里。通知只说结论，让用户进 app 看详情。
+	domainEvents := []event.DomainEvent{
+		event.New("AppealDecisionRecorded", "Appeal", appeal.ID, 1, appeal.AppellantID, e.CorrelationID, e.CommandID, decision.CreatedAt,
+			map[string]any{
+				"appealId": appeal.ID,
+				"decision": decision.Decision,
+			}),
+	}
+	if err := s.repository.WriteAndPublish(ctx, func(txCtx context.Context) error {
+		return s.repository.AddAppealDecision(txCtx, decision)
+	}, domainEvents); err != nil {
 		return command.Rejected(e, "APPEAL_DECISION_FAILED", "INTERNAL", "SAFE_RETRY", "moderation.appeal_decision_failed", nil)
 	}
 	return command.Accepted(e, "ModerationAppealDecision", decision.ID, 1, p.Decision, nil)

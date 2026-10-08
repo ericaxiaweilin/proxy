@@ -36,6 +36,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
+	"github.com/proxy-app/proxy-api/internal/research"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/payment"
@@ -141,6 +142,8 @@ type Server struct {
 	UserModel *usermodel.Service
 	// OpsMetrics：运营控制台的真实读模型（OPS-REAL-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	OpsMetrics opsmetrics.Source
+	// Research：实验注册 + 影子评估（OPS-RESEARCH-001）。nil = Research 页返回 NOT_CONNECTED。
+	Research *research.Service
 	// Gravity：引力状态存储（GRAVITY-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	Gravity gravity.Store
 	// Matching：撮合排序的旋钮存储与决策留痕读模型（OPS-MATCHING-TUNABLES-001）。
@@ -239,26 +242,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health/live", s.live)
 	mux.HandleFunc("/health/ready", s.ready)
 	mux.HandleFunc("/v1/commands/", s.command)
+	mux.HandleFunc("/v1/decisions/evaluate", s.evaluateDecision)
 	mux.HandleFunc("/v1/experience/surface", s.experienceSurface)
 	mux.HandleFunc("/v1/experience/delta", s.experienceDelta)
 	mux.HandleFunc("/v1/experience/metrics", s.experienceMetrics)
 	mux.HandleFunc("/v1/operator/context-field", s.operatorConsole(s.operatorContextField))
 	mux.HandleFunc("/v1/operator/surface-plans", s.operatorConsole(s.operatorSurfacePlans))
 	mux.HandleFunc("/v1/operator/execution-runtime", s.operatorConsole(s.operatorExecutionRuntime))
-	mux.HandleFunc("/v1/operator/decision-engine", s.operatorConsole(operatorDecisionEngine))
-	mux.HandleFunc("/v1/operator/clarification-gate", s.operatorConsole(operatorClarificationGate))
+	mux.HandleFunc("/v1/operator/decision-engine", s.operatorConsole(s.operatorDecisionEngine))
+	mux.HandleFunc("/v1/operator/clarification-gate", s.operatorConsole(s.operatorClarificationGate))
 	mux.HandleFunc("/v1/operator/supply-health", s.operatorConsole(s.operatorSupplyHealth))
-	mux.HandleFunc("/v1/operator/fulfillment-attribution", s.operatorConsole(operatorFulfillmentAttr))
+	mux.HandleFunc("/v1/operator/north-star", s.operatorConsole(s.operatorNorthStar))
+	mux.HandleFunc("/v1/operator/fulfillment-attribution", s.operatorConsole(s.operatorAttributionAudit))
 	mux.HandleFunc("/v1/operator/behavior", s.operatorConsole(s.operatorBehavior))
 	mux.HandleFunc("/v1/operator/research", s.operatorConsole(operatorResearch))
 	mux.HandleFunc("/v1/operator/population", s.operatorConsole(s.operatorPopulation))
-	mux.HandleFunc("/v1/operator/tags", s.operatorConsole(operatorTags))
-	mux.HandleFunc("/v1/operator/intent-orchestration", s.operatorConsole(operatorIntentOrchestration))
-	mux.HandleFunc("/v1/operator/engine-api", s.operatorConsole(operatorEngineAPI))
+	mux.HandleFunc("/v1/operator/tags", s.operatorConsole(s.operatorTags))
+	mux.HandleFunc("/v1/operator/intent-orchestration", s.operatorConsole(s.operatorIntentOrchestration))
+	mux.HandleFunc("/v1/operator/engine-api", s.operatorConsole(s.operatorEngineAPI))
 	mux.HandleFunc("/v1/operator/merchant", s.operatorConsole(s.operatorMerchant))
 	mux.HandleFunc("/v1/operator/retention", s.operatorConsole(s.operatorRetention))
-	mux.HandleFunc("/v1/operator/trust", s.operatorConsole(operatorTrust))
-	mux.HandleFunc("/v1/operator/quality", s.operatorConsole(operatorQuality))
+	mux.HandleFunc("/v1/operator/trust", s.operatorConsole(s.operatorTrust))
+	mux.HandleFunc("/v1/operator/quality", s.operatorConsole(s.operatorDataQuality))
 	// GRAVITY-001: 引力状态（真实派生数据，spec §6-§7 / §21）。
 	mux.HandleFunc("/v1/operator/gravity", s.operatorConsole(s.operatorGravity))
 	mux.HandleFunc("/v1/operator/gravity/recompute", s.operatorConsoleMethod(http.MethodPost, s.operatorGravityRecompute))
