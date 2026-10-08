@@ -30,12 +30,13 @@ import { Access } from "./pages/Access";
 import { Moderation } from "./pages/Moderation";
 import { Appeals } from "./pages/Appeals";
 import { AuthorityRequests } from "./pages/AuthorityRequests";
+import { Restrictions } from "./pages/Restrictions";
 import { MatchPreview } from "./pages/MatchPreview";
 import { DemandGap } from "./pages/DemandGap";
 import { Insights } from "./pages/Insights";
 import { Providers } from "./pages/Providers";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "appeals" | "authority" | "matchpreview" | "demandgap" | "insights" | "providerprofiles";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access" | "moderation" | "appeals" | "authority" | "restrictions" | "matchpreview" | "demandgap" | "insights" | "providerprofiles";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -68,6 +69,7 @@ const TITLES: Record<Page, string> = {
   moderation: "举报处置",
   appeals: "申诉复核",
   authority: "有权机关请求",
+  restrictions: "账号限制",
   matchpreview: "撮合预览",
   demandgap: "需求缺口",
   insights: "用户洞察",
@@ -93,7 +95,7 @@ export function App() {
         {/* DISPATCH-LOOP-001：运营每天真正在用的那一页，放最上面。 */}
         <div className="navgroup">工作台</div>
         <div className="nav">
-          {(["dispatch", "marketboard", "storeboard", "moderation", "appeals", "authority", "matchpreview"] as Page[]).map((p) => (
+          {(["dispatch", "marketboard", "storeboard", "moderation", "appeals", "authority", "restrictions", "matchpreview"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => navTo(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -192,6 +194,8 @@ export function App() {
           {page === "appeals" && <Appeals />}
           {/* OPS-AUTHORITY-001：有权机关请求（受理要四项核验，响应只记录，不真的调数据 / 下架） */}
           {page === "authority" && <AuthorityRequests />}
+          {/* OPS-RESTRICT-001：账号限制（两档，在命令边界执行；封禁不自动取消进行中订单） */}
+          {page === "restrictions" && <Restrictions />}
           {/* OPS-MATCH-PREVIEW-001：撮合预览 —— 这张单此刻会邀谁、为什么（只读） */}
           {page === "matchpreview" && <MatchPreview key={previewId} initialId={previewId} />}
           {/* OPS-INSIGHT-001：需求缺口（供需并排、不给比值）与用户洞察（标签分群，小格子抑制） */}
@@ -205,7 +209,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "appeals", "authority", "matchpreview", "demandgap", "insights", "providerprofiles"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access", "moderation", "appeals", "authority", "restrictions", "matchpreview", "demandgap", "insights", "providerprofiles"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
