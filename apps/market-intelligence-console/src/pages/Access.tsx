@@ -21,7 +21,10 @@ type Payload = {
   principals: PrincipalInfo[];
   me?: { principalId: string; actorId: string; scopes: string[]; narrowed: boolean };
   // OPS-DATA-ENV-001：这台进程连的是哪一套数据，是部署声明的，不是从行里推出来的。
-  dataEnv?: { variable: string; declared: string; businessRatesPublished: boolean; note: string };
+  dataEnv?: {
+    variable: string; declared: string; businessRatesPublished: boolean; note: string;
+    database?: string; databaseVersion?: string; databaseNote?: string;
+  };
   audit: {
     connected: boolean; recorded?: number; writeFailed?: number; writeFailedNote?: string;
     recent?: AuditEntry[]; recentError?: string;
@@ -134,6 +137,17 @@ export function Access() {
               ? <span className="badge" style={{ background: "#e6f4ea", color: "#1e6930" }}>比率型指标已发布</span>
               : <span className="badge" style={{ background: "#fde7e7", color: "#a32020" }}>比率型指标停用 · 只给原始计数</span>}
           </div>
+          {/* 声明是一句断言，这一行让它可核对：运营拿 dbname@host:port 跟部署清单对一眼，
+              就知道这一屏的读数出自哪套数据。问不出来时把「问不出来」写出来，不留一个空位 ——
+              本机 dev 库和服务器上的库都叫 proxy，界面上原本长得一模一样。 */}
+          <div style={{ marginTop: 8 }}>
+            <b>读的是</b>{" "}
+            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
+              {data.dataEnv.database || "（问不出来）"}
+            </span>
+            {data.dataEnv.databaseVersion ? <span style={{ color: "#8a8190", fontSize: 12 }}> · PG {data.dataEnv.databaseVersion}</span> : null}
+          </div>
+          {data.dataEnv.databaseNote ? <div className="notice" style={{ marginTop: 6 }}>{data.dataEnv.databaseNote}</div> : null}
           <div className="notice" style={{ marginTop: 8 }}>{data.dataEnv.note}</div>
         </div>
       ) : null}

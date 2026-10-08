@@ -103,7 +103,7 @@ func (s *Server) operatorAccess(w http.ResponseWriter, r *http.Request) {
 		"audit":      audit,
 		// OPS-DATA-ENV-001：这一页是「系统当前到底怎么配的」唯一的可观测面，数据环境声明漏在
 		// 这里就等于漏在整个后台里没人知道 —— 而它决定了比率型指标给不给看。
-		"dataEnv": dataEnvStatus(),
+		"dataEnv": dataEnvStatus(r.Context(), s.OpsMetrics),
 		"notes": []string{
 			"授权只读：白名单与 scope 收窄都来自 env（PROXY_OPERATOR_PRINCIPALS / PROXY_OPERATOR_SCOPES），改完要重启 api。",
 			"没有条目的白名单账号 = 持全部 scope（接 scope 配置之前的老行为）；配成空集 = 明确全拒。两者相反。",
