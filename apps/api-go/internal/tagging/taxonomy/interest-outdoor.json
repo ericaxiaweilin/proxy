@@ -1,55 +1,849 @@
-{"domain":"interest","nodes":[
-{"id":"interest/outdoor/mountain","parent":"interest/outdoor","name":{"zh":"山野徒步","vi":"Leo núi","en":"Hills & Trekking"},"keywords":["爬山","登山","leo núi","núi non","đỉnh cao"]},
-{"id":"interest/outdoor/mountain/hiking","parent":"interest/outdoor/mountain","name":{"zh":"一日徒步","vi":"Đi bộ trong ngày","en":"Day Hike"},"keywords":["一日徒步","hiking","leo núi trong ngày","đi bộ đường dài","city hike"]},
-{"id":"interest/outdoor/mountain/trekking","parent":"interest/outdoor/mountain","name":{"zh":"多日穿越","vi":"Trekking dài ngày","en":"Multi-day Trek"},"keywords":["多日徒步","trekking","穿越","2n3đ","xuyên rừng"]},
-{"id":"interest/outdoor/mountain/summit","parent":"interest/outdoor/mountain","name":{"zh":"登顶挑战","vi":"Chinh phục đỉnh","en":"Summit Push"},"keywords":["登顶","chinh phục đỉnh","lên đỉnh","đỉnh cao nhất","summit"]},
-{"id":"interest/outdoor/mountain/fansipan","parent":"interest/outdoor/mountain","name":{"zh":"番西邦线","vi":"Fansipan","en":"Fansipan"},"keywords":["fansipan","phan xi păng","nóc nhà đông dương","lào cai","đỉnh phansipan"]},
-{"id":"interest/outdoor/mountain/stone_plateau","parent":"interest/outdoor/mountain","name":{"zh":"石高原","vi":"Cao nguyên đá","en":"Stone Plateau"},"keywords":["石高原","cao nguyên đá","đồng văn","mã pí lè","đèo mã phục"]},
-{"id":"interest/outdoor/mountain/caving","parent":"interest/outdoor/mountain","name":{"zh":"探洞","vi":"Khám hang động","en":"Caving"},"keywords":["探洞","hang động","caving","sơn đoòng","hang tối"]},
-{"id":"interest/outdoor/mountain/waterfall","parent":"interest/outdoor/mountain","name":{"zh":"瀑布线","vi":"Săn thác","en":"Waterfall Chasing"},"keywords":["瀑布","săn thác","waterfall","thác cao","mùa nước thác"]},
-{"id":"interest/outdoor/water","parent":"interest/outdoor","name":{"zh":"江河湖海","vi":"Sông suối & hồ","en":"Rivers & Lakes"},"keywords":["下水","chơi nước","ngồi xuồng","mặt hồ","bến nước"]},
-{"id":"interest/outdoor/water/kayaking","parent":"interest/outdoor/water","name":{"zh":"皮划艇","vi":"Chèo thuyền kayak","en":"Kayaking"},"keywords":["皮划艇","kayak","thuyền kayak","vịnh","chèo"]},
-{"id":"interest/outdoor/water/rafting","parent":"interest/outdoor/water","name":{"zh":"激流漂流","vi":"Chèo vượt ghềnh","en":"Whitewater Rafting"},"keywords":["漂流","rafting","vượt ghềnh","chèo thuyền","thượng nguồn"]},
-{"id":"interest/outdoor/water/canyoning","parent":"interest/outdoor/water","name":{"zh":"溯溪","vi":"Trek suối","en":"Canyoning"},"keywords":["溯溪","canyoning","leo thác nước","vực nước","ghềnh đá"]},
-{"id":"interest/outdoor/water/snorkeling","parent":"interest/outdoor/water","name":{"zh":"浮潜","vi":"Lặn ống thở","en":"Snorkeling"},"keywords":["浮潜","snorkeling","snorkel","ngắm san hô","kính lặn"]},
-{"id":"interest/outdoor/water/diving","parent":"interest/outdoor/water","name":{"zh":"水肺潜水","vi":"Lặn bình hơi","en":"Scuba Diving"},"keywords":["水肺","scuba","lặn sâu","cô tô","đào tạo lặn"]},
-{"id":"interest/outdoor/water/paddleboarding","parent":"interest/outdoor/water","name":{"zh":"桨板","vi":"Chèo ván SUP","en":"Paddleboarding"},"keywords":["桨板","sup","ván chèo","chèo ván","paddleboard"]},
-{"id":"interest/outdoor/water/fishing","parent":"interest/outdoor/water","name":{"zh":"垂钓","vi":"Câu cá","en":"Angling"},"keywords":["钓鱼","câu cá","cần câu","câu đêm","lure"]},
-{"id":"interest/outdoor/camp","parent":"interest/outdoor","name":{"zh":"露营","vi":"Cắm trại","en":"Camping"},"keywords":["露营","cắm trại","khu trại","đi trại","rừng trại"]},
-{"id":"interest/outdoor/camp/tent","parent":"interest/outdoor/camp","name":{"zh":"扎帐篷","vi":"Dựng lều","en":"Tent Camping"},"keywords":["扎营","搭帐篷","lều","tent","ngủ lều"]},
-{"id":"interest/outdoor/camp/car_camping","parent":"interest/outdoor/camp","name":{"zh":"汽车露营","vi":"Camping ô tô","en":"Car Camping"},"keywords":["汽车露营","camping ô tô","ngủ trên xe","mui xe","bãi xe đêm"]},
-{"id":"interest/outdoor/camp/glamping","parent":"interest/outdoor/camp","name":{"zh":"轻奢露营","vi":"Glamping","en":"Glamping"},"keywords":["轻奢露营","glamping","lều tiện nghi","nệm hơi","trọn gói trại"]},
-{"id":"interest/outdoor/camp/picnic","parent":"interest/outdoor/camp","name":{"zh":"草地野餐","vi":"Đi picnic","en":"Picnic"},"keywords":["野餐","picnic","bãi cỏ","thảm trải","hộp picnic"]},
-{"id":"interest/outdoor/camp/hammock","parent":"interest/outdoor/camp","name":{"zh":"吊床","vi":"Võng nằm","en":"Hammock"},"keywords":["吊床","võng","ngủ võng","treo võng","hammock"]},
-{"id":"interest/outdoor/camp/bonfire","parent":"interest/outdoor/camp","name":{"zh":"篝火夜","vi":"Đốt lửa trại","en":"Campfire"},"keywords":["篝火","lửa trại","đốt lửa","trại lửa","than hoa"]},
-{"id":"interest/outdoor/nature","parent":"interest/outdoor","name":{"zh":"自然观察","vi":"Ngắm thiên nhiên","en":"Nature Watching"},"keywords":["观自然","thiên nhiên hoang dã","wildlife","vườn quốc gia","khu bảo tồn"]},
-{"id":"interest/outdoor/nature/birdwatching","parent":"interest/outdoor/nature","name":{"zh":"观鸟","vi":"Ngắm chim","en":"Birdwatching"},"keywords":["观鸟","loài chim","chim quý hiếm","ống nhòm","chim di cư"]},
-{"id":"interest/outdoor/nature/stargazing","parent":"interest/outdoor/nature","name":{"zh":"观星","vi":"Ngắm sao","en":"Stargazing"},"keywords":["观星","dải ngân hà","sao băng","telescope","bầu trời đêm"]},
-{"id":"interest/outdoor/nature/cloud_hunting","parent":"interest/outdoor/nature","name":{"zh":"追云","vi":"Săn mây","en":"Cloud Hunting"},"keywords":["săn mây","biển mây","lưng mây","đỉnh mây","追云"]},
-{"id":"interest/outdoor/nature/foraging","parent":"interest/outdoor/nature","name":{"zh":"采野味","vi":"Hái rau rừng","en":"Foraging"},"keywords":["挖野菜","采菌","hái nấm","măng rừng","trúc đào"]},
-{"id":"interest/outdoor/nature/blossom","parent":"interest/outdoor/nature","name":{"zh":"赏花期","vi":"Mùa hoa","en":"Blossom Season"},"keywords":["花期","hoa mận","tam giác mạch","nở rộ","mộc miên"]},
-{"id":"interest/outdoor/nature/butterflies","parent":"interest/outdoor/nature","name":{"zh":"观蝶","vi":"Mùa bướm","en":"Butterfly Season"},"keywords":["观蝶","cánh bướm","butterflies","cúc phương","bướm đêm"]},
-{"id":"interest/outdoor/nature/mangrove","parent":"interest/outdoor/nature","name":{"zh":"红树林","vi":"Rừng ngập mặn","en":"Mangrove"},"keywords":["红树林","đất ngập mặn","mangrove","xẻo module","tôm cua rừng"]},
-{"id":"interest/outdoor/spots","parent":"interest/outdoor","name":{"zh":"城郊山野","vi":"Rừng núi ven đô","en":"Hills Near Hanoi"},"keywords":["近山","ven nội","về rừng","đi rừng cuối tuần","hai tiếng xe"]},
-{"id":"interest/outdoor/spots/mau_son","parent":"interest/outdoor/spots","name":{"zh":"猫儿山","vi":"Mẫu Sơn","en":"Mẫu Sơn"},"keywords":["mẫu sơn","tuyết rơi","lạng sơn","sương giá","đỉnh gió"]},
-{"id":"interest/outdoor/spots/tam_dao","parent":"interest/outdoor/spots","name":{"zh":"倒斜山","vi":"Tam Đảo","en":"Tam Đảo"},"keywords":["tam đảo","vĩnh phúc","thị trấn mù","cổng trời","nhà thờ đá"]},
-{"id":"interest/outdoor/spots/ba_vi","parent":"interest/outdoor/spots","name":{"zh":"巴位山","vi":"Ba Vì","en":"Ba Vì"},"keywords":["ba vì","thác đa","sơn tinh","đồi thông","kỳ hoa"]},
-{"id":"interest/outdoor/spots/hoang_su_phi","parent":"interest/outdoor/spots","name":{"zh":"黄树皮梯田","vi":"Ruộng bậc thang","en":"Terraced Fields"},"keywords":["hoàng su phì","bậc thang","lũng pú","mùa nước đổ","gặt lúa"]},
-{"id":"interest/outdoor/spots/pu_luong","parent":"interest/outdoor/spots","name":{"zh":"普良","vi":"Pù Luông","en":"Pù Luông"},"keywords":["pù luông","mường lào","bản đôn","nhà sàn","thác kình"]},
-{"id":"interest/outdoor/spots/ta_nang","parent":"interest/outdoor/spots","name":{"zh":"塔浪线","vi":"Tà Năng – Phan Dũng","en":"Tà Năng Trek"},"keywords":["tà năng","phan dũng","đồi cỏ tranh","linh dương","đi 2 ngày"]},
-{"id":"interest/outdoor/spots/yen_tu","parent":"interest/outdoor/spots","name":{"zh":"安子山","vi":"Núi Yên Tử","en":"Yên Tử"},"keywords":["yên tử","tràng lai","chùa đồng","vãn cảnh","quảng ninh núi"]},
-{"id":"interest/outdoor/spots/moc_chau","parent":"interest/outdoor/spots","name":{"zh":"木州茶山","vi":"Đồi chè Mộc Châu","en":"Mộc Châu Hills"},"keywords":["mộc châu","đồi chè","bò sữa","nà ca","mận hậu"]},
-{"id":"interest/outdoor/spots/ninh_thuan","parent":"interest/outdoor/spots","name":{"zh":"宁顺沙丘","vi":"Đồi cát Ninh Thuận","en":"Ninh Thuận Dunes"},"keywords":["ninh thuận","đồi cát","nam cương","pan rang","trượt cát"]},
-{"id":"interest/outdoor/spots/cao_bang","parent":"interest/outdoor/spots","name":{"zh":"高平","vi":"Cao Bằng","en":"Cao Bằng"},"keywords":["cao bằng","bản giốc","thang hen","pác bó","núi thủng"]},
-{"id":"interest/outdoor/spots/ninh_binh","parent":"interest/outdoor/spots","name":{"zh":"宁平","vi":"Ninh Bình","en":"Ninh Bình"},"keywords":["ninh bình","tràng an","tam cốc","vân long","bái đính"]},
-{"id":"interest/outdoor/spots/ba_be","parent":"interest/outdoor/spots","name":{"zh":"三海湖","vi":"Hồ Ba Bể","en":"Ba Bể Lake"},"keywords":["ba bể","hồ ba bể","bắc kạn","pác ngậm","ghe tam gian"]},
-{"id":"interest/outdoor/spots/con_son","parent":"interest/outdoor/spots","name":{"zh":"昆山","vi":"Côn Sơn – Kiếp Bạc","en":"Côn Sơn"},"keywords":["côn sơn","chí linh","thanh mai","kiếp bạc","bàn cờ"]},
-{"id":"interest/outdoor/adventure","parent":"interest/outdoor","name":{"zh":"野外挑战","vi":"Mạo hiểm ngoài trời","en":"Outdoor Adventure"},"keywords":[" mạo hiểm","thử thách","chơi mạnh","trải nghiệm mạnh","vượt giới hạn"]},
-{"id":"interest/outdoor/adventure/paragliding","parent":"interest/outdoor/adventure","name":{"zh":"滑翔伞","vi":"Dù lượn","en":"Paragliding"},"keywords":["滑翔伞","dù lượn","cánh dù","bay đôi","điểm cất cánh"]},
-{"id":"interest/outdoor/adventure/zipline","parent":"interest/outdoor/adventure","name":{"zh":"高空滑索","vi":"Đu dây vượt","en":"Zipline"},"keywords":["滑索","zipline","tuyến trượt","rẽ gió","độ cao"]},
-{"id":"interest/outdoor/adventure/via_ferrata","parent":"interest/outdoor/adventure","name":{"zh":"飞拉达","vi":"Leo núi có dây","en":"Via Ferrata"},"keywords":["via ferrata","leo có dây","móc an toàn","dây bảo hộ","vách đá"]},
-{"id":"interest/outdoor/skills","parent":"interest/outdoor","name":{"zh":"野外技能","vi":"Kỹ năng đi rừng","en":"Bushcraft"},"keywords":["kỹ năng","kinh nghiệm rừng","rèn người","an toàn rừng","dã chiến"]},
-{"id":"interest/outdoor/skills/survival","parent":"interest/outdoor/skills","name":{"zh":"野外生存","vi":"Sinh tồn","en":"Survival Skills"},"keywords":["sinh tồn","nhóm lửa","mồi lửa","dấu chân","tạo nước"]},
-{"id":"interest/outdoor/skills/navigation","parent":"interest/outdoor/skills","name":{"zh":"看路识图","vi":"La bàn & bản đồ","en":"Navigation"},"keywords":["la bàn","bản đồ","định hướng","xem hướng","compass"]},
-{"id":"interest/outdoor/skills/gear","parent":"interest/outdoor/skills","name":{"zh":"户外装备","vi":"Đồ nghề leo núi","en":"Outdoor Gear"},"keywords":["装备","đồ nghề","balo","giày leo núi","áo gió"]}
-]}
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/outdoor/mountain",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "山野徒步",
+    "vi": "Leo núi",
+    "en": "Hills & Trekking"
+   },
+   "keywords": [
+    "爬山",
+    "登山",
+    "leo núi",
+    "núi non",
+    "đỉnh cao"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/hiking",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "一日徒步",
+    "vi": "Đi bộ trong ngày",
+    "en": "Day Hike"
+   },
+   "keywords": [
+    "一日徒步",
+    "hiking",
+    "leo núi trong ngày",
+    "đi bộ đường dài",
+    "city hike"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/trekking",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "多日穿越",
+    "vi": "Trekking dài ngày",
+    "en": "Multi-day Trek"
+   },
+   "keywords": [
+    "多日徒步",
+    "trekking",
+    "穿越",
+    "2n3đ",
+    "xuyên rừng"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/summit",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "登顶挑战",
+    "vi": "Chinh phục đỉnh",
+    "en": "Summit Push"
+   },
+   "keywords": [
+    "登顶",
+    "chinh phục đỉnh",
+    "lên đỉnh",
+    "đỉnh cao nhất",
+    "summit"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/fansipan",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "番西邦线",
+    "vi": "Fansipan",
+    "en": "Fansipan"
+   },
+   "keywords": [
+    "fansipan",
+    "phan xi păng",
+    "nóc nhà đông dương",
+    "lào cai",
+    "đỉnh phansipan"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/stone_plateau",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "石高原",
+    "vi": "Cao nguyên đá",
+    "en": "Stone Plateau"
+   },
+   "keywords": [
+    "石高原",
+    "cao nguyên đá",
+    "đồng văn",
+    "mã pí lè",
+    "đèo mã phục"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/caving",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "探洞",
+    "vi": "Khám hang động",
+    "en": "Caving"
+   },
+   "keywords": [
+    "探洞",
+    "hang động",
+    "caving",
+    "sơn đoòng",
+    "hang tối"
+   ]
+  },
+  {
+   "id": "interest/outdoor/mountain/waterfall",
+   "parent": "interest/outdoor/mountain",
+   "name": {
+    "zh": "瀑布线",
+    "vi": "Săn thác",
+    "en": "Waterfall Chasing"
+   },
+   "keywords": [
+    "瀑布",
+    "săn thác",
+    "waterfall",
+    "thác cao",
+    "mùa nước thác"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "江河湖海",
+    "vi": "Sông suối & hồ",
+    "en": "Rivers & Lakes"
+   },
+   "keywords": [
+    "下水",
+    "chơi nước",
+    "ngồi xuồng",
+    "mặt hồ",
+    "bến nước"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/kayaking",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "皮划艇",
+    "vi": "Chèo thuyền kayak",
+    "en": "Kayaking"
+   },
+   "keywords": [
+    "皮划艇",
+    "kayak",
+    "thuyền kayak",
+    "vịnh"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/rafting",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "激流漂流",
+    "vi": "Chèo vượt ghềnh",
+    "en": "Whitewater Rafting"
+   },
+   "keywords": [
+    "漂流",
+    "rafting",
+    "vượt ghềnh",
+    "chèo thuyền",
+    "thượng nguồn"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/canyoning",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "溯溪",
+    "vi": "Trek suối",
+    "en": "Canyoning"
+   },
+   "keywords": [
+    "溯溪",
+    "canyoning",
+    "leo thác nước",
+    "vực nước",
+    "ghềnh đá"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/snorkeling",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "浮潜",
+    "vi": "Lặn ống thở",
+    "en": "Snorkeling"
+   },
+   "keywords": [
+    "浮潜",
+    "snorkeling",
+    "snorkel",
+    "ngắm san hô",
+    "kính lặn"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/diving",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "水肺潜水",
+    "vi": "Lặn bình hơi",
+    "en": "Scuba Diving"
+   },
+   "keywords": [
+    "水肺",
+    "scuba",
+    "lặn sâu",
+    "cô tô",
+    "đào tạo lặn"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/paddleboarding",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "桨板",
+    "vi": "Chèo ván SUP",
+    "en": "Paddleboarding"
+   },
+   "keywords": [
+    "桨板",
+    "sup",
+    "ván chèo",
+    "chèo ván",
+    "paddleboard"
+   ]
+  },
+  {
+   "id": "interest/outdoor/water/fishing",
+   "parent": "interest/outdoor/water",
+   "name": {
+    "zh": "垂钓",
+    "vi": "Câu cá",
+    "en": "Angling"
+   },
+   "keywords": [
+    "钓鱼",
+    "câu cá",
+    "cần câu",
+    "câu đêm",
+    "lure"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "露营",
+    "vi": "Cắm trại",
+    "en": "Camping"
+   },
+   "keywords": [
+    "khu trại",
+    "đi trại",
+    "rừng trại"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp/tent",
+   "parent": "interest/outdoor/camp",
+   "name": {
+    "zh": "扎帐篷",
+    "vi": "Dựng lều",
+    "en": "Tent Camping"
+   },
+   "keywords": [
+    "扎营",
+    "搭帐篷",
+    "lều",
+    "tent",
+    "ngủ lều"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp/car_camping",
+   "parent": "interest/outdoor/camp",
+   "name": {
+    "zh": "汽车露营",
+    "vi": "Camping ô tô",
+    "en": "Car Camping"
+   },
+   "keywords": [
+    "汽车露营",
+    "camping ô tô",
+    "ngủ trên xe",
+    "mui xe",
+    "bãi xe đêm"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp/glamping",
+   "parent": "interest/outdoor/camp",
+   "name": {
+    "zh": "轻奢露营",
+    "vi": "Glamping",
+    "en": "Glamping"
+   },
+   "keywords": [
+    "轻奢露营",
+    "glamping",
+    "lều tiện nghi",
+    "nệm hơi",
+    "trọn gói trại"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp/picnic",
+   "parent": "interest/outdoor/camp",
+   "name": {
+    "zh": "草地野餐",
+    "vi": "Đi picnic",
+    "en": "Picnic"
+   },
+   "keywords": [
+    "野餐",
+    "picnic",
+    "bãi cỏ",
+    "thảm trải",
+    "hộp picnic"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp/hammock",
+   "parent": "interest/outdoor/camp",
+   "name": {
+    "zh": "吊床",
+    "vi": "Võng nằm",
+    "en": "Hammock"
+   },
+   "keywords": [
+    "吊床",
+    "võng",
+    "ngủ võng",
+    "treo võng",
+    "hammock"
+   ]
+  },
+  {
+   "id": "interest/outdoor/camp/bonfire",
+   "parent": "interest/outdoor/camp",
+   "name": {
+    "zh": "篝火夜",
+    "vi": "Đốt lửa trại",
+    "en": "Campfire"
+   },
+   "keywords": [
+    "篝火",
+    "lửa trại",
+    "đốt lửa",
+    "trại lửa",
+    "than hoa"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "自然观察",
+    "vi": "Ngắm thiên nhiên",
+    "en": "Nature Watching"
+   },
+   "keywords": [
+    "观自然",
+    "thiên nhiên hoang dã",
+    "wildlife",
+    "khu bảo tồn"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/birdwatching",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "观鸟",
+    "vi": "Ngắm chim",
+    "en": "Birdwatching"
+   },
+   "keywords": [
+    "观鸟",
+    "loài chim",
+    "chim quý hiếm",
+    "ống nhòm",
+    "chim di cư"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/stargazing",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "观星",
+    "vi": "Ngắm sao",
+    "en": "Stargazing"
+   },
+   "keywords": [
+    "观星",
+    "dải ngân hà",
+    "sao băng",
+    "telescope",
+    "bầu trời đêm"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/cloud_hunting",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "追云",
+    "vi": "Săn mây",
+    "en": "Cloud Hunting"
+   },
+   "keywords": [
+    "săn mây",
+    "biển mây",
+    "lưng mây",
+    "đỉnh mây",
+    "追云"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/foraging",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "采野味",
+    "vi": "Hái rau rừng",
+    "en": "Foraging"
+   },
+   "keywords": [
+    "挖野菜",
+    "采菌",
+    "hái nấm",
+    "măng rừng",
+    "trúc đào"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/blossom",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "赏花期",
+    "vi": "Mùa hoa",
+    "en": "Blossom Season"
+   },
+   "keywords": [
+    "花期",
+    "hoa mận",
+    "tam giác mạch",
+    "nở rộ",
+    "mộc miên"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/butterflies",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "观蝶",
+    "vi": "Mùa bướm",
+    "en": "Butterfly Season"
+   },
+   "keywords": [
+    "观蝶",
+    "cánh bướm",
+    "butterflies",
+    "cúc phương",
+    "bướm đêm"
+   ]
+  },
+  {
+   "id": "interest/outdoor/nature/mangrove",
+   "parent": "interest/outdoor/nature",
+   "name": {
+    "zh": "红树林",
+    "vi": "Rừng ngập mặn",
+    "en": "Mangrove"
+   },
+   "keywords": [
+    "红树林",
+    "đất ngập mặn",
+    "mangrove",
+    "xẻo module",
+    "tôm cua rừng"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "城郊山野",
+    "vi": "Rừng núi ven đô",
+    "en": "Hills Near Hanoi"
+   },
+   "keywords": [
+    "近山",
+    "ven nội",
+    "về rừng",
+    "đi rừng cuối tuần",
+    "hai tiếng xe"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/mau_son",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "猫儿山",
+    "vi": "Mẫu Sơn",
+    "en": "Mẫu Sơn"
+   },
+   "keywords": [
+    "mẫu sơn",
+    "tuyết rơi",
+    "lạng sơn",
+    "sương giá",
+    "đỉnh gió"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/tam_dao",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "倒斜山",
+    "vi": "Tam Đảo",
+    "en": "Tam Đảo"
+   },
+   "keywords": [
+    "tam đảo",
+    "vĩnh phúc",
+    "thị trấn mù",
+    "cổng trời",
+    "nhà thờ đá"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/ba_vi",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "巴位山",
+    "vi": "Ba Vì",
+    "en": "Ba Vì"
+   },
+   "keywords": [
+    "ba vì",
+    "thác đa",
+    "sơn tinh",
+    "đồi thông",
+    "kỳ hoa"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/hoang_su_phi",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "黄树皮梯田",
+    "vi": "Ruộng bậc thang",
+    "en": "Terraced Fields"
+   },
+   "keywords": [
+    "hoàng su phì",
+    "bậc thang",
+    "lũng pú",
+    "mùa nước đổ",
+    "gặt lúa"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/pu_luong",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "普良",
+    "vi": "Pù Luông",
+    "en": "Pù Luông"
+   },
+   "keywords": [
+    "pù luông",
+    "mường lào",
+    "bản đôn",
+    "nhà sàn",
+    "thác kình"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/ta_nang",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "塔浪线",
+    "vi": "Tà Năng – Phan Dũng",
+    "en": "Tà Năng Trek"
+   },
+   "keywords": [
+    "tà năng",
+    "phan dũng",
+    "đồi cỏ tranh",
+    "linh dương",
+    "đi 2 ngày"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/yen_tu",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "安子山",
+    "vi": "Núi Yên Tử",
+    "en": "Yên Tử"
+   },
+   "keywords": [
+    "yên tử",
+    "tràng lai",
+    "chùa đồng",
+    "vãn cảnh",
+    "quảng ninh núi"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/moc_chau",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "木州茶山",
+    "vi": "Đồi chè Mộc Châu",
+    "en": "Mộc Châu Hills"
+   },
+   "keywords": [
+    "mộc châu",
+    "đồi chè",
+    "bò sữa",
+    "nà ca",
+    "mận hậu"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/ninh_thuan",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "宁顺沙丘",
+    "vi": "Đồi cát Ninh Thuận",
+    "en": "Ninh Thuận Dunes"
+   },
+   "keywords": [
+    "ninh thuận",
+    "đồi cát",
+    "nam cương",
+    "pan rang",
+    "trượt cát"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/cao_bang",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "高平",
+    "vi": "Cao Bằng",
+    "en": "Cao Bằng"
+   },
+   "keywords": [
+    "cao bằng",
+    "bản giốc",
+    "thang hen",
+    "pác bó",
+    "núi thủng"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/ninh_binh",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "宁平",
+    "vi": "Ninh Bình",
+    "en": "Ninh Bình"
+   },
+   "keywords": [
+    "ninh bình",
+    "tràng an",
+    "tam cốc",
+    "vân long",
+    "bái đính"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/ba_be",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "三海湖",
+    "vi": "Hồ Ba Bể",
+    "en": "Ba Bể Lake"
+   },
+   "keywords": [
+    "ba bể",
+    "hồ ba bể",
+    "bắc kạn",
+    "pác ngậm",
+    "ghe tam gian"
+   ]
+  },
+  {
+   "id": "interest/outdoor/spots/con_son",
+   "parent": "interest/outdoor/spots",
+   "name": {
+    "zh": "昆山",
+    "vi": "Côn Sơn – Kiếp Bạc",
+    "en": "Côn Sơn"
+   },
+   "keywords": [
+    "côn sơn",
+    "chí linh",
+    "thanh mai",
+    "kiếp bạc",
+    "bàn cờ"
+   ]
+  },
+  {
+   "id": "interest/outdoor/adventure",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "野外挑战",
+    "vi": "Mạo hiểm ngoài trời",
+    "en": "Outdoor Adventure"
+   },
+   "keywords": [
+    "mạo hiểm",
+    "thử thách",
+    "chơi mạnh",
+    "trải nghiệm mạnh",
+    "vượt giới hạn"
+   ]
+  },
+  {
+   "id": "interest/outdoor/adventure/paragliding",
+   "parent": "interest/outdoor/adventure",
+   "name": {
+    "zh": "滑翔伞",
+    "vi": "Dù lượn",
+    "en": "Paragliding"
+   },
+   "keywords": [
+    "滑翔伞",
+    "dù lượn",
+    "cánh dù",
+    "bay đôi",
+    "điểm cất cánh"
+   ]
+  },
+  {
+   "id": "interest/outdoor/adventure/zipline",
+   "parent": "interest/outdoor/adventure",
+   "name": {
+    "zh": "高空滑索",
+    "vi": "Đu dây vượt",
+    "en": "Zipline"
+   },
+   "keywords": [
+    "滑索",
+    "zipline",
+    "tuyến trượt",
+    "rẽ gió",
+    "độ cao"
+   ]
+  },
+  {
+   "id": "interest/outdoor/adventure/via_ferrata",
+   "parent": "interest/outdoor/adventure",
+   "name": {
+    "zh": "飞拉达",
+    "vi": "Leo núi có dây",
+    "en": "Via Ferrata"
+   },
+   "keywords": [
+    "via ferrata",
+    "leo có dây",
+    "móc an toàn",
+    "dây bảo hộ",
+    "vách đá"
+   ]
+  },
+  {
+   "id": "interest/outdoor/skills",
+   "parent": "interest/outdoor",
+   "name": {
+    "zh": "野外技能",
+    "vi": "Kỹ năng đi rừng",
+    "en": "Bushcraft"
+   },
+   "keywords": [
+    "kỹ năng",
+    "kinh nghiệm rừng",
+    "rèn người",
+    "an toàn rừng",
+    "dã chiến"
+   ]
+  },
+  {
+   "id": "interest/outdoor/skills/survival",
+   "parent": "interest/outdoor/skills",
+   "name": {
+    "zh": "野外生存",
+    "vi": "Sinh tồn",
+    "en": "Survival Skills"
+   },
+   "keywords": [
+    "sinh tồn",
+    "nhóm lửa",
+    "mồi lửa",
+    "dấu chân",
+    "tạo nước"
+   ]
+  },
+  {
+   "id": "interest/outdoor/skills/navigation",
+   "parent": "interest/outdoor/skills",
+   "name": {
+    "zh": "看路识图",
+    "vi": "La bàn & bản đồ",
+    "en": "Navigation"
+   },
+   "keywords": [
+    "la bàn",
+    "bản đồ",
+    "định hướng",
+    "xem hướng",
+    "compass"
+   ]
+  },
+  {
+   "id": "interest/outdoor/skills/gear",
+   "parent": "interest/outdoor/skills",
+   "name": {
+    "zh": "户外装备",
+    "vi": "Đồ nghề leo núi",
+    "en": "Outdoor Gear"
+   },
+   "keywords": [
+    "装备",
+    "đồ nghề",
+    "balo",
+    "giày leo núi",
+    "áo gió"
+   ]
+  }
+ ]
+}

@@ -4,284 +4,701 @@
   {
    "id": "interest/reading/book",
    "parent": "interest/reading",
-   "name": {"zh": "读书", "vi": "Sách", "en": "Books"},
-   "keywords": ["读书", "sách vở", "mọt sách", "bookworm"]
+   "name": {
+    "zh": "读书",
+    "vi": "Sách",
+    "en": "Books"
+   },
+   "keywords": [
+    "读书",
+    "sách vở",
+    "mọt sách",
+    "bookworm"
+   ]
   },
   {
    "id": "interest/reading/book/club",
    "parent": "interest/reading/book",
-   "name": {"zh": "读书会", "vi": "CLB đọc sách", "en": "Book Club"},
-   "keywords": ["读书会", "câu lạc bộ đọc sách", "book club", "sinh hoạt sách"]
+   "name": {
+    "zh": "读书会",
+    "vi": "CLB đọc sách",
+    "en": "Book Club"
+   },
+   "keywords": [
+    "读书会",
+    "câu lạc bộ đọc sách",
+    "sinh hoạt sách"
+   ]
   },
   {
    "id": "interest/reading/book/secondhand",
    "parent": "interest/reading/book",
-   "name": {"zh": "二手书", "vi": "Sách cũ", "en": "Used Books"},
-   "keywords": ["二手书", "thanh lý sách", "sách cũ", "page sách cũ"]
+   "name": {
+    "zh": "二手书",
+    "vi": "Sách cũ",
+    "en": "Used Books"
+   },
+   "keywords": [
+    "二手书",
+    "thanh lý sách",
+    "sách cũ",
+    "page sách cũ"
+   ]
   },
   {
    "id": "interest/reading/book/bookstore",
    "parent": "interest/reading/book",
-   "name": {"zh": "书店", "vi": "Nhà sách", "en": "Bookstores"},
-   "keywords": ["书店", "nhà sách", "fahasa", "đường sách"]
+   "name": {
+    "zh": "书店",
+    "vi": "Nhà sách",
+    "en": "Bookstores"
+   },
+   "keywords": [
+    "书店",
+    "nhà sách",
+    "fahasa",
+    "đường sách"
+   ]
   },
   {
    "id": "interest/reading/book/library",
    "parent": "interest/reading/book",
-   "name": {"zh": "图书馆", "vi": "Thư viện", "en": "Library"},
-   "keywords": ["图书馆", "thư viện", "thu vien", "mượn sách"]
+   "name": {
+    "zh": "图书馆",
+    "vi": "Thư viện",
+    "en": "Library"
+   },
+   "keywords": [
+    "图书馆",
+    "thu vien"
+   ]
   },
   {
    "id": "interest/reading/book/review",
    "parent": "interest/reading/book",
-   "name": {"zh": "书评", "vi": "Review sách", "en": "Book Reviews"},
-   "keywords": ["书评", "review sách", "đọc review", "book review"]
+   "name": {
+    "zh": "书评",
+    "vi": "Review sách",
+    "en": "Book Reviews"
+   },
+   "keywords": [
+    "书评",
+    "review sách",
+    "đọc review",
+    "book review"
+   ]
   },
   {
    "id": "interest/reading/book/shelf",
    "parent": "interest/reading/book",
-   "name": {"zh": "藏书", "vi": "Tủ sách", "en": "Book Shelf"},
-   "keywords": ["藏书", "tủ sách", "sưu tầm sách", "giá sách"]
+   "name": {
+    "zh": "藏书",
+    "vi": "Tủ sách",
+    "en": "Book Shelf"
+   },
+   "keywords": [
+    "藏书",
+    "sưu tầm sách",
+    "giá sách"
+   ]
   },
   {
    "id": "interest/reading/book/fair",
    "parent": "interest/reading/book",
-   "name": {"zh": "书展", "vi": "Hội sách", "en": "Book Fair"},
-   "keywords": ["书展", "hội sách", "hoi sach", "book fair"]
+   "name": {
+    "zh": "书展",
+    "vi": "Hội sách",
+    "en": "Book Fair"
+   },
+   "keywords": [
+    "书展",
+    "hội sách",
+    "hoi sach",
+    "book fair"
+   ]
   },
   {
    "id": "interest/reading/genre",
    "parent": "interest/reading",
-   "name": {"zh": "书籍类型", "vi": "Thể loại sách", "en": "Book Genres"},
-   "keywords": ["书籍类型", "thể loại sách", "tủ sách theo chủ đề", "sách hay nên đọc"]
+   "name": {
+    "zh": "书籍类型",
+    "vi": "Thể loại sách",
+    "en": "Book Genres"
+   },
+   "keywords": [
+    "书籍类型",
+    "thể loại sách",
+    "tủ sách theo chủ đề",
+    "sách hay nên đọc"
+   ]
   },
   {
    "id": "interest/reading/genre/literary",
    "parent": "interest/reading/genre",
-   "name": {"zh": "文学小说", "vi": "Văn học", "en": "Literary Fiction"},
-   "keywords": ["文学小说", "văn học", "van hoc", "literary"]
+   "name": {
+    "zh": "文学小说",
+    "vi": "Văn học",
+    "en": "Literary Fiction"
+   },
+   "keywords": [
+    "文学小说",
+    "văn học",
+    "van hoc",
+    "literary"
+   ]
   },
   {
    "id": "interest/reading/genre/classics",
    "parent": "interest/reading/genre",
-   "name": {"zh": "经典名著", "vi": "Kinh điển", "en": "Classics"},
-   "keywords": ["经典名著", "văn học kinh điển", "kinh điển", "classic novel"]
+   "name": {
+    "zh": "经典名著",
+    "vi": "Kinh điển",
+    "en": "Classics"
+   },
+   "keywords": [
+    "经典名著",
+    "văn học kinh điển",
+    "kinh điển",
+    "classic novel"
+   ]
   },
   {
    "id": "interest/reading/genre/mystery",
    "parent": "interest/reading/genre",
-   "name": {"zh": "推理小说", "vi": "Truyện trinh thám", "en": "Mystery Novels"},
-   "keywords": ["推理小说", "侦探小说", "truyện trinh thám", "whodunit"]
+   "name": {
+    "zh": "推理小说",
+    "vi": "Truyện trinh thám",
+    "en": "Mystery Novels"
+   },
+   "keywords": [
+    "推理小说",
+    "侦探小说",
+    "truyện trinh thám",
+    "whodunit"
+   ]
   },
   {
    "id": "interest/reading/genre/ghost",
    "parent": "interest/reading/genre",
-   "name": {"zh": "灵异志怪", "vi": "Truyện ma", "en": "Ghost Stories"},
-   "keywords": ["灵异小说", "truyện ma", "ghost story", "ma cà rồng"]
+   "name": {
+    "zh": "灵异志怪",
+    "vi": "Truyện ma",
+    "en": "Ghost Stories"
+   },
+   "keywords": [
+    "灵异小说",
+    "truyện ma",
+    "ghost story",
+    "ma cà rồng"
+   ]
   },
   {
    "id": "interest/reading/genre/romance_novel",
    "parent": "interest/reading/genre",
-   "name": {"zh": "言情小说", "vi": "Ngôn tình", "en": "Romance Novels"},
-   "keywords": ["言情小说", "ngôn tình", "sách ngôn tình", "ngon tinh"]
+   "name": {
+    "zh": "言情小说",
+    "vi": "Ngôn tình",
+    "en": "Romance Novels"
+   },
+   "keywords": [
+    "言情小说",
+    "ngôn tình",
+    "sách ngôn tình",
+    "ngon tinh"
+   ]
   },
   {
    "id": "interest/reading/genre/xianxia",
    "parent": "interest/reading/genre",
-   "name": {"zh": "仙侠玄幻", "vi": "Tiên hiệp", "en": "Xianxia"},
-   "keywords": ["仙侠", "tiên hiệp", "tien hiep", "huyền huyễn"]
+   "name": {
+    "zh": "仙侠玄幻",
+    "vi": "Tiên hiệp",
+    "en": "Xianxia"
+   },
+   "keywords": [
+    "仙侠",
+    "tiên hiệp",
+    "tien hiep",
+    "huyền huyễn"
+   ]
   },
   {
    "id": "interest/reading/genre/wuxia",
    "parent": "interest/reading/genre",
-   "name": {"zh": "武侠", "vi": "Kiếm hiệp", "en": "Wuxia"},
-   "keywords": ["武侠", "kiếm hiệp", "kiem hiep", "kim dung"]
+   "name": {
+    "zh": "武侠",
+    "vi": "Kiếm hiệp",
+    "en": "Wuxia"
+   },
+   "keywords": [
+    "武侠",
+    "kiếm hiệp",
+    "kiem hiep",
+    "kim dung"
+   ]
   },
   {
    "id": "interest/reading/genre/webnovel",
    "parent": "interest/reading/genre",
-   "name": {"zh": "网络小说", "vi": "Truyện mạng", "en": "Web Novels"},
-   "keywords": ["网文", "网络小说", "truyện mạng", "truyện convert"]
+   "name": {
+    "zh": "网络小说",
+    "vi": "Truyện mạng",
+    "en": "Web Novels"
+   },
+   "keywords": [
+    "网文",
+    "网络小说",
+    "truyện mạng",
+    "truyện convert"
+   ]
   },
   {
    "id": "interest/reading/genre/manga",
    "parent": "interest/reading/genre",
-   "name": {"zh": "漫画", "vi": "Truyện tranh", "en": "Comics"},
-   "keywords": ["漫画", "truyện tranh", "manhwa", "manga"]
+   "name": {
+    "zh": "漫画",
+    "vi": "Truyện tranh",
+    "en": "Comics"
+   },
+   "keywords": [
+    "漫画",
+    "truyện tranh",
+    "manhwa",
+    "manga"
+   ]
   },
   {
    "id": "interest/reading/genre/fantasy",
    "parent": "interest/reading/genre",
-   "name": {"zh": "奇幻小说", "vi": "Kỳ ảo", "en": "Fantasy"},
-   "keywords": ["奇幻", "kỳ ảo", "fantasy", "thần thoại"]
+   "name": {
+    "zh": "奇幻小说",
+    "vi": "Kỳ ảo",
+    "en": "Fantasy"
+   },
+   "keywords": [
+    "奇幻",
+    "kỳ ảo",
+    "fantasy",
+    "thần thoại"
+   ]
   },
   {
    "id": "interest/reading/genre/sci_fi_book",
    "parent": "interest/reading/genre",
-   "name": {"zh": "科幻小说", "vi": "Khoa huyễn", "en": "Sci-fi Books"},
-   "keywords": ["科幻小说", "truyện khoa huyễn", "sci-fi", "time travel"]
+   "name": {
+    "zh": "科幻小说",
+    "vi": "Khoa huyễn",
+    "en": "Sci-fi Books"
+   },
+   "keywords": [
+    "科幻小说",
+    "truyện khoa huyễn",
+    "sci-fi",
+    "time travel"
+   ]
   },
   {
    "id": "interest/reading/genre/poetry",
    "parent": "interest/reading/genre",
-   "name": {"zh": "诗歌", "vi": "Thơ", "en": "Poetry"},
-   "keywords": ["诗歌", "thơ", "vần", "thơ đường"]
+   "name": {
+    "zh": "诗歌",
+    "vi": "Thơ",
+    "en": "Poetry"
+   },
+   "keywords": [
+    "诗歌",
+    "thơ",
+    "vần",
+    "thơ đường"
+   ]
   },
   {
    "id": "interest/reading/genre/truyen_kieu",
    "parent": "interest/reading/genre",
-   "name": {"zh": "金云翘传", "vi": "Truyện Kiều", "en": "Truyện Kiều"},
-   "keywords": ["truyện kiều", "thúy kiều", "金云翘传", "阮攸"]
+   "name": {
+    "zh": "金云翘传",
+    "vi": "Truyện Kiều",
+    "en": "Truyện Kiều"
+   },
+   "keywords": [
+    "truyện kiều",
+    "thúy kiều",
+    "金云翘传",
+    "阮攸"
+   ]
   },
   {
    "id": "interest/reading/genre/essay",
    "parent": "interest/reading/genre",
-   "name": {"zh": "散文", "vi": "Tản văn", "en": "Essays"},
-   "keywords": ["散文", "tản văn", "tan van", "bút ký"]
+   "name": {
+    "zh": "散文",
+    "vi": "Tản văn",
+    "en": "Essays"
+   },
+   "keywords": [
+    "散文",
+    "tản văn",
+    "tan van",
+    "bút ký"
+   ]
   },
   {
    "id": "interest/reading/genre/biography",
    "parent": "interest/reading/genre",
-   "name": {"zh": "传记", "vi": "Tiểu sử", "en": "Biography"},
-   "keywords": ["传记", "tiểu sử", "tien su", "memoir"]
+   "name": {
+    "zh": "传记",
+    "vi": "Tiểu sử",
+    "en": "Biography"
+   },
+   "keywords": [
+    "传记",
+    "tiểu sử",
+    "tien su",
+    "memoir"
+   ]
   },
   {
    "id": "interest/reading/genre/history_book",
    "parent": "interest/reading/genre",
-   "name": {"zh": "历史书", "vi": "Sách lịch sử", "en": "History Books"},
-   "keywords": ["历史书", "sách lịch sử", "đọc sử", "history book"]
+   "name": {
+    "zh": "历史书",
+    "vi": "Sách lịch sử",
+    "en": "History Books"
+   },
+   "keywords": [
+    "历史书",
+    "sách lịch sử",
+    "đọc sử",
+    "history book"
+   ]
   },
   {
    "id": "interest/reading/genre/business_book",
    "parent": "interest/reading/genre",
-   "name": {"zh": "商业书", "vi": "Sách doanh nhân", "en": "Business Books"},
-   "keywords": ["商业书", "sách doanh nhân", "doanh nhan", "business book"]
+   "name": {
+    "zh": "商业书",
+    "vi": "Sách doanh nhân",
+    "en": "Business Books"
+   },
+   "keywords": [
+    "商业书",
+    "sách doanh nhân",
+    "doanh nhan",
+    "business book"
+   ]
   },
   {
    "id": "interest/reading/genre/self_help",
    "parent": "interest/reading/genre",
-   "name": {"zh": "自助成长", "vi": "Phát triển bản thân", "en": "Self-help"},
-   "keywords": ["自助成长", "phát triển bản thân", "sách kỹ năng", "self help"]
+   "name": {
+    "zh": "自助成长",
+    "vi": "Phát triển bản thân",
+    "en": "Self-help"
+   },
+   "keywords": [
+    "自助成长",
+    "phát triển bản thân",
+    "sách kỹ năng",
+    "self help"
+   ]
   },
   {
    "id": "interest/reading/genre/psychology_book",
    "parent": "interest/reading/genre",
-   "name": {"zh": "心理学书", "vi": "Sách tâm lý", "en": "Psychology"},
-   "keywords": ["心理学书", "sách tâm lý", "tâm lý học", "healing"]
+   "name": {
+    "zh": "心理学书",
+    "vi": "Sách tâm lý",
+    "en": "Psychology"
+   },
+   "keywords": [
+    "心理学书",
+    "sách tâm lý",
+    "tâm lý học",
+    "healing"
+   ]
   },
   {
    "id": "interest/reading/genre/philosophy",
    "parent": "interest/reading/genre",
-   "name": {"zh": "哲学书", "vi": "Triết học", "en": "Philosophy"},
-   "keywords": ["哲学", "triết học", "sách triết", "philosophy"]
+   "name": {
+    "zh": "哲学书",
+    "vi": "Triết học",
+    "en": "Philosophy"
+   },
+   "keywords": [
+    "哲学",
+    "triết học",
+    "sách triết",
+    "philosophy"
+   ]
   },
   {
    "id": "interest/reading/genre/children_book",
    "parent": "interest/reading/genre",
-   "name": {"zh": "童书", "vi": "Sách thiếu nhi", "en": "Children Books"},
-   "keywords": ["童书", "sách thiếu nhi", "truyện cổ tích", "đọc cho bé"]
+   "name": {
+    "zh": "童书",
+    "vi": "Sách thiếu nhi",
+    "en": "Children Books"
+   },
+   "keywords": [
+    "童书",
+    "sách thiếu nhi",
+    "truyện cổ tích",
+    "đọc cho bé"
+   ]
   },
   {
    "id": "interest/reading/audio",
    "parent": "interest/reading",
-   "name": {"zh": "听书", "vi": "Sách audio", "en": "Audio"},
-   "keywords": ["听书", "nghe sách", "audio book", "sách audio"]
+   "name": {
+    "zh": "听书",
+    "vi": "Sách audio",
+    "en": "Audio"
+   },
+   "keywords": [
+    "听书",
+    "nghe sách",
+    "audio book",
+    "sách audio"
+   ]
   },
   {
    "id": "interest/reading/audio/audiobook",
    "parent": "interest/reading/audio",
-   "name": {"zh": "有声书", "vi": "Sách nói", "en": "Audiobooks"},
-   "keywords": ["有声书", "sách nói", "sach noi", "audiobook"]
+   "name": {
+    "zh": "有声书",
+    "vi": "Sách nói",
+    "en": "Audiobooks"
+   },
+   "keywords": [
+    "有声书",
+    "sách nói",
+    "sach noi",
+    "audiobook"
+   ]
   },
   {
    "id": "interest/reading/audio/podcast",
    "parent": "interest/reading/audio",
-   "name": {"zh": "播客", "vi": "Podcast", "en": "Podcasts"},
-   "keywords": ["播客", "podcast", "nghe podcast", "radio show"]
+   "name": {
+    "zh": "播客",
+    "vi": "Podcast",
+    "en": "Podcasts"
+   },
+   "keywords": [
+    "播客",
+    "podcast",
+    "nghe podcast",
+    "radio show"
+   ]
   },
   {
    "id": "interest/reading/audio/radio",
    "parent": "interest/reading/audio",
-   "name": {"zh": "电台", "vi": "Đài phát thanh", "en": "Radio"},
-   "keywords": ["电台", "vovin", "đài tiếng nói", "fm"]
+   "name": {
+    "zh": "电台",
+    "vi": "Đài phát thanh",
+    "en": "Radio"
+   },
+   "keywords": [
+    "电台",
+    "vovin",
+    "đài tiếng nói",
+    "fm"
+   ]
   },
   {
    "id": "interest/reading/audio/read_aloud",
    "parent": "interest/reading/audio",
-   "name": {"zh": "朗读", "vi": "Đọc diễn cảm", "en": "Reading Aloud"},
-   "keywords": ["朗读", "đọc diễn cảm", "doc dien cam", "cuộc thi đọc"]
+   "name": {
+    "zh": "朗读",
+    "vi": "Đọc diễn cảm",
+    "en": "Reading Aloud"
+   },
+   "keywords": [
+    "朗读",
+    "đọc diễn cảm",
+    "doc dien cam",
+    "cuộc thi đọc"
+   ]
   },
   {
    "id": "interest/reading/write",
    "parent": "interest/reading",
-   "name": {"zh": "写作", "vi": "Viết lách", "en": "Writing"},
-   "keywords": ["写作", "viết lách", "viet sach", "writing"]
+   "name": {
+    "zh": "写作",
+    "vi": "Viết lách",
+    "en": "Writing"
+   },
+   "keywords": [
+    "写作",
+    "viết lách",
+    "viet sach",
+    "writing"
+   ]
   },
   {
    "id": "interest/reading/write/journaling",
    "parent": "interest/reading/write",
-   "name": {"zh": "日记", "vi": "Nhật ký", "en": "Journaling"},
-   "keywords": ["日记", "nhật ký", "nhat ky", "bullet journal"]
+   "name": {
+    "zh": "日记",
+    "vi": "Nhật ký",
+    "en": "Journaling"
+   },
+   "keywords": [
+    "日记",
+    "nhật ký",
+    "nhat ky",
+    "bullet journal"
+   ]
   },
   {
    "id": "interest/reading/write/copywriting",
    "parent": "interest/reading/write",
-   "name": {"zh": "文案写作", "vi": "Copywriting", "en": "Copywriting"},
-   "keywords": ["文案", "copywriter", "viết content", "content creator"]
+   "name": {
+    "zh": "文案写作",
+    "vi": "Copywriting",
+    "en": "Copywriting"
+   },
+   "keywords": [
+    "文案",
+    "copywriter",
+    "viết content",
+    "content creator"
+   ]
   },
   {
    "id": "interest/reading/write/blogging",
    "parent": "interest/reading/write",
-   "name": {"zh": "博客", "vi": "Blog", "en": "Blogging"},
-   "keywords": ["博客", "blog", "viết blog", "bài dài"]
+   "name": {
+    "zh": "博客",
+    "vi": "Blog",
+    "en": "Blogging"
+   },
+   "keywords": [
+    "博客",
+    "blog",
+    "viết blog",
+    "bài dài"
+   ]
   },
   {
    "id": "interest/reading/write/creative_writing",
    "parent": "interest/reading/write",
-   "name": {"zh": "小说创作", "vi": "Viết truyện", "en": "Creative Writing"},
-   "keywords": ["写小说", "viết truyện", "tác phẩm mới", "creative writing"]
+   "name": {
+    "zh": "小说创作",
+    "vi": "Viết truyện",
+    "en": "Creative Writing"
+   },
+   "keywords": [
+    "写小说",
+    "viết truyện",
+    "tác phẩm mới",
+    "creative writing"
+   ]
   },
   {
    "id": "interest/reading/write/translation",
    "parent": "interest/reading/write",
-   "name": {"zh": "笔译", "vi": "Dịch thuật", "en": "Translation"},
-   "keywords": ["笔译", "biên dịch", "dịch sách", "dịch giả"]
+   "name": {
+    "zh": "笔译",
+    "vi": "Dịch thuật",
+    "en": "Translation"
+   },
+   "keywords": [
+    "笔译",
+    "biên dịch",
+    "dịch sách",
+    "dịch giả"
+   ]
   },
   {
    "id": "interest/reading/write/calligraphy",
    "parent": "interest/reading/write",
-   "name": {"zh": "书法", "vi": "Thư pháp", "en": "Calligraphy"},
-   "keywords": ["书法", "thư pháp", "thu phap", "luyện chữ"]
+   "name": {
+    "zh": "书法",
+    "vi": "Thư pháp",
+    "en": "Calligraphy"
+   },
+   "keywords": [
+    "thu phap",
+    "luyện chữ"
+   ]
   },
   {
    "id": "interest/reading/write/official_account",
    "parent": "interest/reading/write",
-   "name": {"zh": "公众号", "vi": "WeChat MP", "en": "Public Account"},
-   "keywords": ["公众号", "wechat mp", "viết wechat", "bài viral"]
+   "name": {
+    "zh": "公众号",
+    "vi": "WeChat MP",
+    "en": "Public Account"
+   },
+   "keywords": [
+    "公众号",
+    "wechat mp",
+    "viết wechat",
+    "bài viral"
+   ]
   },
   {
    "id": "interest/reading/study",
    "parent": "interest/reading",
-   "name": {"zh": "深读方法", "vi": "Phương pháp đọc", "en": "Reading Method"},
-   "keywords": ["深读", "phương pháp đọc", "doc sach khoa hoc", "speed read"]
+   "name": {
+    "zh": "深读方法",
+    "vi": "Phương pháp đọc",
+    "en": "Reading Method"
+   },
+   "keywords": [
+    "深读",
+    "phương pháp đọc",
+    "doc sach khoa hoc",
+    "speed read"
+   ]
   },
   {
    "id": "interest/reading/study/deep_read",
    "parent": "interest/reading/study",
-   "name": {"zh": "深度阅读", "vi": "Đọc sâu", "en": "Deep Reading"},
-   "keywords": ["深度阅读", "đọc sâu", "doc sau", "long read"]
+   "name": {
+    "zh": "深度阅读",
+    "vi": "Đọc sâu",
+    "en": "Deep Reading"
+   },
+   "keywords": [
+    "深度阅读",
+    "đọc sâu",
+    "doc sau",
+    "long read"
+   ]
   },
   {
    "id": "interest/reading/study/habit",
    "parent": "interest/reading/study",
-   "name": {"zh": "阅读打卡", "vi": "Thói quen đọc", "en": "Reading Habit"},
-   "keywords": ["阅读打卡", "thói quen đọc", "đọc mỗi ngày", "reading challenge"]
+   "name": {
+    "zh": "阅读打卡",
+    "vi": "Thói quen đọc",
+    "en": "Reading Habit"
+   },
+   "keywords": [
+    "阅读打卡",
+    "thói quen đọc",
+    "đọc mỗi ngày",
+    "reading challenge"
+   ]
   },
   {
    "id": "interest/reading/study/notes",
    "parent": "interest/reading/study",
-   "name": {"zh": "读书笔记", "vi": "Sổ tay khi đọc", "en": "Reading Notes"},
-   "keywords": ["读书笔记", "sổ tay khi đọc", "trích dẫn", "quote sách"]
+   "name": {
+    "zh": "读书笔记",
+    "vi": "Sổ tay khi đọc",
+    "en": "Reading Notes"
+   },
+   "keywords": [
+    "读书笔记",
+    "sổ tay khi đọc",
+    "trích dẫn",
+    "quote sách"
+   ]
   }
  ]
 }

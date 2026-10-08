@@ -1,491 +1,1179 @@
 {
-  "domain": "interest",
-  "nodes": [
-    {
-      "id": "interest/culture/heritage",
-      "parent": "interest/culture",
-      "name": { "zh": "遗产古迹", "vi": "Di tích & di sản", "en": "Heritage sites" },
-      "keywords": ["di tích", "遗迹", "heritage site"]
-    },
-    {
-      "id": "interest/culture/heritage/citadel",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "皇城遗址", "vi": "Hoàng thành Thăng Long", "en": "Imperial citadel" },
-      "keywords": ["hoàng thành", "皇城", "thăng long", "cột cờ hà nội"]
-    },
-    {
-      "id": "interest/culture/heritage/vanmieu",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "文庙国学", "vi": "Văn Miếu – Quốc Tử Giám", "en": "Temple of Literature" },
-      "keywords": ["văn miếu", "文庙", "quốc tử giám", "bia tiến sĩ"]
-    },
-    {
-      "id": "interest/culture/heritage/pagoda",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "古寺参观", "vi": "Thăm chùa", "en": "Pagoda visits" },
-      "keywords": ["chùa", "古寺", "niệm phật", "phật đường"]
-    },
-    {
-      "id": "interest/culture/heritage/shrine",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "祠堂与村亭", "vi": "Đền & đình làng", "en": "Shrines & communal houses" },
-      "keywords": ["thờ thành hoàng", "村亭", "miếu", "thủy tổ"]
-    },
-    {
-      "id": "interest/culture/heritage/old_quarter",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "老城街巷", "vi": "Phố cổ", "en": "Old quarters" },
-      "keywords": ["phố cổ", "三十六街", "hàng bạc", "ngõ cũ"]
-    },
-    {
-      "id": "interest/culture/heritage/colonial",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "法式建筑", "vi": "Kiến trúc Pháp", "en": "French colonial architecture" },
-      "keywords": ["kiến trúc pháp", "nhà hát lớn", "cầu long biên"]
-    },
-    {
-      "id": "interest/culture/heritage/cham",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "占婆遗迹", "vi": "Tháp Chăm", "en": "Cham towers" },
-      "keywords": ["chăm pa", "tháp chăm", "my sơn", "trà kiệu"]
-    },
-    {
-      "id": "interest/culture/heritage/hodynasty",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "胡朝城堡", "vi": "Thành nhà Hồ", "en": "Ho dynasty citadel" },
-      "keywords": ["thành nhà hồ", "nhà hồ", "tây đô"]
-    },
-    {
-      "id": "interest/culture/heritage/museum",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "博物馆", "vi": "Bảo tàng", "en": "Museums" },
-      "keywords": ["bảo tàng", "博物馆", "museum", "phòng truyền thống"]
-    },
-    {
-      "id": "interest/culture/heritage/history",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "历史讲座", "vi": "Tìm sử Việt", "en": "Vietnamese history talks" },
-      "keywords": ["sử việt", "历史故事", "truyền thuyết", "gia phả"]
-    },
-    {
-      "id": "interest/culture/heritage/architecture",
-      "parent": "interest/culture/heritage",
-      "name": { "zh": "老建筑走读", "vi": "Kiến trúc xưa", "en": "Old architecture walks" },
-      "keywords": ["kiến trúc xưa", "cầu ngói", "nhà gỗ", "mái ngói"]
-    },
-    {
-      "id": "interest/culture/performing",
-      "parent": "interest/culture",
-      "name": { "zh": "传统戏曲", "vi": "Nghệ thuật biểu diễn", "en": "Performing arts" },
-      "keywords": ["hát truyền thống", "看戏", "tiết mục"]
-    },
-    {
-      "id": "interest/culture/performing/water_puppet",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "水上木偶戏", "vi": "Múa rối nước", "en": "Water puppets" },
-      "keywords": ["múa rối nước", "水上木偶", "rối nước", "thủy đình"]
-    },
-    {
-      "id": "interest/culture/performing/cho",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "嘲剧", "vi": "Hát chèo", "en": "Chèo opera" },
-      "keywords": ["hát chèo", "嘲剧", "chèo truyền thống", "liềng chèo"]
-    },
-    {
-      "id": "interest/culture/performing/cailuong",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "改良剧", "vi": "Cải lương", "en": "Cải lương drama" },
-      "keywords": ["cải lương", "改良剧", "vọng cổ", "thoại khúc"]
-    },
-    {
-      "id": "interest/culture/performing/tuong",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "越古典戏", "vi": "Hát tuồng", "en": "Tuồng opera" },
-      "keywords": ["hát bội", "tuồng cổ", "bộ hát", "tích diễn"]
-    },
-    {
-      "id": "interest/culture/performing/quanho",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "官贺民歌", "vi": "Dân ca quan họ", "en": "Quan họ folk song" },
-      "keywords": ["quan họ", "liền anh", "liền chị", "lim bắc ninh"]
-    },
-    {
-      "id": "interest/culture/performing/trudao",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "椿歌对唱", "vi": "Hát trống quân", "en": "Trù dao singing" },
-      "keywords": ["trù dao", "hát ghẹo", "trống quân", "đêm rằm"]
-    },
-    {
-      "id": "interest/culture/performing/xam",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "街头瞽唱", "vi": "Hát xẩm", "en": "Xẩm folk singing" },
-      "keywords": ["hát xẩm", "瞽歌", "xẩm tàu điện"]
-    },
-    {
-      "id": "interest/culture/performing/catru",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "歌筹", "vi": "Ca trù", "en": "Ca trù" },
-      "keywords": ["ca trù", "歌筹", "đàn đáy"]
-    },
-    {
-      "id": "interest/culture/performing/nhanhac",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "宫廷雅乐", "vi": "Nhã nhạc cung đình", "en": "Hue court music" },
-      "keywords": ["nhã nhạc", "cố cung", "bát âm"]
-    },
-    {
-      "id": "interest/culture/performing/baichoi",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "牌帽吟唱", "vi": "Hát bài chòi", "en": "Bài chòi singing" },
-      "keywords": ["bài chòi", "đi chòi", "hò bài"]
-    },
-    {
-      "id": "interest/culture/performing/improv",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "即兴小戏", "vi": "Kịch ứng tác", "en": "Improvised skits" },
-      "keywords": ["kịch ứng tác", "táo quân", "hài kịch"]
-    },
-    {
-      "id": "interest/culture/performing/theatre",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "话剧与舞台", "vi": "Nhà hát kịch", "en": "Theatre nights" },
-      "keywords": ["kịch nói", "xem kịch", "nhà hát kịch", "sân khấu"]
-    },
-    {
-      "id": "interest/culture/performing/mua",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "民族舞蹈", "vi": "Múa dân tộc", "en": "Folk dance" },
-      "keywords": ["múa", "民族舞", "múa lân", "xòe hoa"]
-    },
-    {
-      "id": "interest/culture/performing/show",
-      "parent": "interest/culture/performing",
-      "name": { "zh": "观演之夜", "vi": "Đi xem biểu diễn", "en": "Going to shows" },
-      "keywords": ["vé xem", "tối thứ bảy", "rạp hát"]
-    },
-    {
-      "id": "interest/culture/visual_arts",
-      "parent": "interest/culture",
-      "name": { "zh": "视觉艺术", "vi": "Mỹ thuật", "en": "Visual arts" },
-      "keywords": ["mỹ thuật", "美术", "họa sĩ"]
-    },
-    {
-      "id": "interest/culture/visual_arts/exhibit",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "展览与画廊", "vi": "Triển lãm & gallery", "en": "Exhibitions & galleries" },
-      "keywords": ["triển lãm", "画廊", "gallery tour", "khai mạc"]
-    },
-    {
-      "id": "interest/culture/visual_arts/painting",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "绘画", "vi": "Vẽ tranh", "en": "Painting" },
-      "keywords": ["vẽ tranh", "水彩", "tranh lụa", "vẽ cùng nhau"]
-    },
-    {
-      "id": "interest/culture/visual_arts/lacquer",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "磨漆画", "vi": "Tranh sơn mài", "en": "Lacquer painting" },
-      "keywords": ["tranh sơn mài", "磨漆", "bột màu"]
-    },
-    {
-      "id": "interest/culture/visual_arts/sketch",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "街头写生", "vi": "Ký họa phố", "en": "Urban sketching" },
-      "keywords": ["ký họa", "sketching", "vẽ ngoài phố", "cột điện"]
-    },
-    {
-      "id": "interest/culture/visual_arts/calligraphy",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "书法", "vi": "Thư pháp", "en": "Calligraphy" },
-      "keywords": ["thư pháp", "书法", "ông đồ", "bút lông", "cho chữ"]
-    },
-    {
-      "id": "interest/culture/visual_arts/nom_han",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "喃字汉字", "vi": "Chữ Nôm & Hán", "en": "Nom & Han characters" },
-      "keywords": ["chữ nôm", "hán tự", "对联"]
-    },
-    {
-      "id": "interest/culture/visual_arts/poetry",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "诗词吟诵", "vi": "Thơ & ngâm thơ", "en": "Poetry & recital" },
-      "keywords": ["làm thơ", "吟诗", "thơ lục bát", "vần điệu"]
-    },
-    {
-      "id": "interest/culture/visual_arts/collect",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "旧物收藏", "vi": "Sưu tầm đồ cũ", "en": "Collecting antiques" },
-      "keywords": ["sưu tầm", "đồ xưa", "tiền cổ", "tem thư"]
-    },
-    {
-      "id": "interest/culture/visual_arts/books",
-      "parent": "interest/culture/visual_arts",
-      "name": { "zh": "出版与画册", "vi": "Nhà xuất bản", "en": "Publishing & art books" },
-      "keywords": ["tủ sách", "画册", "xuất bản", "dự án sách"]
-    },
-    {
-      "id": "interest/culture/craft_village",
-      "parent": "interest/culture",
-      "name": { "zh": "工艺村", "vi": "Làng nghề", "en": "Craft villages" },
-      "keywords": ["làng nghề", "逛村", "artisan village"]
-    },
-    {
-      "id": "interest/culture/craft_village/pottery",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "陶瓷村", "vi": "Làng gốm", "en": "Pottery villages" },
-      "keywords": ["gốm", "陶瓷村", "bát tràng", "bến sứ", "gốm đông triều"]
-    },
-    {
-      "id": "interest/culture/craft_village/silk",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "丝绸村", "vi": "Làng lụa", "en": "Silk villages" },
-      "keywords": ["lụa", "丝织村", "vạn phúc", "khâu đũi"]
-    },
-    {
-      "id": "interest/culture/craft_village/paper",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "手抄纸村", "vi": "Làng giấy dó", "en": "Dó paper village" },
-      "keywords": ["giấy dó", "手工纸", "yên thái"]
-    },
-    {
-      "id": "interest/culture/craft_village/incense",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "香村", "vi": "Làng hương", "en": "Incense villages" },
-      "keywords": ["nhang", "thắp hương", "vòng trầm", "quế"]
-    },
-    {
-      "id": "interest/culture/craft_village/bronze",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "铜器村", "vi": "Làng đồng", "en": "Bronze casting village" },
-      "keywords": ["đồng ngũ xã", "đúc đồng", "铜鼎"]
-    },
-    {
-      "id": "interest/culture/craft_village/bamboo",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "竹编村", "vi": "Làng tre đan", "en": "Bamboo weaving village" },
-      "keywords": ["phú vinh", "rổ tre", "song mây"]
-    },
-    {
-      "id": "interest/culture/craft_village/painting_village",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "画像村", "vi": "Làng vẽ tranh", "en": "Village painters" },
-      "keywords": ["sình mãi", "tranh đông hồ", "kim hoàng"]
-    },
-    {
-      "id": "interest/culture/craft_village/embroidery",
-      "parent": "interest/culture/craft_village",
-      "name": { "zh": "绣村与木雕", "vi": "Làng thêu & chạm gỗ", "en": "Embroidery & wood carving" },
-      "keywords": ["thêu", "quất động", "chạm gỗ"]
-    },
-    {
-      "id": "interest/culture/customs",
-      "parent": "interest/culture",
-      "name": { "zh": "民俗与礼俗", "vi": "Phong tục", "en": "Customs & rites" },
-      "keywords": ["phong tục", "乡约", "tập quán"]
-    },
-    {
-      "id": "interest/culture/customs/wedding",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "传统婚俗", "vi": "Đám cưới truyền thống", "en": "Traditional weddings" },
-      "keywords": ["ăn hỏi", "lễ đen", "dạm ngõ", "hỷ đường"]
-    },
-    {
-      "id": "interest/culture/customs/funeral",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "白事礼俗", "vi": "Việc tang", "en": "Funeral rites" },
-      "keywords": ["tang lễ", "viếng", "thờ cúng", "sang cát"]
-    },
-    {
-      "id": "interest/culture/customs/newhome",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "入宅与择日", "vi": "Xem ngày chuyển nhà", "en": "House-moving dates" },
-      "keywords": ["cúng nhập trạch", "bốc bát hương", "phong thủy nhà"]
-    },
-    {
-      "id": "interest/culture/customs/coming_of_age",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "成年礼", "vi": "Lễ trưởng thành", "en": "Coming-of-age rite" },
-      "keywords": ["trưởng thành", "cột tóc", "tuổi 18"]
-    },
-    {
-      "id": "interest/culture/customs/mediumship",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "灵唱与上童", "vi": "Hầu đồng & hát văn", "en": "Spirit mediumship songs" },
-      "keywords": ["hầu đồng", "hát văn", "tứ phủ", "thanh đồng"]
-    },
-    {
-      "id": "interest/culture/customs/tet",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "年节习俗", "vi": "Không khí Tết", "en": "Tet customs" },
-      "keywords": ["mâm ngũ quả", "cúng ông công", "hái lộc", "lì xì sớm"]
-    },
-    {
-      "id": "interest/culture/customs/lantern_toys",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "星灯玩具", "vi": "Đèn ông sao & tò he", "en": "Star lanterns & dough toys" },
-      "keywords": ["đèn ông sao", "tò he", "búp bê gỗ", "headless doll"]
-    },
-    {
-      "id": "interest/culture/customs/folk_games",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "民间游戏", "vi": "Trò chơi dân gian", "en": "Folk games" },
-      "keywords": ["trò chơi dân gian", "bịt mắt bắt dê", "kéo co"]
-    },
-    {
-      "id": "interest/culture/customs/chess",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "象棋对弈", "vi": "Cờ tướng", "en": "Chinese chess corners" },
-      "keywords": ["cờ tướng", "对弈", "park chess"]
-    },
-    {
-      "id": "interest/culture/customs/birdsong",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "鸣鸟比拼", "vi": "Thi chim cảnh", "en": "Songbird contests" },
-      "keywords": ["chim chào mào", "lồng chim", "sáo nghệ"]
-    },
-    {
-      "id": "interest/culture/customs/auspicious",
-      "parent": "interest/culture/customs",
-      "name": { "zh": "好日与彩头", "vi": "Ngày lành tháng tốt", "en": "Auspicious days" },
-      "keywords": ["ngày lành", "mùng một", "khai trương"]
-    },
-    {
-      "id": "interest/culture/community",
-      "parent": "interest/culture",
-      "name": { "zh": "族群与乡土", "vi": "Cộng đồng & bản sắc", "en": "Community & identity" },
-      "keywords": ["cộng đồng", "族群", "bản sắc"]
-    },
-    {
-      "id": "interest/culture/community/ethnic",
-      "parent": "interest/culture/community",
-      "name": { "zh": "少数民族文化", "vi": "Văn hóa dân tộc thiểu số", "en": "Ethnic minority culture" },
-      "keywords": ["dân tộc", "hmong", "tày", "nùng"]
-    },
-    {
-      "id": "interest/culture/community/weaving",
-      "parent": "interest/culture/community",
-      "name": { "zh": "织布与蜡染", "vi": "Thổ cẩm & vẽ sáp", "en": "Brocade & batik" },
-      "keywords": ["thổ cẩm", "vải chàm", "váy người dao"]
-    },
-    {
-      "id": "interest/culture/community/stilt_house",
-      "parent": "interest/culture/community",
-      "name": { "zh": "吊脚楼与长桌宴", "vi": "Nhà sàn & tiệc dài", "en": "Stilt houses & banquets" },
-      "keywords": ["cạp đất", "kể chuyện", "mâm lá"]
-    },
-    {
-      "id": "interest/culture/community/hometown",
-      "parent": "interest/culture/community",
-      "name": { "zh": "同乡会", "vi": "Hội đồng hương", "en": "Hometown associations" },
-      "keywords": ["đồng hương", "同乡会", "gặp đồng hương"]
-    },
-    {
-      "id": "interest/culture/community/chinese_vn",
-      "parent": "interest/culture/community",
-      "name": { "zh": "华人会馆与方言", "vi": "Hội quán người Hoa", "en": "Chinese associations" },
-      "keywords": ["quảng đông", "tiếng hẹ", "hội quán", "ngửa"]
-    },
-    {
-      "id": "interest/culture/community/overseas",
-      "parent": "interest/culture/community",
-      "name": { "zh": "海外越南人", "vi": "Người Việt ở nước ngoài", "en": "Overseas Vietnamese" },
-      "keywords": ["kiều bào", "viettieu", "làng việt ở nhật"]
-    },
-    {
-      "id": "interest/culture/community/union",
-      "parent": "interest/culture/community",
-      "name": { "zh": "妇女与青年团", "vi": "Hội phụ nữ & đoàn", "en": "Women's union & youth league" },
-      "keywords": ["đoàn viên", "họp tổ dân phố", "chi đoàn"]
-    },
-    {
-      "id": "interest/culture/community/charity",
-      "parent": "interest/culture/community",
-      "name": { "zh": "公益捐赠", "vi": "Từ thiện", "en": "Charity & giving" },
-      "keywords": ["từ thiện", "bếp ăn 0 đồng", "áo ấm mùa đông", "quyên góp"]
-    },
-    {
-      "id": "interest/culture/community/blood_donation",
-      "parent": "interest/culture/community",
-      "name": { "zh": "互助献血", "vi": "Hiến máu cứu người", "en": "Blood donation" },
-      "keywords": ["hiến máu", "group máu", "cần máu gấp", "điểm hiến máu"]
-    },
-    {
-      "id": "interest/culture/city_spaces",
-      "parent": "interest/culture",
-      "name": { "zh": "城市文化空间", "vi": "Không gian văn hóa", "en": "Cultural spaces" },
-      "keywords": ["không gian văn hóa", "文化空间", "sinh hoạt tổ dân phố"]
-    },
-    {
-      "id": "interest/culture/city_spaces/walking_street",
-      "parent": "interest/culture/city_spaces",
-      "name": { "zh": "步行街区", "vi": "Phố đi bộ", "en": "Walking streets" },
-      "keywords": ["phố đi bộ", "步行区", "cầu đi bộ", "dạo phố"]
-    },
-    {
-      "id": "interest/culture/city_spaces/lakeside",
-      "parent": "interest/culture/city_spaces",
-      "name": { "zh": "湖边散步", "vi": "Đi bộ ven hồ", "en": "Lakeside walks" },
-      "keywords": ["ven hồ", "hồ tây buổi sáng", "tản bộ"]
-    },
-    {
-      "id": "interest/culture/city_spaces/library",
-      "parent": "interest/culture/city_spaces",
-      "name": { "zh": "图书馆阅览室", "vi": "Thư viện & phòng đọc", "en": "Libraries & reading rooms" },
-      "keywords": ["thư viện", "phòng đọc", "library card", "mượn sách"]
-    },
-    {
-      "id": "interest/culture/city_spaces/book_club",
-      "parent": "interest/culture/city_spaces",
-      "name": { "zh": "读书会", "vi": "Câu lạc bộ sách", "en": "Book clubs" },
-      "keywords": ["câu lạc bộ sách", "book club", "đọc cùng nhau"]
-    },
-    {
-      "id": "interest/culture/city_spaces/culture_house",
-      "parent": "interest/culture/city_spaces",
-      "name": { "zh": "文化馆与社团", "vi": "Nhà văn hóa", "en": "Culture houses" },
-      "keywords": ["nhà văn hóa", "sự kiện cộng đồng", "câu lạc bộ phường"]
-    },
-    {
-      "id": "interest/culture/lang",
-      "parent": "interest/culture",
-      "name": { "zh": "语言与文化理解", "vi": "Ngôn ngữ & hiểu văn hóa", "en": "Language & culture" },
-      "keywords": ["trau dồi ngôn ngữ", "语言角", "giao tiếp đa văn hóa"]
-    },
-    {
-      "id": "interest/culture/lang/vietnamese",
-      "parent": "interest/culture/lang",
-      "name": { "zh": "越南语会话", "vi": "Giao tiếp tiếng Việt", "en": "Vietnamese for foreigners" },
-      "keywords": ["học nói tiếng việt", "越语会话", "vietspeak"]
-    },
-    {
-      "id": "interest/culture/lang/chinese",
-      "parent": "interest/culture/lang",
-      "name": { "zh": "中文会话", "vi": "Giao tiếp tiếng Trung", "en": "Chinese conversation" },
-      "keywords": ["luyện khẩu ngữ", "中文陪练", "tiếng trung giao tiếp"]
-    },
-    {
-      "id": "interest/culture/lang/translate",
-      "parent": "interest/culture/lang",
-      "name": { "zh": "翻译与文书", "vi": "Phiên dịch & giấy tờ", "en": "Interpreting & paperwork" },
-      "keywords": ["phiên dịch hiện trường", "翻译文件", "công chứng"]
-    },
-    {
-      "id": "interest/culture/lang/dialect",
-      "parent": "interest/culture/lang",
-      "name": { "zh": "口音与方言", "vi": "Giọng địa phương", "en": "Accents & dialects" },
-      "keywords": ["giọng miền trung", "方言差异", "ngữ điệu"]
-    },
-    {
-      "id": "interest/culture/lang/addressing",
-      "parent": "interest/culture/lang",
-      "name": { "zh": "称呼与辈分", "vi": "Cách xưng hô", "en": "Forms of address" },
-      "keywords": ["xưng hô", "称呼辈分", "thưa gửi"]
-    },
-    {
-      "id": "interest/culture/lang/etiquette",
-      "parent": "interest/culture/lang",
-      "name": { "zh": "待客礼数", "vi": "Phép lịch sự", "en": "Hosting etiquette" },
-      "keywords": ["chào hỏi", "礼数", "mời vào nhà"]
-    }
-  ]
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/culture/heritage",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "遗产古迹",
+    "vi": "Di tích & di sản",
+    "en": "Heritage sites"
+   },
+   "keywords": [
+    "di tích",
+    "遗迹",
+    "heritage site"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/citadel",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "皇城遗址",
+    "vi": "Hoàng thành Thăng Long",
+    "en": "Imperial citadel"
+   },
+   "keywords": [
+    "hoàng thành",
+    "皇城",
+    "thăng long",
+    "cột cờ hà nội"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/vanmieu",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "文庙国学",
+    "vi": "Văn Miếu – Quốc Tử Giám",
+    "en": "Temple of Literature"
+   },
+   "keywords": [
+    "văn miếu",
+    "文庙",
+    "quốc tử giám",
+    "bia tiến sĩ"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/pagoda",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "古寺参观",
+    "vi": "Thăm chùa",
+    "en": "Pagoda visits"
+   },
+   "keywords": [
+    "chùa",
+    "古寺",
+    "niệm phật",
+    "phật đường"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/shrine",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "祠堂与村亭",
+    "vi": "Đền & đình làng",
+    "en": "Shrines & communal houses"
+   },
+   "keywords": [
+    "thờ thành hoàng",
+    "村亭",
+    "miếu",
+    "thủy tổ"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/old_quarter",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "老城街巷",
+    "vi": "Phố cổ",
+    "en": "Old quarters"
+   },
+   "keywords": [
+    "phố cổ",
+    "三十六街",
+    "hàng bạc",
+    "ngõ cũ"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/colonial",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "法式建筑",
+    "vi": "Kiến trúc Pháp",
+    "en": "French colonial architecture"
+   },
+   "keywords": [
+    "kiến trúc pháp",
+    "nhà hát lớn",
+    "cầu long biên"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/cham",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "占婆遗迹",
+    "vi": "Tháp Chăm",
+    "en": "Cham towers"
+   },
+   "keywords": [
+    "chăm pa",
+    "tháp chăm",
+    "my sơn",
+    "trà kiệu"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/hodynasty",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "胡朝城堡",
+    "vi": "Thành nhà Hồ",
+    "en": "Ho dynasty citadel"
+   },
+   "keywords": [
+    "thành nhà hồ",
+    "nhà hồ",
+    "tây đô"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/museum",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "博物馆",
+    "vi": "Bảo tàng",
+    "en": "Museums"
+   },
+   "keywords": [
+    "bảo tàng",
+    "博物馆",
+    "museum",
+    "phòng truyền thống"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/history",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "历史讲座",
+    "vi": "Tìm sử Việt",
+    "en": "Vietnamese history talks"
+   },
+   "keywords": [
+    "sử việt",
+    "历史故事",
+    "truyền thuyết",
+    "gia phả"
+   ]
+  },
+  {
+   "id": "interest/culture/heritage/architecture",
+   "parent": "interest/culture/heritage",
+   "name": {
+    "zh": "老建筑走读",
+    "vi": "Kiến trúc xưa",
+    "en": "Old architecture walks"
+   },
+   "keywords": [
+    "kiến trúc xưa",
+    "cầu ngói",
+    "nhà gỗ",
+    "mái ngói"
+   ]
+  },
+  {
+   "id": "interest/culture/performing",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "传统戏曲",
+    "vi": "Nghệ thuật biểu diễn",
+    "en": "Performing arts"
+   },
+   "keywords": [
+    "hát truyền thống",
+    "看戏",
+    "tiết mục"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/water_puppet",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "水上木偶戏",
+    "vi": "Múa rối nước",
+    "en": "Water puppets"
+   },
+   "keywords": [
+    "múa rối nước",
+    "水上木偶",
+    "rối nước",
+    "thủy đình"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/cho",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "嘲剧",
+    "vi": "Hát chèo",
+    "en": "Chèo opera"
+   },
+   "keywords": [
+    "hát chèo",
+    "嘲剧",
+    "chèo truyền thống",
+    "liềng chèo"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/cailuong",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "改良剧",
+    "vi": "Cải lương",
+    "en": "Cải lương drama"
+   },
+   "keywords": [
+    "cải lương",
+    "改良剧",
+    "vọng cổ",
+    "thoại khúc"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/tuong",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "越古典戏",
+    "vi": "Hát tuồng",
+    "en": "Tuồng opera"
+   },
+   "keywords": [
+    "hát bội",
+    "tuồng cổ",
+    "bộ hát",
+    "tích diễn"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/quanho",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "官贺民歌",
+    "vi": "Dân ca quan họ",
+    "en": "Quan họ folk song"
+   },
+   "keywords": [
+    "quan họ",
+    "liền anh",
+    "liền chị",
+    "lim bắc ninh"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/trudao",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "椿歌对唱",
+    "vi": "Hát trống quân",
+    "en": "Trù dao singing"
+   },
+   "keywords": [
+    "trù dao",
+    "hát ghẹo",
+    "trống quân",
+    "đêm rằm"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/xam",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "街头瞽唱",
+    "vi": "Hát xẩm",
+    "en": "Xẩm folk singing"
+   },
+   "keywords": [
+    "hát xẩm",
+    "瞽歌",
+    "xẩm tàu điện"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/catru",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "歌筹",
+    "vi": "Ca trù",
+    "en": "Ca trù"
+   },
+   "keywords": [
+    "ca trù",
+    "歌筹",
+    "đàn đáy"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/nhanhac",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "宫廷雅乐",
+    "vi": "Nhã nhạc cung đình",
+    "en": "Hue court music"
+   },
+   "keywords": [
+    "nhã nhạc",
+    "cố cung",
+    "bát âm"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/baichoi",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "牌帽吟唱",
+    "vi": "Hát bài chòi",
+    "en": "Bài chòi singing"
+   },
+   "keywords": [
+    "bài chòi",
+    "đi chòi",
+    "hò bài"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/improv",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "即兴小戏",
+    "vi": "Kịch ứng tác",
+    "en": "Improvised skits"
+   },
+   "keywords": [
+    "kịch ứng tác",
+    "táo quân",
+    "hài kịch"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/theatre",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "话剧与舞台",
+    "vi": "Nhà hát kịch",
+    "en": "Theatre nights"
+   },
+   "keywords": [
+    "kịch nói",
+    "xem kịch",
+    "nhà hát kịch",
+    "sân khấu"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/mua",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "民族舞蹈",
+    "vi": "Múa dân tộc",
+    "en": "Folk dance"
+   },
+   "keywords": [
+    "múa",
+    "民族舞",
+    "múa lân",
+    "xòe hoa"
+   ]
+  },
+  {
+   "id": "interest/culture/performing/show",
+   "parent": "interest/culture/performing",
+   "name": {
+    "zh": "观演之夜",
+    "vi": "Đi xem biểu diễn",
+    "en": "Going to shows"
+   },
+   "keywords": [
+    "vé xem",
+    "tối thứ bảy",
+    "rạp hát"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "视觉艺术",
+    "vi": "Mỹ thuật",
+    "en": "Visual arts"
+   },
+   "keywords": [
+    "mỹ thuật",
+    "美术",
+    "họa sĩ"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/exhibit",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "展览与画廊",
+    "vi": "Triển lãm & gallery",
+    "en": "Exhibitions & galleries"
+   },
+   "keywords": [
+    "triển lãm",
+    "画廊",
+    "gallery tour",
+    "khai mạc"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/painting",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "绘画",
+    "vi": "Vẽ tranh",
+    "en": "Painting"
+   },
+   "keywords": [
+    "vẽ tranh",
+    "水彩",
+    "tranh lụa",
+    "vẽ cùng nhau"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/lacquer",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "磨漆画",
+    "vi": "Tranh sơn mài",
+    "en": "Lacquer painting"
+   },
+   "keywords": [
+    "tranh sơn mài",
+    "磨漆",
+    "bột màu"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/sketch",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "街头写生",
+    "vi": "Ký họa phố",
+    "en": "Urban sketching"
+   },
+   "keywords": [
+    "ký họa",
+    "sketching",
+    "vẽ ngoài phố",
+    "cột điện"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/calligraphy",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "书法",
+    "vi": "Thư pháp",
+    "en": "Calligraphy"
+   },
+   "keywords": [
+    "thư pháp",
+    "书法",
+    "ông đồ",
+    "bút lông",
+    "cho chữ"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/nom_han",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "喃字汉字",
+    "vi": "Chữ Nôm & Hán",
+    "en": "Nom & Han characters"
+   },
+   "keywords": [
+    "chữ nôm",
+    "hán tự",
+    "对联"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/poetry",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "诗词吟诵",
+    "vi": "Thơ & ngâm thơ",
+    "en": "Poetry & recital"
+   },
+   "keywords": [
+    "làm thơ",
+    "吟诗",
+    "thơ lục bát",
+    "vần điệu"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/collect",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "旧物收藏",
+    "vi": "Sưu tầm đồ cũ",
+    "en": "Collecting antiques"
+   },
+   "keywords": [
+    "sưu tầm",
+    "đồ xưa",
+    "tiền cổ",
+    "tem thư"
+   ]
+  },
+  {
+   "id": "interest/culture/visual_arts/books",
+   "parent": "interest/culture/visual_arts",
+   "name": {
+    "zh": "出版与画册",
+    "vi": "Nhà xuất bản",
+    "en": "Publishing & art books"
+   },
+   "keywords": [
+    "tủ sách",
+    "画册",
+    "xuất bản",
+    "dự án sách"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "工艺村",
+    "vi": "Làng nghề",
+    "en": "Craft villages"
+   },
+   "keywords": [
+    "làng nghề",
+    "逛村",
+    "artisan village"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/pottery",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "陶瓷村",
+    "vi": "Làng gốm",
+    "en": "Pottery villages"
+   },
+   "keywords": [
+    "gốm",
+    "陶瓷村",
+    "bát tràng",
+    "bến sứ",
+    "gốm đông triều"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/silk",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "丝绸村",
+    "vi": "Làng lụa",
+    "en": "Silk villages"
+   },
+   "keywords": [
+    "lụa",
+    "丝织村",
+    "vạn phúc",
+    "khâu đũi"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/paper",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "手抄纸村",
+    "vi": "Làng giấy dó",
+    "en": "Dó paper village"
+   },
+   "keywords": [
+    "giấy dó",
+    "手工纸",
+    "yên thái"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/incense",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "香村",
+    "vi": "Làng hương",
+    "en": "Incense villages"
+   },
+   "keywords": [
+    "nhang",
+    "thắp hương",
+    "vòng trầm",
+    "quế"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/bronze",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "铜器村",
+    "vi": "Làng đồng",
+    "en": "Bronze casting village"
+   },
+   "keywords": [
+    "đồng ngũ xã",
+    "đúc đồng",
+    "铜鼎"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/bamboo",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "竹编村",
+    "vi": "Làng tre đan",
+    "en": "Bamboo weaving village"
+   },
+   "keywords": [
+    "phú vinh",
+    "rổ tre",
+    "song mây"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/painting_village",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "画像村",
+    "vi": "Làng vẽ tranh",
+    "en": "Village painters"
+   },
+   "keywords": [
+    "sình mãi",
+    "tranh đông hồ",
+    "kim hoàng"
+   ]
+  },
+  {
+   "id": "interest/culture/craft_village/embroidery",
+   "parent": "interest/culture/craft_village",
+   "name": {
+    "zh": "绣村与木雕",
+    "vi": "Làng thêu & chạm gỗ",
+    "en": "Embroidery & wood carving"
+   },
+   "keywords": [
+    "thêu",
+    "quất động",
+    "chạm gỗ"
+   ]
+  },
+  {
+   "id": "interest/culture/customs",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "民俗与礼俗",
+    "vi": "Phong tục",
+    "en": "Customs & rites"
+   },
+   "keywords": [
+    "phong tục",
+    "乡约",
+    "tập quán"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/wedding",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "传统婚俗",
+    "vi": "Đám cưới truyền thống",
+    "en": "Traditional weddings"
+   },
+   "keywords": [
+    "ăn hỏi",
+    "lễ đen",
+    "dạm ngõ",
+    "hỷ đường"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/funeral",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "白事礼俗",
+    "vi": "Việc tang",
+    "en": "Funeral rites"
+   },
+   "keywords": [
+    "tang lễ",
+    "viếng",
+    "thờ cúng",
+    "sang cát"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/newhome",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "入宅与择日",
+    "vi": "Xem ngày chuyển nhà",
+    "en": "House-moving dates"
+   },
+   "keywords": [
+    "cúng nhập trạch",
+    "bốc bát hương",
+    "phong thủy nhà"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/coming_of_age",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "成年礼",
+    "vi": "Lễ trưởng thành",
+    "en": "Coming-of-age rite"
+   },
+   "keywords": [
+    "trưởng thành",
+    "cột tóc",
+    "tuổi 18"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/mediumship",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "灵唱与上童",
+    "vi": "Hầu đồng & hát văn",
+    "en": "Spirit mediumship songs"
+   },
+   "keywords": [
+    "hầu đồng",
+    "hát văn",
+    "tứ phủ",
+    "thanh đồng"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/tet",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "年节习俗",
+    "vi": "Không khí Tết",
+    "en": "Tet customs"
+   },
+   "keywords": [
+    "mâm ngũ quả",
+    "cúng ông công",
+    "hái lộc",
+    "lì xì sớm"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/lantern_toys",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "星灯玩具",
+    "vi": "Đèn ông sao & tò he",
+    "en": "Star lanterns & dough toys"
+   },
+   "keywords": [
+    "đèn ông sao",
+    "tò he",
+    "búp bê gỗ",
+    "headless doll"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/folk_games",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "民间游戏",
+    "vi": "Trò chơi dân gian",
+    "en": "Folk games"
+   },
+   "keywords": [
+    "trò chơi dân gian",
+    "bịt mắt bắt dê",
+    "kéo co"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/chess",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "象棋对弈",
+    "vi": "Cờ tướng",
+    "en": "Chinese chess corners"
+   },
+   "keywords": [
+    "cờ tướng",
+    "对弈",
+    "park chess"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/birdsong",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "鸣鸟比拼",
+    "vi": "Thi chim cảnh",
+    "en": "Songbird contests"
+   },
+   "keywords": [
+    "chim chào mào",
+    "lồng chim",
+    "sáo nghệ"
+   ]
+  },
+  {
+   "id": "interest/culture/customs/auspicious",
+   "parent": "interest/culture/customs",
+   "name": {
+    "zh": "好日与彩头",
+    "vi": "Ngày lành tháng tốt",
+    "en": "Auspicious days"
+   },
+   "keywords": [
+    "ngày lành",
+    "mùng một",
+    "khai trương"
+   ]
+  },
+  {
+   "id": "interest/culture/community",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "族群与乡土",
+    "vi": "Cộng đồng & bản sắc",
+    "en": "Community & identity"
+   },
+   "keywords": [
+    "cộng đồng",
+    "族群",
+    "bản sắc"
+   ]
+  },
+  {
+   "id": "interest/culture/community/ethnic",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "少数民族文化",
+    "vi": "Văn hóa dân tộc thiểu số",
+    "en": "Ethnic minority culture"
+   },
+   "keywords": [
+    "dân tộc",
+    "hmong",
+    "tày",
+    "nùng"
+   ]
+  },
+  {
+   "id": "interest/culture/community/weaving",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "织布与蜡染",
+    "vi": "Thổ cẩm & vẽ sáp",
+    "en": "Brocade & batik"
+   },
+   "keywords": [
+    "thổ cẩm",
+    "vải chàm",
+    "váy người dao"
+   ]
+  },
+  {
+   "id": "interest/culture/community/stilt_house",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "吊脚楼与长桌宴",
+    "vi": "Nhà sàn & tiệc dài",
+    "en": "Stilt houses & banquets"
+   },
+   "keywords": [
+    "cạp đất",
+    "kể chuyện",
+    "mâm lá"
+   ]
+  },
+  {
+   "id": "interest/culture/community/hometown",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "同乡会",
+    "vi": "Hội đồng hương",
+    "en": "Hometown associations"
+   },
+   "keywords": [
+    "đồng hương",
+    "同乡会",
+    "gặp đồng hương"
+   ]
+  },
+  {
+   "id": "interest/culture/community/chinese_vn",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "华人会馆与方言",
+    "vi": "Hội quán người Hoa",
+    "en": "Chinese associations"
+   },
+   "keywords": [
+    "quảng đông",
+    "tiếng hẹ",
+    "hội quán",
+    "ngửa"
+   ]
+  },
+  {
+   "id": "interest/culture/community/overseas",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "海外越南人",
+    "vi": "Người Việt ở nước ngoài",
+    "en": "Overseas Vietnamese"
+   },
+   "keywords": [
+    "kiều bào",
+    "viettieu",
+    "làng việt ở nhật"
+   ]
+  },
+  {
+   "id": "interest/culture/community/union",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "妇女与青年团",
+    "vi": "Hội phụ nữ & đoàn",
+    "en": "Women's union & youth league"
+   },
+   "keywords": [
+    "đoàn viên",
+    "họp tổ dân phố",
+    "chi đoàn"
+   ]
+  },
+  {
+   "id": "interest/culture/community/charity",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "公益捐赠",
+    "vi": "Từ thiện",
+    "en": "Charity & giving"
+   },
+   "keywords": [
+    "từ thiện",
+    "bếp ăn 0 đồng",
+    "áo ấm mùa đông",
+    "quyên góp"
+   ]
+  },
+  {
+   "id": "interest/culture/community/blood_donation",
+   "parent": "interest/culture/community",
+   "name": {
+    "zh": "互助献血",
+    "vi": "Hiến máu cứu người",
+    "en": "Blood donation"
+   },
+   "keywords": [
+    "hiến máu",
+    "group máu",
+    "cần máu gấp",
+    "điểm hiến máu"
+   ]
+  },
+  {
+   "id": "interest/culture/city_spaces",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "城市文化空间",
+    "vi": "Không gian văn hóa",
+    "en": "Cultural spaces"
+   },
+   "keywords": [
+    "không gian văn hóa",
+    "文化空间",
+    "sinh hoạt tổ dân phố"
+   ]
+  },
+  {
+   "id": "interest/culture/city_spaces/walking_street",
+   "parent": "interest/culture/city_spaces",
+   "name": {
+    "zh": "步行街区",
+    "vi": "Phố đi bộ",
+    "en": "Walking streets"
+   },
+   "keywords": [
+    "phố đi bộ",
+    "步行区",
+    "cầu đi bộ",
+    "dạo phố"
+   ]
+  },
+  {
+   "id": "interest/culture/city_spaces/lakeside",
+   "parent": "interest/culture/city_spaces",
+   "name": {
+    "zh": "湖边散步",
+    "vi": "Đi bộ ven hồ",
+    "en": "Lakeside walks"
+   },
+   "keywords": [
+    "ven hồ",
+    "hồ tây buổi sáng",
+    "tản bộ"
+   ]
+  },
+  {
+   "id": "interest/culture/city_spaces/library",
+   "parent": "interest/culture/city_spaces",
+   "name": {
+    "zh": "图书馆阅览室",
+    "vi": "Thư viện & phòng đọc",
+    "en": "Libraries & reading rooms"
+   },
+   "keywords": [
+    "thư viện",
+    "phòng đọc",
+    "library card",
+    "mượn sách"
+   ]
+  },
+  {
+   "id": "interest/culture/city_spaces/book_club",
+   "parent": "interest/culture/city_spaces",
+   "name": {
+    "zh": "读书会",
+    "vi": "Câu lạc bộ sách",
+    "en": "Book clubs"
+   },
+   "keywords": [
+    "câu lạc bộ sách",
+    "book club",
+    "đọc cùng nhau"
+   ]
+  },
+  {
+   "id": "interest/culture/city_spaces/culture_house",
+   "parent": "interest/culture/city_spaces",
+   "name": {
+    "zh": "文化馆与社团",
+    "vi": "Nhà văn hóa",
+    "en": "Culture houses"
+   },
+   "keywords": [
+    "nhà văn hóa",
+    "sự kiện cộng đồng",
+    "câu lạc bộ phường"
+   ]
+  },
+  {
+   "id": "interest/culture/lang",
+   "parent": "interest/culture",
+   "name": {
+    "zh": "语言与文化理解",
+    "vi": "Ngôn ngữ & hiểu văn hóa",
+    "en": "Language & culture"
+   },
+   "keywords": [
+    "trau dồi ngôn ngữ",
+    "语言角",
+    "giao tiếp đa văn hóa"
+   ]
+  },
+  {
+   "id": "interest/culture/lang/vietnamese",
+   "parent": "interest/culture/lang",
+   "name": {
+    "zh": "越南语会话",
+    "vi": "Giao tiếp tiếng Việt",
+    "en": "Vietnamese for foreigners"
+   },
+   "keywords": [
+    "học nói tiếng việt",
+    "越语会话",
+    "vietspeak"
+   ]
+  },
+  {
+   "id": "interest/culture/lang/chinese",
+   "parent": "interest/culture/lang",
+   "name": {
+    "zh": "中文会话",
+    "vi": "Giao tiếp tiếng Trung",
+    "en": "Chinese conversation"
+   },
+   "keywords": [
+    "luyện khẩu ngữ",
+    "中文陪练",
+    "tiếng trung giao tiếp"
+   ]
+  },
+  {
+   "id": "interest/culture/lang/translate",
+   "parent": "interest/culture/lang",
+   "name": {
+    "zh": "翻译与文书",
+    "vi": "Phiên dịch & giấy tờ",
+    "en": "Interpreting & paperwork"
+   },
+   "keywords": [
+    "phiên dịch hiện trường",
+    "翻译文件",
+    "công chứng"
+   ]
+  },
+  {
+   "id": "interest/culture/lang/dialect",
+   "parent": "interest/culture/lang",
+   "name": {
+    "zh": "口音与方言",
+    "vi": "Giọng địa phương",
+    "en": "Accents & dialects"
+   },
+   "keywords": [
+    "giọng miền trung",
+    "方言差异",
+    "ngữ điệu"
+   ]
+  },
+  {
+   "id": "interest/culture/lang/addressing",
+   "parent": "interest/culture/lang",
+   "name": {
+    "zh": "称呼与辈分",
+    "vi": "Cách xưng hô",
+    "en": "Forms of address"
+   },
+   "keywords": [
+    "xưng hô",
+    "称呼辈分",
+    "thưa gửi"
+   ]
+  },
+  {
+   "id": "interest/culture/lang/etiquette",
+   "parent": "interest/culture/lang",
+   "name": {
+    "zh": "待客礼数",
+    "vi": "Phép lịch sự",
+    "en": "Hosting etiquette"
+   },
+   "keywords": [
+    "chào hỏi",
+    "礼数",
+    "mời vào nhà"
+   ]
+  }
+ ]
 }

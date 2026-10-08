@@ -1,515 +1,1253 @@
 {
-  "domain": "interest",
-  "nodes": [
-    {
-      "id": "interest/drink/coffee",
-      "parent": "interest/drink",
-      "name": { "zh": "咖啡", "vi": "Cà phê", "en": "Coffee" },
-      "keywords": ["咖啡", "cà phê", "cafe", "coffee", "quán cà phê"]
-    },
-    {
-      "id": "interest/drink/coffee/espresso",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "意式浓缩", "vi": "Espresso", "en": "Espresso" },
-      "keywords": ["espresso", "浓缩咖啡", "cà phê espresso", "máy pha cà phê"]
-    },
-    {
-      "id": "interest/drink/coffee/americano",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "美式咖啡", "vi": "Cà phê đen đá", "en": "Americano & iced black" },
-      "keywords": ["americano", "美式", "cà phê đen", "cà phê đen đá", "long black"]
-    },
-    {
-      "id": "interest/drink/coffee/latte",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "拿铁", "vi": "Cà phê latte", "en": "Latte" },
-      "keywords": ["latte", "拿铁", "cà phê latte", "ice latte"]
-    },
-    {
-      "id": "interest/drink/coffee/flat_white",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "澳白", "vi": "Cà phê sữa nóng", "en": "Flat white" },
-      "keywords": ["flat white", "澳白", "cà phê sữa nóng"]
-    },
-    {
-      "id": "interest/drink/coffee/cappuccino",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "卡布奇诺", "vi": "Cà phê cappuccino", "en": "Cappuccino" },
-      "keywords": ["cappuccino", "卡布奇诺", "bọt sữa cà phê"]
-    },
-    {
-      "id": "interest/drink/coffee/cold_brew",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "冷萃咖啡", "vi": "Cà phê cold brew", "en": "Cold brew coffee" },
-      "keywords": ["cold brew", "冷萃咖啡", "cà phê cold brew"]
-    },
-    {
-      "id": "interest/drink/coffee/pour_over",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "手冲咖啡", "vi": "Cà phê pha tay", "en": "Pour over" },
-      "keywords": ["手冲", "pour over", "v60", "hand drip", "pha cà phê tay"]
-    },
-    {
-      "id": "interest/drink/coffee/phin",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "滴漏咖啡", "vi": "Cà phê phin", "en": "Phin filter coffee" },
-      "keywords": ["phin", "滴漏壶", "cà phê phin", "phin nhôm"]
-    },
-    {
-      "id": "interest/drink/coffee/egg_coffee",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "鸡蛋咖啡", "vi": "Cà phê trứng", "en": "Egg coffee" },
-      "keywords": ["cà phê trứng", "鸡蛋咖啡", "egg coffee", "kem cà phê trứng"]
-    },
-    {
-      "id": "interest/drink/coffee/bac_xiu",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "越式奶白咖啡", "vi": "Bạc xỉu", "en": "Bạc xỉu" },
-      "keywords": ["bạc xỉu", "cà phê bạc xỉu", "越式奶白咖啡"]
-    },
-    {
-      "id": "interest/drink/coffee/salt_coffee",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "咸咖啡", "vi": "Cà phê muối", "en": "Salt coffee" },
-      "keywords": ["cà phê muối", "咸咖啡", "salt coffee", "cà phê muối huế"]
-    },
-    {
-      "id": "interest/drink/coffee/coconut_coffee",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "椰子咖啡", "vi": "Cà phê dừa", "en": "Coconut coffee" },
-      "keywords": ["cà phê dừa", "生椰拿铁", "coconut latte", "cốt dừa cà phê"]
-    },
-    {
-      "id": "interest/drink/coffee/beans",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "越南咖啡豆", "vi": "Cà phê Việt", "en": "Vietnamese beans" },
-      "keywords": ["robusta", "cà phê hạt", "咖啡豆", "buôn ma thuột", "arabica đà lạt"]
-    },
-    {
-      "id": "interest/drink/coffee/roastery",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "自家烘焙", "vi": "Rang cà phê tại nhà", "en": "Home roasting" },
-      "keywords": ["rang cà phê", "自家烘焙", "home roasting", "single origin"]
-    },
-    {
-      "id": "interest/drink/coffee/latte_art",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "咖啡拉花", "vi": "Vẽ latte", "en": "Latte art" },
-      "keywords": ["latte art", "拉花", "nghệ thuật latte"]
-    },
-    {
-      "id": "interest/drink/coffee/cafe_hopping",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "咖啡馆探店", "vi": "Khám phá quán cà phê", "en": "Café hopping" },
-      "keywords": ["探店咖啡馆", "café hopping", "quán cà phê mới", "cà phê ngon hà nội"]
-    },
-    {
-      "id": "interest/drink/coffee/garden_cafe",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "庭院咖啡馆", "vi": "Cà phê sân vườn", "en": "Garden café" },
-      "keywords": ["cà phê sân vườn", "庭院咖啡", "garden cafe", "cà phê cây xanh"]
-    },
-    {
-      "id": "interest/drink/coffee/book_cafe",
-      "parent": "interest/drink/coffee",
-      "name": { "zh": "书吧咖啡", "vi": "Cà phê sách", "en": "Book café" },
-      "keywords": ["cà phê sách", "书吧", "book cafe", "yên tĩnh làm việc"]
-    },
-    {
-      "id": "interest/drink/tea",
-      "parent": "interest/drink",
-      "name": { "zh": "茶饮", "vi": "Trà", "en": "Tea" },
-      "keywords": ["茶", "trà", "tea", "uống trà", "trà ngon"]
-    },
-    {
-      "id": "interest/drink/tea/green_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "绿茶", "vi": "Trà xanh", "en": "Green tea" },
-      "keywords": ["绿茶", "trà xanh", "green tea", "trà thái nguyên"]
-    },
-    {
-      "id": "interest/drink/tea/matcha",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "抹茶", "vi": "Trà matcha", "en": "Matcha" },
-      "keywords": ["抹茶", "matcha", "latte matcha"]
-    },
-    {
-      "id": "interest/drink/tea/lotus_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "莲花茶", "vi": "Trà sen", "en": "Lotus tea" },
-      "keywords": ["trà sen", "莲花茶", "lotus tea", "trà ướp sen hồ tây"]
-    },
-    {
-      "id": "interest/drink/tea/jasmine_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "茉莉花茶", "vi": "Trà nhài", "en": "Jasmine tea" },
-      "keywords": ["茉莉花茶", "trà nhài", "jasmine tea"]
-    },
-    {
-      "id": "interest/drink/tea/oolong",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "乌龙茶", "vi": "Trà ô long", "en": "Oolong" },
-      "keywords": ["乌龙茶", "trà ô long", "oolong", "trà lài ô long"]
-    },
-    {
-      "id": "interest/drink/tea/dancong",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "鸭屎香单丛", "vi": "Trà đan tùng", "en": "Dancong tea" },
-      "keywords": ["鸭屎香", "单丛茶", "dan cong", "trà phượng hoàng"]
-    },
-    {
-      "id": "interest/drink/tea/puer",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "普洱茶", "vi": "Trà phổ nhĩ", "en": "Pu'er tea" },
-      "keywords": ["普洱", "trà phổ nhĩ", "puer", "trà nén"]
-    },
-    {
-      "id": "interest/drink/tea/black_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "红茶", "vi": "Hồng trà", "en": "Black tea" },
-      "keywords": ["红茶", "hồng trà", "black tea", "trà đen"]
-    },
-    {
-      "id": "interest/drink/tea/herbal_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "花草茶", "vi": "Trà thảo mộc", "en": "Herbal infusion" },
-      "keywords": ["花草茶", "trà hoa cúc", "herbal tea", "trà hoa hồng"]
-    },
-    {
-      "id": "interest/drink/tea/artiso",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "洋蓟茶", "vi": "Trà atiso", "en": "Artichoke tea" },
-      "keywords": ["atiso", "trà atiso", "洋蓟茶", "atiso đà lạt"]
-    },
-    {
-      "id": "interest/drink/tea/lemon_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "柠檬茶", "vi": "Trà chanh", "en": "Lemon tea" },
-      "keywords": ["柠檬茶", "trà chanh", "lemon tea", "chanh sả"]
-    },
-    {
-      "id": "interest/drink/tea/shaken_lemon",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "手打柠檬茶", "vi": "Trà chanh lắc", "en": "Shaken lemon tea" },
-      "keywords": ["手打柠檬茶", "trà chanh đá xay", "shaken lemon"]
-    },
-    {
-      "id": "interest/drink/tea/fruit_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "果茶", "vi": "Trà trái cây", "en": "Fruit tea" },
-      "keywords": ["果茶", "trà trái cây", "fruit tea", "trà đào"]
-    },
-    {
-      "id": "interest/drink/tea/bubble_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "珍珠奶茶", "vi": "Trà sữa", "en": "Bubble tea" },
-      "keywords": ["奶茶", "trà sữa", "bubble tea", "trân châu", "boba"]
-    },
-    {
-      "id": "interest/drink/tea/gongfu",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "功夫茶", "vi": "Trà công phu", "en": "Gongfu tea" },
-      "keywords": ["功夫茶", "盖碗茶", "gongfu", "ấm trà sứ"]
-    },
-    {
-      "id": "interest/drink/tea/iced_tea",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "冷萃茶", "vi": "Trà nguội đá", "en": "Iced tea" },
-      "keywords": ["冷泡茶", "trà ngâm lạnh", "iced tea", "hồng trà đá"]
-    },
-    {
-      "id": "interest/drink/tea/ginger_honey",
-      "parent": "interest/drink/tea",
-      "name": { "zh": "姜蜜茶", "vi": "Trà gừng mật ong", "en": "Ginger honey tea" },
-      "keywords": ["姜茶", "trà gừng", "ginger tea", "mật ong chanh"]
-    },
-    {
-      "id": "interest/drink/smoothie",
-      "parent": "interest/drink",
-      "name": { "zh": "奶昔冰沙", "vi": "Sinh tố", "en": "Smoothies" },
-      "keywords": ["sinh tố", "奶昔", "smoothie", "milkshake", "đá xay"]
-    },
-    {
-      "id": "interest/drink/smoothie/avocado",
-      "parent": "interest/drink/smoothie",
-      "name": { "zh": "牛油果奶昔", "vi": "Sinh tố bơ", "en": "Avocado smoothie" },
-      "keywords": ["sinh tố bơ", "牛油果奶昔", "avocado smoothie", "bơ sáp đà lạt"]
-    },
-    {
-      "id": "interest/drink/smoothie/mango",
-      "parent": "interest/drink/smoothie",
-      "name": { "zh": "芒果奶昔", "vi": "Sinh tố xoài", "en": "Mango smoothie" },
-      "keywords": ["sinh tố xoài", "芒果奶昔", "mango smoothie"]
-    },
-    {
-      "id": "interest/drink/smoothie/banana",
-      "parent": "interest/drink/smoothie",
-      "name": { "zh": "香蕉奶昔", "vi": "Sinh tố chuối", "en": "Banana shake" },
-      "keywords": ["sinh tố chuối", "香蕉奶昔", "banana smoothie"]
-    },
-    {
-      "id": "interest/drink/smoothie/berry",
-      "parent": "interest/drink/smoothie",
-      "name": { "zh": "草莓奶昔", "vi": "Sinh tố dâu", "en": "Berry smoothie" },
-      "keywords": ["sinh tố dâu", "草莓奶昔", "strawberry smoothie", "dâu tằm"]
-    },
-    {
-      "id": "interest/drink/smoothie/yogurt_drink",
-      "parent": "interest/drink/smoothie",
-      "name": { "zh": "酸奶昔", "vi": "Sữa chua đánh đá", "en": "Yogurt cooler" },
-      "keywords": ["sữa chua đánh", "酸奶昔", "yogurt drink"]
-    },
-    {
-      "id": "interest/drink/juice",
-      "parent": "interest/drink",
-      "name": { "zh": "鲜榨果汁", "vi": "Nước ép trái cây", "en": "Fresh juice" },
-      "keywords": ["nước ép", "鲜榨果汁", "juice", "ép trái cây"]
-    },
-    {
-      "id": "interest/drink/juice/sugarcane",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "甘蔗汁", "vi": "Nước mía", "en": "Sugarcane juice" },
-      "keywords": ["nước mía", "甘蔗汁", "sugarcane juice", "mía quất"]
-    },
-    {
-      "id": "interest/drink/juice/coconut_water",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "椰子水", "vi": "Nước dừa", "en": "Coconut water" },
-      "keywords": ["nước dừa", "椰子水", "coconut water", "dừa xiêm"]
-    },
-    {
-      "id": "interest/drink/juice/orange",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "橙汁", "vi": "Nước cam", "en": "Orange juice" },
-      "keywords": ["nước cam", "橙汁", "orange juice", "cam vắt"]
-    },
-    {
-      "id": "interest/drink/juice/watermelon",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "西瓜汁", "vi": "Nước dưa hấu", "en": "Watermelon juice" },
-      "keywords": ["nước dưa hấu", "西瓜汁", "watermelon juice"]
-    },
-    {
-      "id": "interest/drink/juice/carrot",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "胡萝卜汁", "vi": "Nước cà rốt", "en": "Carrot juice" },
-      "keywords": ["nước cà rốt", "胡萝卜汁", "carrot juice"]
-    },
-    {
-      "id": "interest/drink/juice/tomato",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "番茄汁", "vi": "Nước cà chua", "en": "Tomato juice" },
-      "keywords": ["nước cà chua", "番茄汁", "tomato juice"]
-    },
-    {
-      "id": "interest/drink/juice/guava",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "番石榴汁", "vi": "Nước ổi", "en": "Guava juice" },
-      "keywords": ["nước ổi", "番石榴汁", "guava juice"]
-    },
-    {
-      "id": "interest/drink/juice/cold_press",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "冷压果汁", "vi": "Nước ép chậm", "en": "Cold press juice" },
-      "keywords": ["ép chậm", "冷压果汁", "cold press", "máy ép chậm"]
-    },
-    {
-      "id": "interest/drink/juice/lemonade",
-      "parent": "interest/drink/juice",
-      "name": { "zh": "柠檬水", "vi": "Nước chanh", "en": "Lemonade" },
-      "keywords": ["nước chanh", "柠檬水", "lemonade", "nước sấu"]
-    },
-    {
-      "id": "interest/drink/sweet_drink",
-      "parent": "interest/drink",
-      "name": { "zh": "甜汤酸奶", "vi": "Chè & sữa chua", "en": "Sweet cups & yogurt" },
-      "keywords": ["chè", "糖水", "甜汤", "chè ngọt", "đồ ngọt mát"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/three_color",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "三色甜汤", "vi": "Chè ba màu", "en": "Three-colour sweet soup" },
-      "keywords": ["chè ba màu", "三色甜汤", "chè hà nội"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/mung_bean",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "绿豆甜汤", "vi": "Chè đậu xanh", "en": "Mung bean sweet soup" },
-      "keywords": ["chè đậu xanh", "绿豆甜汤", "mung bean soup"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/red_bean",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "红豆甜汤", "vi": "Chè đậu đỏ", "en": "Red bean sweet soup" },
-      "keywords": ["chè đậu đỏ", "红豆甜汤", "red bean soup"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/mixed_che",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "什锦甜汤", "vi": "Chè thập cẩm", "en": "Mixed sweet soup" },
-      "keywords": ["chè thập cẩm", "什锦甜汤", "chè đỗ đen"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/sticky_ball",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "姜汁汤圆", "vi": "Chè trôi nước", "en": "Ginger sticky balls" },
-      "keywords": ["chè trôi nước", "姜汁汤圆", "trôi nước đường gừng"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/purple_rice",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "酸奶紫米", "vi": "Sữa chua nếp cẩm", "en": "Fermented-rice yogurt" },
-      "keywords": ["nếp cẩm", "酸奶紫米", "sữa chua nếp cẩm"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/yogurt",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "越南酸奶", "vi": "Sữa chua hộp", "en": "Yogurt cups" },
-      "keywords": ["sữa chua", "酸奶", "yogurt"]
-    },
-    {
-      "id": "interest/drink/sweet_drink/aloe",
-      "parent": "interest/drink/sweet_drink",
-      "name": { "zh": "芦荟饮", "vi": "Nước nha đam", "en": "Aloe drink" },
-      "keywords": ["nha đam", "芦荟饮", "aloe vera drink"]
-    },
-    {
-      "id": "interest/drink/herbal",
-      "parent": "interest/drink",
-      "name": { "zh": "草本养生饮", "vi": "Nước thảo mộc", "en": "Herbal drinks" },
-      "keywords": ["凉茶", "thanh nhiệt", "nước lá", "trà hạ nhiệt"]
-    },
-    {
-      "id": "interest/drink/herbal/kombucha",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "康普茶", "vi": "Trà kombucha", "en": "Kombucha" },
-      "keywords": ["kombucha", "康普茶", "trà lên men"]
-    },
-    {
-      "id": "interest/drink/herbal/detox_water",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "排毒水", "vi": "Nước detox", "en": "Detox water" },
-      "keywords": ["detox", "排毒水", "nước detox"]
-    },
-    {
-      "id": "interest/drink/herbal/oat_milk",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "燕麦奶", "vi": "Sữa yến mạch", "en": "Oat milk" },
-      "keywords": ["sữa yến mạch", "燕麦奶", "oat milk"]
-    },
-    {
-      "id": "interest/drink/herbal/nut_milk",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "坚果奶", "vi": "Sữa hạt", "en": "Nut milk" },
-      "keywords": ["sữa hạt", "坚果奶", "nut milk", "hạt chia"]
-    },
-    {
-      "id": "interest/drink/herbal/black_bean",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "烤黑豆水", "vi": "Nước đậu đen rang", "en": "Roasted black bean" },
-      "keywords": ["đậu đen rang", "黑豆水", "nước đậu đen"]
-    },
-    {
-      "id": "interest/drink/herbal/sour_plum",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "酸梅汤", "vi": "Nước mơ", "en": "Sour plum drink" },
-      "keywords": ["酸梅汤", "nước mơ", "乌梅汤", "mơ ngâm"]
-    },
-    {
-      "id": "interest/drink/herbal/water_log",
-      "parent": "interest/drink/herbal",
-      "name": { "zh": "喝水打卡", "vi": "Uống đủ nước", "en": "Water logging" },
-      "keywords": ["喝水打卡", "uống đủ nước", "water intake", "nước ấm buổi sáng"]
-    },
-    {
-      "id": "interest/drink/street",
-      "parent": "interest/drink",
-      "name": { "zh": "街头饮品", "vi": "Đồ uống lề đường", "en": "Street drinks" },
-      "keywords": ["ven đường", "路边饮品", "quán nước", "hàng nước"]
-    },
-    {
-      "id": "interest/drink/street/iced_tea_cart",
-      "parent": "interest/drink/street",
-      "name": { "zh": "路边冰茶", "vi": "Trà đá vỉa hè", "en": "Sidewalk iced tea" },
-      "keywords": ["trà đá", "vỉa hè", "路边冰茶", "cốc trà đá"]
-    },
-    {
-      "id": "interest/drink/street/bag_coffee",
-      "parent": "interest/drink/street",
-      "name": { "zh": "袋装冰咖啡", "vi": "Cà phê túi", "en": "Bag iced coffee" },
-      "keywords": ["bạc xỉu túi", "袋装咖啡", "cà phê túi nilon"]
-    },
-    {
-      "id": "interest/drink/street/takeaway",
-      "parent": "interest/drink/street",
-      "name": { "zh": "外带饮品", "vi": "Đồ uống mang đi", "en": "Takeaway drinks" },
-      "keywords": ["mang đi", "外带咖啡", "takeaway cup", "cốc giấy"]
-    },
-    {
-      "id": "interest/drink/street/morning_set",
-      "parent": "interest/drink/street",
-      "name": { "zh": "早点配饮", "vi": "Cà phê sáng", "en": "Morning coffee set" },
-      "keywords": ["cà phê sáng", "早点咖啡", "sáng sớm", "cà phê trước giờ làm"]
-    },
-    {
-      "id": "interest/drink/makers",
-      "parent": "interest/drink",
-      "name": { "zh": "自制调饮", "vi": "Pha chế tại nhà", "en": "Home mixing" },
-      "keywords": ["tự pha", "自制饮品", "home brewing", "công thức đồ uống"]
-    },
-    {
-      "id": "interest/drink/makers/mocktail",
-      "parent": "interest/drink/makers",
-      "name": { "zh": "无酒精特调", "vi": "Mocktail nhà làm", "en": "Mocktails" },
-      "keywords": ["mocktail", "无酒精特调", "nước uống tự pha"]
-    },
-    {
-      "id": "interest/drink/makers/syrup",
-      "parent": "interest/drink/makers",
-      "name": { "zh": "自制糖浆", "vi": "Siro tự nấu", "en": "Homemade syrup" },
-      "keywords": ["nước siro", "自制糖浆", "đường nước"]
-    },
-    {
-      "id": "interest/drink/makers/toppings",
-      "parent": "interest/drink/makers",
-      "name": { "zh": "奶盖小料", "vi": "Kem sữa & topping", "en": "Foam & toppings" },
-      "keywords": ["kem sữa", "奶盖", "cheese foam", "thạch đen"]
-    },
-    {
-      "id": "interest/drink/makers/gear",
-      "parent": "interest/drink/makers",
-      "name": { "zh": "冲煮器具", "vi": "Dụng cụ pha", "en": "Brewing gear" },
-      "keywords": ["dụng cụ pha", "咖啡器具", "máy xay cà phê", "bình lắc"]
-    },
-    {
-      "id": "interest/drink/makers/matcha_whisk",
-      "parent": "interest/drink/makers",
-      "name": { "zh": "点茶打抹茶", "vi": "Đánh matcha", "en": "Matcha whisking" },
-      "keywords": ["打抹茶", "chasen", "cây đánh trà"]
-    },
-    {
-      "id": "interest/drink/makers/milk_froth",
-      "parent": "interest/drink/makers",
-      "name": { "zh": "打发奶泡", "vi": "Đánh bọt sữa", "en": "Milk frothing" },
-      "keywords": ["奶泡", "steam wand", "tạo bọt sữa"]
-    },
-    {
-      "id": "interest/drink/knowledge",
-      "parent": "interest/drink",
-      "name": { "zh": "品鉴与知识", "vi": "Kiến thức đồ uống", "en": "Tasting & know-how" },
-      "keywords": ["盲测", "cupping", "nếm thử", "loại hạt"]
-    },
-    {
-      "id": "interest/drink/knowledge/notes",
-      "parent": "interest/drink/knowledge",
-      "name": { "zh": "风味笔记", "vi": "Ghi chú hương vị", "en": "Flavour notes" },
-      "keywords": ["flavour notes", "风味描述", "hậu vị", "cảm nhận vị"]
-    },
-    {
-      "id": "interest/drink/knowledge/sweet_control",
-      "parent": "interest/drink/knowledge",
-      "name": { "zh": "控糖点单", "vi": "Gọi ít đường", "en": "Sugar level" },
-      "keywords": ["ít đường", "控糖", "half sweet", "đường cát"]
-    }
-  ]
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/drink/coffee",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "咖啡",
+    "vi": "Cà phê",
+    "en": "Coffee"
+   },
+   "keywords": [
+    "咖啡",
+    "cà phê",
+    "cafe",
+    "coffee",
+    "quán cà phê"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/espresso",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "意式浓缩",
+    "vi": "Espresso",
+    "en": "Espresso"
+   },
+   "keywords": [
+    "espresso",
+    "浓缩咖啡",
+    "cà phê espresso",
+    "máy pha cà phê"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/americano",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "美式咖啡",
+    "vi": "Cà phê đen đá",
+    "en": "Americano & iced black"
+   },
+   "keywords": [
+    "americano",
+    "美式",
+    "cà phê đen",
+    "cà phê đen đá",
+    "long black"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/latte",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "拿铁",
+    "vi": "Cà phê latte",
+    "en": "Latte"
+   },
+   "keywords": [
+    "latte",
+    "拿铁",
+    "cà phê latte",
+    "ice latte"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/flat_white",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "澳白",
+    "vi": "Cà phê sữa nóng",
+    "en": "Flat white"
+   },
+   "keywords": [
+    "flat white",
+    "澳白",
+    "cà phê sữa nóng"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/cappuccino",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "卡布奇诺",
+    "vi": "Cà phê cappuccino",
+    "en": "Cappuccino"
+   },
+   "keywords": [
+    "cappuccino",
+    "卡布奇诺",
+    "bọt sữa cà phê"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/cold_brew",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "冷萃咖啡",
+    "vi": "Cà phê cold brew",
+    "en": "Cold brew coffee"
+   },
+   "keywords": [
+    "cold brew",
+    "冷萃咖啡",
+    "cà phê cold brew"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/pour_over",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "手冲咖啡",
+    "vi": "Cà phê pha tay",
+    "en": "Pour over"
+   },
+   "keywords": [
+    "手冲",
+    "pour over",
+    "v60",
+    "hand drip",
+    "pha cà phê tay"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/phin",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "滴漏咖啡",
+    "vi": "Cà phê phin",
+    "en": "Phin filter coffee"
+   },
+   "keywords": [
+    "phin",
+    "滴漏壶",
+    "cà phê phin",
+    "phin nhôm"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/egg_coffee",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "鸡蛋咖啡",
+    "vi": "Cà phê trứng",
+    "en": "Egg coffee"
+   },
+   "keywords": [
+    "cà phê trứng",
+    "鸡蛋咖啡",
+    "egg coffee",
+    "kem cà phê trứng"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/bac_xiu",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "越式奶白咖啡",
+    "vi": "Bạc xỉu",
+    "en": "Bạc xỉu"
+   },
+   "keywords": [
+    "bạc xỉu",
+    "cà phê bạc xỉu",
+    "越式奶白咖啡"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/salt_coffee",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "咸咖啡",
+    "vi": "Cà phê muối",
+    "en": "Salt coffee"
+   },
+   "keywords": [
+    "cà phê muối",
+    "咸咖啡",
+    "salt coffee",
+    "cà phê muối huế"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/coconut_coffee",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "椰子咖啡",
+    "vi": "Cà phê dừa",
+    "en": "Coconut coffee"
+   },
+   "keywords": [
+    "cà phê dừa",
+    "生椰拿铁",
+    "coconut latte",
+    "cốt dừa cà phê"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/beans",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "越南咖啡豆",
+    "vi": "Cà phê Việt",
+    "en": "Vietnamese beans"
+   },
+   "keywords": [
+    "robusta",
+    "cà phê hạt",
+    "咖啡豆",
+    "buôn ma thuột",
+    "arabica đà lạt"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/roastery",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "自家烘焙",
+    "vi": "Rang cà phê tại nhà",
+    "en": "Home roasting"
+   },
+   "keywords": [
+    "rang cà phê",
+    "自家烘焙",
+    "home roasting",
+    "single origin"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/latte_art",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "咖啡拉花",
+    "vi": "Vẽ latte",
+    "en": "Latte art"
+   },
+   "keywords": [
+    "latte art",
+    "拉花",
+    "nghệ thuật latte"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/cafe_hopping",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "咖啡馆探店",
+    "vi": "Khám phá quán cà phê",
+    "en": "Café hopping"
+   },
+   "keywords": [
+    "探店咖啡馆",
+    "café hopping",
+    "quán cà phê mới",
+    "cà phê ngon hà nội"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/garden_cafe",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "庭院咖啡馆",
+    "vi": "Cà phê sân vườn",
+    "en": "Garden café"
+   },
+   "keywords": [
+    "cà phê sân vườn",
+    "庭院咖啡",
+    "garden cafe",
+    "cà phê cây xanh"
+   ]
+  },
+  {
+   "id": "interest/drink/coffee/book_cafe",
+   "parent": "interest/drink/coffee",
+   "name": {
+    "zh": "书吧咖啡",
+    "vi": "Cà phê sách",
+    "en": "Book café"
+   },
+   "keywords": [
+    "cà phê sách",
+    "书吧",
+    "book cafe",
+    "yên tĩnh làm việc"
+   ]
+  },
+  {
+   "id": "interest/drink/tea",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "茶饮",
+    "vi": "Trà",
+    "en": "Tea"
+   },
+   "keywords": [
+    "trà",
+    "tea",
+    "uống trà",
+    "trà ngon"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/green_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "绿茶",
+    "vi": "Trà xanh",
+    "en": "Green tea"
+   },
+   "keywords": [
+    "绿茶",
+    "trà xanh",
+    "green tea",
+    "trà thái nguyên"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/matcha",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "抹茶",
+    "vi": "Trà matcha",
+    "en": "Matcha"
+   },
+   "keywords": [
+    "抹茶",
+    "matcha",
+    "latte matcha"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/lotus_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "莲花茶",
+    "vi": "Trà sen",
+    "en": "Lotus tea"
+   },
+   "keywords": [
+    "trà sen",
+    "莲花茶",
+    "lotus tea",
+    "trà ướp sen hồ tây"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/jasmine_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "茉莉花茶",
+    "vi": "Trà nhài",
+    "en": "Jasmine tea"
+   },
+   "keywords": [
+    "茉莉花茶",
+    "trà nhài",
+    "jasmine tea"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/oolong",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "乌龙茶",
+    "vi": "Trà ô long",
+    "en": "Oolong"
+   },
+   "keywords": [
+    "乌龙茶",
+    "trà ô long",
+    "oolong",
+    "trà lài ô long"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/dancong",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "鸭屎香单丛",
+    "vi": "Trà đan tùng",
+    "en": "Dancong tea"
+   },
+   "keywords": [
+    "鸭屎香",
+    "单丛茶",
+    "dan cong",
+    "trà phượng hoàng"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/puer",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "普洱茶",
+    "vi": "Trà phổ nhĩ",
+    "en": "Pu'er tea"
+   },
+   "keywords": [
+    "普洱",
+    "trà phổ nhĩ",
+    "puer",
+    "trà nén"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/black_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "红茶",
+    "vi": "Hồng trà",
+    "en": "Black tea"
+   },
+   "keywords": [
+    "红茶",
+    "hồng trà",
+    "black tea",
+    "trà đen"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/herbal_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "花草茶",
+    "vi": "Trà thảo mộc",
+    "en": "Herbal infusion"
+   },
+   "keywords": [
+    "花草茶",
+    "trà hoa cúc",
+    "herbal tea",
+    "trà hoa hồng"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/artiso",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "洋蓟茶",
+    "vi": "Trà atiso",
+    "en": "Artichoke tea"
+   },
+   "keywords": [
+    "atiso",
+    "trà atiso",
+    "洋蓟茶",
+    "atiso đà lạt"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/lemon_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "柠檬茶",
+    "vi": "Trà chanh",
+    "en": "Lemon tea"
+   },
+   "keywords": [
+    "柠檬茶",
+    "trà chanh",
+    "lemon tea",
+    "chanh sả"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/shaken_lemon",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "手打柠檬茶",
+    "vi": "Trà chanh lắc",
+    "en": "Shaken lemon tea"
+   },
+   "keywords": [
+    "手打柠檬茶",
+    "trà chanh đá xay",
+    "shaken lemon"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/fruit_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "果茶",
+    "vi": "Trà trái cây",
+    "en": "Fruit tea"
+   },
+   "keywords": [
+    "果茶",
+    "trà trái cây",
+    "fruit tea",
+    "trà đào"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/bubble_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "珍珠奶茶",
+    "vi": "Trà sữa",
+    "en": "Bubble tea"
+   },
+   "keywords": [
+    "奶茶",
+    "trà sữa",
+    "bubble tea",
+    "trân châu",
+    "boba"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/gongfu",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "功夫茶",
+    "vi": "Trà công phu",
+    "en": "Gongfu tea"
+   },
+   "keywords": [
+    "功夫茶",
+    "盖碗茶",
+    "gongfu",
+    "ấm trà sứ"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/iced_tea",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "冷萃茶",
+    "vi": "Trà nguội đá",
+    "en": "Iced tea"
+   },
+   "keywords": [
+    "冷泡茶",
+    "trà ngâm lạnh",
+    "iced tea",
+    "hồng trà đá"
+   ]
+  },
+  {
+   "id": "interest/drink/tea/ginger_honey",
+   "parent": "interest/drink/tea",
+   "name": {
+    "zh": "姜蜜茶",
+    "vi": "Trà gừng mật ong",
+    "en": "Ginger honey tea"
+   },
+   "keywords": [
+    "姜茶",
+    "trà gừng",
+    "ginger tea",
+    "mật ong chanh"
+   ]
+  },
+  {
+   "id": "interest/drink/smoothie",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "奶昔冰沙",
+    "vi": "Sinh tố",
+    "en": "Smoothies"
+   },
+   "keywords": [
+    "sinh tố",
+    "奶昔",
+    "smoothie",
+    "milkshake",
+    "đá xay"
+   ]
+  },
+  {
+   "id": "interest/drink/smoothie/avocado",
+   "parent": "interest/drink/smoothie",
+   "name": {
+    "zh": "牛油果奶昔",
+    "vi": "Sinh tố bơ",
+    "en": "Avocado smoothie"
+   },
+   "keywords": [
+    "sinh tố bơ",
+    "牛油果奶昔",
+    "avocado smoothie",
+    "bơ sáp đà lạt"
+   ]
+  },
+  {
+   "id": "interest/drink/smoothie/mango",
+   "parent": "interest/drink/smoothie",
+   "name": {
+    "zh": "芒果奶昔",
+    "vi": "Sinh tố xoài",
+    "en": "Mango smoothie"
+   },
+   "keywords": [
+    "sinh tố xoài",
+    "芒果奶昔",
+    "mango smoothie"
+   ]
+  },
+  {
+   "id": "interest/drink/smoothie/banana",
+   "parent": "interest/drink/smoothie",
+   "name": {
+    "zh": "香蕉奶昔",
+    "vi": "Sinh tố chuối",
+    "en": "Banana shake"
+   },
+   "keywords": [
+    "sinh tố chuối",
+    "香蕉奶昔",
+    "banana smoothie"
+   ]
+  },
+  {
+   "id": "interest/drink/smoothie/berry",
+   "parent": "interest/drink/smoothie",
+   "name": {
+    "zh": "草莓奶昔",
+    "vi": "Sinh tố dâu",
+    "en": "Berry smoothie"
+   },
+   "keywords": [
+    "sinh tố dâu",
+    "草莓奶昔",
+    "strawberry smoothie",
+    "dâu tằm"
+   ]
+  },
+  {
+   "id": "interest/drink/smoothie/yogurt_drink",
+   "parent": "interest/drink/smoothie",
+   "name": {
+    "zh": "酸奶昔",
+    "vi": "Sữa chua đánh đá",
+    "en": "Yogurt cooler"
+   },
+   "keywords": [
+    "sữa chua đánh",
+    "酸奶昔",
+    "yogurt drink"
+   ]
+  },
+  {
+   "id": "interest/drink/juice",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "鲜榨果汁",
+    "vi": "Nước ép trái cây",
+    "en": "Fresh juice"
+   },
+   "keywords": [
+    "nước ép",
+    "鲜榨果汁",
+    "juice",
+    "ép trái cây"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/sugarcane",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "甘蔗汁",
+    "vi": "Nước mía",
+    "en": "Sugarcane juice"
+   },
+   "keywords": [
+    "nước mía",
+    "甘蔗汁",
+    "sugarcane juice",
+    "mía quất"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/coconut_water",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "椰子水",
+    "vi": "Nước dừa",
+    "en": "Coconut water"
+   },
+   "keywords": [
+    "nước dừa",
+    "椰子水",
+    "coconut water",
+    "dừa xiêm"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/orange",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "橙汁",
+    "vi": "Nước cam",
+    "en": "Orange juice"
+   },
+   "keywords": [
+    "nước cam",
+    "橙汁",
+    "orange juice",
+    "cam vắt"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/watermelon",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "西瓜汁",
+    "vi": "Nước dưa hấu",
+    "en": "Watermelon juice"
+   },
+   "keywords": [
+    "nước dưa hấu",
+    "西瓜汁",
+    "watermelon juice"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/carrot",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "胡萝卜汁",
+    "vi": "Nước cà rốt",
+    "en": "Carrot juice"
+   },
+   "keywords": [
+    "nước cà rốt",
+    "胡萝卜汁",
+    "carrot juice"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/tomato",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "番茄汁",
+    "vi": "Nước cà chua",
+    "en": "Tomato juice"
+   },
+   "keywords": [
+    "nước cà chua",
+    "番茄汁",
+    "tomato juice"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/guava",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "番石榴汁",
+    "vi": "Nước ổi",
+    "en": "Guava juice"
+   },
+   "keywords": [
+    "nước ổi",
+    "番石榴汁",
+    "guava juice"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/cold_press",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "冷压果汁",
+    "vi": "Nước ép chậm",
+    "en": "Cold press juice"
+   },
+   "keywords": [
+    "ép chậm",
+    "冷压果汁",
+    "cold press",
+    "máy ép chậm"
+   ]
+  },
+  {
+   "id": "interest/drink/juice/lemonade",
+   "parent": "interest/drink/juice",
+   "name": {
+    "zh": "柠檬水",
+    "vi": "Nước chanh",
+    "en": "Lemonade"
+   },
+   "keywords": [
+    "nước chanh",
+    "柠檬水",
+    "lemonade",
+    "nước sấu"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "甜汤酸奶",
+    "vi": "Chè & sữa chua",
+    "en": "Sweet cups & yogurt"
+   },
+   "keywords": [
+    "糖水",
+    "甜汤",
+    "chè ngọt",
+    "đồ ngọt mát"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/three_color",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "三色甜汤",
+    "vi": "Chè ba màu",
+    "en": "Three-colour sweet soup"
+   },
+   "keywords": [
+    "chè ba màu",
+    "三色甜汤",
+    "chè hà nội"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/mung_bean",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "绿豆甜汤",
+    "vi": "Chè đậu xanh",
+    "en": "Mung bean sweet soup"
+   },
+   "keywords": [
+    "chè đậu xanh",
+    "绿豆甜汤",
+    "mung bean soup"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/red_bean",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "红豆甜汤",
+    "vi": "Chè đậu đỏ",
+    "en": "Red bean sweet soup"
+   },
+   "keywords": [
+    "chè đậu đỏ",
+    "红豆甜汤",
+    "red bean soup"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/mixed_che",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "什锦甜汤",
+    "vi": "Chè thập cẩm",
+    "en": "Mixed sweet soup"
+   },
+   "keywords": [
+    "chè thập cẩm",
+    "什锦甜汤",
+    "chè đỗ đen"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/sticky_ball",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "姜汁汤圆",
+    "vi": "Chè trôi nước",
+    "en": "Ginger sticky balls"
+   },
+   "keywords": [
+    "chè trôi nước",
+    "姜汁汤圆",
+    "trôi nước đường gừng"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/purple_rice",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "酸奶紫米",
+    "vi": "Sữa chua nếp cẩm",
+    "en": "Fermented-rice yogurt"
+   },
+   "keywords": [
+    "nếp cẩm",
+    "酸奶紫米",
+    "sữa chua nếp cẩm"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/yogurt",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "越南酸奶",
+    "vi": "Sữa chua hộp",
+    "en": "Yogurt cups"
+   },
+   "keywords": [
+    "sữa chua",
+    "酸奶",
+    "yogurt"
+   ]
+  },
+  {
+   "id": "interest/drink/sweet_drink/aloe",
+   "parent": "interest/drink/sweet_drink",
+   "name": {
+    "zh": "芦荟饮",
+    "vi": "Nước nha đam",
+    "en": "Aloe drink"
+   },
+   "keywords": [
+    "nha đam",
+    "芦荟饮",
+    "aloe vera drink"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "草本养生饮",
+    "vi": "Nước thảo mộc",
+    "en": "Herbal drinks"
+   },
+   "keywords": [
+    "凉茶",
+    "thanh nhiệt",
+    "nước lá",
+    "trà hạ nhiệt"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/kombucha",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "康普茶",
+    "vi": "Trà kombucha",
+    "en": "Kombucha"
+   },
+   "keywords": [
+    "kombucha",
+    "康普茶",
+    "trà lên men"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/detox_water",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "排毒水",
+    "vi": "Nước detox",
+    "en": "Detox water"
+   },
+   "keywords": [
+    "detox",
+    "排毒水",
+    "nước detox"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/oat_milk",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "燕麦奶",
+    "vi": "Sữa yến mạch",
+    "en": "Oat milk"
+   },
+   "keywords": [
+    "sữa yến mạch",
+    "燕麦奶",
+    "oat milk"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/nut_milk",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "坚果奶",
+    "vi": "Sữa hạt",
+    "en": "Nut milk"
+   },
+   "keywords": [
+    "sữa hạt",
+    "坚果奶",
+    "nut milk",
+    "hạt chia"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/black_bean",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "烤黑豆水",
+    "vi": "Nước đậu đen rang",
+    "en": "Roasted black bean"
+   },
+   "keywords": [
+    "đậu đen rang",
+    "黑豆水",
+    "nước đậu đen"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/sour_plum",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "酸梅汤",
+    "vi": "Nước mơ",
+    "en": "Sour plum drink"
+   },
+   "keywords": [
+    "酸梅汤",
+    "nước mơ",
+    "乌梅汤",
+    "mơ ngâm"
+   ]
+  },
+  {
+   "id": "interest/drink/herbal/water_log",
+   "parent": "interest/drink/herbal",
+   "name": {
+    "zh": "喝水打卡",
+    "vi": "Uống đủ nước",
+    "en": "Water logging"
+   },
+   "keywords": [
+    "喝水打卡",
+    "uống đủ nước",
+    "water intake",
+    "nước ấm buổi sáng"
+   ]
+  },
+  {
+   "id": "interest/drink/street",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "街头饮品",
+    "vi": "Đồ uống lề đường",
+    "en": "Street drinks"
+   },
+   "keywords": [
+    "路边饮品",
+    "quán nước",
+    "hàng nước"
+   ]
+  },
+  {
+   "id": "interest/drink/street/iced_tea_cart",
+   "parent": "interest/drink/street",
+   "name": {
+    "zh": "路边冰茶",
+    "vi": "Trà đá vỉa hè",
+    "en": "Sidewalk iced tea"
+   },
+   "keywords": [
+    "trà đá",
+    "vỉa hè",
+    "路边冰茶",
+    "cốc trà đá"
+   ]
+  },
+  {
+   "id": "interest/drink/street/bag_coffee",
+   "parent": "interest/drink/street",
+   "name": {
+    "zh": "袋装冰咖啡",
+    "vi": "Cà phê túi",
+    "en": "Bag iced coffee"
+   },
+   "keywords": [
+    "bạc xỉu túi",
+    "袋装咖啡",
+    "cà phê túi nilon"
+   ]
+  },
+  {
+   "id": "interest/drink/street/takeaway",
+   "parent": "interest/drink/street",
+   "name": {
+    "zh": "外带饮品",
+    "vi": "Đồ uống mang đi",
+    "en": "Takeaway drinks"
+   },
+   "keywords": [
+    "mang đi",
+    "外带咖啡",
+    "takeaway cup",
+    "cốc giấy"
+   ]
+  },
+  {
+   "id": "interest/drink/street/morning_set",
+   "parent": "interest/drink/street",
+   "name": {
+    "zh": "早点配饮",
+    "vi": "Cà phê sáng",
+    "en": "Morning coffee set"
+   },
+   "keywords": [
+    "cà phê sáng",
+    "早点咖啡",
+    "sáng sớm",
+    "cà phê trước giờ làm"
+   ]
+  },
+  {
+   "id": "interest/drink/makers",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "自制调饮",
+    "vi": "Pha chế tại nhà",
+    "en": "Home mixing"
+   },
+   "keywords": [
+    "tự pha",
+    "自制饮品",
+    "home brewing",
+    "công thức đồ uống"
+   ]
+  },
+  {
+   "id": "interest/drink/makers/mocktail",
+   "parent": "interest/drink/makers",
+   "name": {
+    "zh": "无酒精特调",
+    "vi": "Mocktail nhà làm",
+    "en": "Mocktails"
+   },
+   "keywords": [
+    "mocktail",
+    "无酒精特调",
+    "nước uống tự pha"
+   ]
+  },
+  {
+   "id": "interest/drink/makers/syrup",
+   "parent": "interest/drink/makers",
+   "name": {
+    "zh": "自制糖浆",
+    "vi": "Siro tự nấu",
+    "en": "Homemade syrup"
+   },
+   "keywords": [
+    "nước siro",
+    "自制糖浆",
+    "đường nước"
+   ]
+  },
+  {
+   "id": "interest/drink/makers/toppings",
+   "parent": "interest/drink/makers",
+   "name": {
+    "zh": "奶盖小料",
+    "vi": "Kem sữa & topping",
+    "en": "Foam & toppings"
+   },
+   "keywords": [
+    "kem sữa",
+    "奶盖",
+    "cheese foam",
+    "thạch đen"
+   ]
+  },
+  {
+   "id": "interest/drink/makers/gear",
+   "parent": "interest/drink/makers",
+   "name": {
+    "zh": "冲煮器具",
+    "vi": "Dụng cụ pha",
+    "en": "Brewing gear"
+   },
+   "keywords": [
+    "dụng cụ pha",
+    "咖啡器具",
+    "máy xay cà phê",
+    "bình lắc"
+   ]
+  },
+  {
+   "id": "interest/drink/makers/matcha_whisk",
+   "parent": "interest/drink/makers",
+   "name": {
+    "zh": "点茶打抹茶",
+    "vi": "Đánh matcha",
+    "en": "Matcha whisking"
+   },
+   "keywords": [
+    "打抹茶",
+    "chasen",
+    "cây đánh trà"
+   ]
+  },
+  {
+   "id": "interest/drink/makers/milk_froth",
+   "parent": "interest/drink/makers",
+   "name": {
+    "zh": "打发奶泡",
+    "vi": "Đánh bọt sữa",
+    "en": "Milk frothing"
+   },
+   "keywords": [
+    "奶泡",
+    "steam wand",
+    "tạo bọt sữa"
+   ]
+  },
+  {
+   "id": "interest/drink/knowledge",
+   "parent": "interest/drink",
+   "name": {
+    "zh": "品鉴与知识",
+    "vi": "Kiến thức đồ uống",
+    "en": "Tasting & know-how"
+   },
+   "keywords": [
+    "盲测",
+    "cupping",
+    "nếm thử",
+    "loại hạt"
+   ]
+  },
+  {
+   "id": "interest/drink/knowledge/notes",
+   "parent": "interest/drink/knowledge",
+   "name": {
+    "zh": "风味笔记",
+    "vi": "Ghi chú hương vị",
+    "en": "Flavour notes"
+   },
+   "keywords": [
+    "flavour notes",
+    "风味描述",
+    "hậu vị",
+    "cảm nhận vị"
+   ]
+  },
+  {
+   "id": "interest/drink/knowledge/sweet_control",
+   "parent": "interest/drink/knowledge",
+   "name": {
+    "zh": "控糖点单",
+    "vi": "Gọi ít đường",
+    "en": "Sugar level"
+   },
+   "keywords": [
+    "ít đường",
+    "控糖",
+    "half sweet",
+    "đường cát"
+   ]
+  }
+ ]
 }
