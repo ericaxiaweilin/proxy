@@ -35,28 +35,45 @@ func (p *Postgres) LoadEvidence(ctx context.Context, since time.Time) (map[strin
 	valid := consent.ValidAtSQL("e.actor_id", "e.created_at", consent.Recommendation)
 
 	// 1) 场景：帖子曝光的停留。watch_ms = 0 表示客户端没报停留，不是「划走」，不参与。
+	//    按帖子分组取回，场景类型在 Go 里定：帖子自带的；没带（UNKNOWN）就从正文推断；
+	//    夜生活 / SPA 不进画像（ProfilableScene）。
 	rows, err := p.pool.Query(ctx, `
-		SELECT e.actor_id, p.scene_type, COUNT(*), COALESCE(SUM(e.watch_ms), 0),
+		SELECT e.actor_id, p.scene_type, p.body, COUNT(*), COALESCE(SUM(e.watch_ms), 0),
 		       COUNT(*) FILTER (WHERE e.watch_ms < $2), MIN(e.created_at), MAX(e.created_at)
 		FROM localnet.interaction_events e
 		JOIN localnet.posts p ON p.id = e.target_id
 		WHERE e.event_type = 'POST_IMPRESSION' AND e.target_type = 'POST'
 		  AND e.created_at >= $1 AND e.watch_ms > 0
-		  AND p.scene_type NOT IN ('UNKNOWN', '')
 		  AND `+valid+`
-		GROUP BY e.actor_id, p.scene_type`, since, QuickSkipMs)
+		GROUP BY e.actor_id, p.id, p.scene_type, p.body`, since, QuickSkipMs)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var id, scene string
+		var id, scene, body string
 		var s SceneEvidence
-		if err := rows.Scan(&id, &scene, &s.Events, &s.DwellMs, &s.QuickSkips, &s.First, &s.Last); err != nil {
+		if err := rows.Scan(&id, &scene, &body, &s.Events, &s.DwellMs, &s.QuickSkips, &s.First, &s.Last); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		if scene == "" || scene == "UNKNOWN" {
+			scene = InferScene(body)
+		}
+		if !ProfilableScene(scene) {
+			continue
+		}
 		ev := get(id)
-		ev.Scenes[scene] = s
+		prev := ev.Scenes[scene]
+		prev.Events += s.Events
+		prev.DwellMs += s.DwellMs
+		prev.QuickSkips += s.QuickSkips
+		if prev.First.IsZero() || s.First.Before(prev.First) {
+			prev.First = s.First
+		}
+		if s.Last.After(prev.Last) {
+			prev.Last = s.Last
+		}
+		ev.Scenes[scene] = prev
 		out[id] = ev
 	}
 	rows.Close()

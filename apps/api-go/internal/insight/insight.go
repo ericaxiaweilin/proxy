@@ -139,3 +139,11 @@ type Source interface {
 	DemandGap(ctx context.Context, now time.Time, days int) (DemandGap, error)
 	Segments(ctx context.Context, now time.Time, axis, withAxis, withValue string) (Segments, error)
 }
+
+// EvalCase 是撮合评估的一个案例：一张公开市场单、它所有仍有效的报名人、发单方最终选定的那个人（OPS-MATCH-EVAL-001）。
+type EvalCase struct {
+	OpportunityID string
+	Applicants    []string
+	Chosen        string
+	Lat, Lng      *float64
+}

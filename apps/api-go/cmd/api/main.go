@@ -819,6 +819,7 @@ func main() {
 			// OPS-PROVIDER-PROFILE-001：小美画像（列表 + 单个画像），只读。
 			profiles := providerProfiles{providers: server.Insight, signals: matchingStore, tags: &tagging.Service{Store: server.TagStore}}
 			server.ProviderList = profiles.List
+			server.MatchEval = matchEvalSource{cases: insight.NewPostgres(pool), signals: matchingStore}
 			server.ProviderProfile = profiles.Profile
 			server.MatchPreview = func(ctx context.Context, opportunityID string, limit int) (api.MatchPreviewResult, error) {
 				return inviter.Preview(ctx, opportunityID, limit, &tagging.Service{Store: server.TagStore}, time.Now().UTC())

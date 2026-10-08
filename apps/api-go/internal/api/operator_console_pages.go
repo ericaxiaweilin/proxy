@@ -295,7 +295,8 @@ func (s *Server) operatorTags(w http.ResponseWriter, r *http.Request) {
 			strings.Join(v.CaseCollisions, "、"), v.LanguageRawTerms, v.LanguageNormTerms))
 	}
 	if v.SceneUnknown > 0 {
-		notes = append(notes, fmt.Sprintf("%d 条帖子的 scene_type 是 UNKNOWN —— 分类器没打上，不是「这些帖子没有场景」。", v.SceneUnknown))
+		notes = append(notes, fmt.Sprintf("%d 条帖子没有场景类型（UNKNOWN）：场景类型是发帖时客户端选填的，没选就是未知——这里没有任何分类器。"+
+			"标签层会用正文里的话题做一次兜底推断（咖啡、徒步、摄影…），正文里没有话题词的仍然是未知，不猜。", v.SceneUnknown))
 	}
 	if v.Posts > 0 && v.ContextPosts > 0 {
 		notes = append(notes, fmt.Sprintf("只有 %d/%d 条帖子带语境标签（%.1f%%）—— context_refs 绝大多数是空数组，内容侧的覆盖率还很低。",

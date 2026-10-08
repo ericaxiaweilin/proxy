@@ -228,3 +228,51 @@ func TestGuidanceStateCountsRealThingsAndCandidatesFollowTheWindow(t *testing.T)
 		t.Fatalf("window 1-7 days, ACTIVE only: mid yes; fresh (2h), old (20d), suspended no")
 	}
 }
+
+// 撮合评估的案例查询对真库：只取多人报名且恰好选定一人的公开单。
+func TestMatchEvalCasesQueryReturnsOnlyMultiApplicantSelectedPublicOpportunities(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	ids := []string{"opp_ev1_" + stamp, "opp_ev2_" + stamp, "opp_ev3_" + stamp}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM marketplace.opportunities WHERE id = ANY($1)`, ids) })
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	for _, id := range ids {
+		exec(`INSERT INTO marketplace.opportunities (id, owner_id, payload, created_at) VALUES ($1,'o',$2::jsonb,$3)`, id, `{"theme":"x","lat":21.0,"lng":105.8}`, now.Add(-time.Hour))
+	}
+	app := func(opp, who, status string, off time.Duration) {
+		exec(`INSERT INTO marketplace.applications (id, opportunity_id, applicant_id, payload, created_at) VALUES ($1,$2,$3,$4::jsonb,$5)`,
+			"ap_"+opp+who, opp, who, `{"status":"`+status+`"}`, now.Add(-time.Hour+off))
+	}
+	app(ids[0], "x1", "SUBMITTED", time.Minute)
+	app(ids[0], "x2", "SELECTED", 2*time.Minute) // 两人报名，选定 x2 ✔
+	app(ids[1], "y1", "SELECTED", time.Minute)   // 只有一人报名 ✘
+	app(ids[2], "z1", "SUBMITTED", time.Minute)  // 两人报名但没选 ✘
+	app(ids[2], "z2", "SUBMITTED", 2*time.Minute)
+
+	cases, err := insight.NewPostgres(pool).EvalCases(ctx, now.Add(-24*time.Hour), 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got *struct{ chosen string }
+	for _, c := range cases {
+		switch c.OpportunityID {
+		case ids[0]:
+			got = &struct{ chosen string }{c.Chosen}
+			if len(c.Applicants) != 2 {
+				t.Errorf("both live applicants are listed: %v", c.Applicants)
+			}
+		case ids[1], ids[2]:
+			t.Errorf("%s must not be an evaluation case", c.OpportunityID)
+		}
+	}
+	if got == nil || got.chosen != "x2" {
+		t.Fatalf("the multi-applicant selected opportunity is a case with the chosen applicant: %+v", got)
+	}
+}

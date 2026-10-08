@@ -122,3 +122,31 @@ func Topics() []string {
 	}
 	return out
 }
+
+// 发布帖子时的「场景类型」是客户端可选填的（allowedSceneTypes），没填就是 UNKNOWN——**没有任何分类器**。
+// 这些帖子原来完全进不了场景兴趣标签。这里用正文话题做一次推断作为兜底；推断不出来就仍然是未知，不猜。
+// 值必须是帖子场景类型的合法取值（internal/localnet allowedSceneTypes 的子集）。
+var topicToScene = map[string]string{
+	"咖啡": "COFFEE", "美食": "BRUNCH", "摄影": "PHOTO", "电影": "CINEMA",
+	"徒步": "OUTDOOR", "露营": "OUTDOOR", "骑行": "OUTDOOR", "湖边": "OUTDOOR", "海边": "OUTDOOR",
+	"日落": "OUTDOOR", "老城": "OUTDOOR", "城市漫步": "OUTDOOR", "寺庙古迹": "OUTDOOR",
+}
+
+// InferScene 从正文推断场景类型；推断不出返回空串。
+func InferScene(body string) string {
+	for _, topic := range ExtractTopics(body) {
+		if scene, ok := topicToScene[topic]; ok {
+			return scene
+		}
+	}
+	return ""
+}
+
+// 不进画像的场景类型：夜生活 / SPA 属于陪同业务的法律敏感类目（见 docs/legal 律师清单第 7 条），
+// 平台不给用户贴「爱夜生活 / 爱 SPA」这类标签再拿去推荐或撮合。内容本身照常展示，只是不参与画像。
+var excludedScenes = map[string]bool{"NIGHTLIFE": true, "SPA": true}
+
+// ProfilableScene 报告某个场景类型能不能成为兴趣 / 回避标签的取值。
+func ProfilableScene(scene string) bool {
+	return scene != "" && scene != "UNKNOWN" && !excludedScenes[scene]
+}

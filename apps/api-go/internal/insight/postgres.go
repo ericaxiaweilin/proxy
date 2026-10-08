@@ -349,3 +349,33 @@ func (p *Postgres) Provider(ctx context.Context, userID string) (ProviderRow, bo
 	}
 	return rows[0], true, nil
 }
+
+// EvalCases：多人报名（≥2 个有效）且恰好选定了一人的公开单。点名私单不算。
+func (p *Postgres) EvalCases(ctx context.Context, since time.Time, limit int) ([]EvalCase, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT o.id,
+		       CASE WHEN o.payload ? 'lat' AND o.payload ? 'lng' THEN (o.payload->>'lat')::float8 END,
+		       CASE WHEN o.payload ? 'lat' AND o.payload ? 'lng' THEN (o.payload->>'lng')::float8 END,
+		       array_agg(a.applicant_id ORDER BY a.created_at),
+		       (array_agg(a.applicant_id) FILTER (WHERE a.payload->>'status' IN ('SELECTED','CONFIRMED')))[1]
+		  FROM marketplace.opportunities o
+		  JOIN marketplace.applications a ON a.opportunity_id = o.id
+		 WHERE o.created_at >= $1 AND COALESCE(o.payload->>'targetAccountId','') = ''
+		   AND a.payload->>'status' IN ('SUBMITTED','SELECTED','CONFIRMED')
+		 GROUP BY o.id, o.payload
+		HAVING COUNT(*) >= 2 AND COUNT(*) FILTER (WHERE a.payload->>'status' IN ('SELECTED','CONFIRMED')) = 1
+		 ORDER BY o.created_at DESC LIMIT $2`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EvalCase{}
+	for rows.Next() {
+		var c EvalCase
+		if err := rows.Scan(&c.OpportunityID, &c.Lat, &c.Lng, &c.Applicants, &c.Chosen); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

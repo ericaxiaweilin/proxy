@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/insight"
+	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 )
 
@@ -143,5 +144,62 @@ func TestProviderProfileNeedsMarketplaceScopeAndAnId(t *testing.T) {
 	}
 	if rec := consoleGet(server, "providers/profile?userId=known", "op_all_token"); rec.Code != http.StatusOK {
 		t.Fatalf("known provider: %d", rec.Code)
+	}
+}
+
+type fakeEval struct {
+	cases []EvalCase
+	order []string // 引擎排序：总是这个顺序
+}
+
+func (f fakeEval) Cases(context.Context, time.Time, int) ([]EvalCase, error) { return f.cases, nil }
+func (f fakeEval) Rank(_ context.Context, c EvalCase) ([]matching.Ranked, error) {
+	out := []matching.Ranked{}
+	for _, id := range f.order {
+		out = append(out, matching.Ranked{AgentID: id})
+	}
+	return out, nil
+}
+
+// 撮合评估：少于 30 单不给百分比；够了才给 top-1 一致率 / MRR / 中位名次；指标算对。
+func TestMatchingEvalRefusesPercentagesOnTinySamplesAndComputesTheMetrics(t *testing.T) {
+	small := ComputeMatchEval([]int{1, 1, 2}, 90)
+	if small.Enough || small.Top1Agreement != nil || small.MRR != nil || small.MedianRank != nil || small.Evaluated != 3 {
+		t.Fatalf("3 cases must not produce percentages: %+v", small)
+	}
+	ranks := make([]int, 0, 40)
+	for i := 0; i < 20; i++ {
+		ranks = append(ranks, 1)
+	}
+	for i := 0; i < 10; i++ {
+		ranks = append(ranks, 2)
+	}
+	for i := 0; i < 10; i++ {
+		ranks = append(ranks, 4)
+	}
+	ev := ComputeMatchEval(ranks, 90)
+	if !ev.Enough || *ev.Top1Agreement != 0.5 || *ev.MRR != 0.688 || *ev.MedianRank != 1.5 {
+		t.Fatalf("40 cases: top1=.5 mrr=(20+5+2.5)/40=.6875→.688 median=1.5, got %+v", ev)
+	}
+	if ev.RankHistogram[0] != 20 || ev.RankHistogram[1] != 10 || ev.RankHistogram[3] != 10 {
+		t.Fatalf("histogram: %v", ev.RankHistogram)
+	}
+	if ComputeMatchEval([]int{9}, 90).RankHistogram[5] != 1 {
+		t.Fatal("rank 6 and beyond share the last bucket")
+	}
+}
+
+func TestMatchingEvalEndpointIsOperatorOnlyAndHonestWhenUnwired(t *testing.T) {
+	server := operatorConsoleServer()
+	if rec := consoleGet(server, "matching-eval", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no session: %d", rec.Code)
+	}
+	if rec := consoleGet(server, "matching-eval", "ops_token"); !strings.Contains(rec.Body.String(), OperatorNotConnectedSource) {
+		t.Fatalf("unwired: %s", rec.Body.String())
+	}
+	server.MatchEval = fakeEval{cases: []EvalCase{{OpportunityID: "o1", Applicants: []string{"a", "b"}, Chosen: "b"}}, order: []string{"a", "b"}}
+	rec := consoleGet(server, "matching-eval", "ops_token")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "样本不足") || strings.Contains(rec.Body.String(), `"top1Agreement":0`) {
+		t.Fatalf("one case is not enough and must say so, with no percentage: %d %s", rec.Code, rec.Body.String())
 	}
 }
