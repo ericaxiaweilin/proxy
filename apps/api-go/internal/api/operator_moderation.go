@@ -193,3 +193,66 @@ func (s *Server) operatorAppealDecision(w http.ResponseWriter, r *http.Request) 
 	s.auditWrite(r, "APPEAL_DECISION", string(ScopeModeration), entry)
 	writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "decisionId": result.Aggregate.ID, "state": result.Aggregate.State, "enforcement": "RECORD_ONLY"})
 }
+
+// OPS-AUTHORITY-001：有权机关请求。
+//
+//	GET  /v1/operator/authority-requests?includeClosed=1
+//	POST /v1/operator/authority-requests          受理一条请求（四项核验缺一不收，时限由请求种类决定）
+//	POST /v1/operator/authority-requests/response 记录对它的响应（FULFILLED / PARTIALLY_FULFILLED / REFUSED / NO_DATA_FOUND）
+//
+// 都走 Moderation 命令边界（核验、时限、署名都在域里），要 AUTHORITY 权限并留审计。
+func (s *Server) operatorAuthorityQueue(w http.ResponseWriter, r *http.Request) {
+	if s.Moderation == nil {
+		notConnected("有权机关请求（没有配数据库）", "COMP-AUTHORITY-001")(w, r)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	queue, err := s.Moderation.AuthorityQueue(r.Context(), r.URL.Query().Get("includeClosed") == "1", limit)
+	if err != nil {
+		log.Printf("operator authority queue: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "authority_queue_failed"})
+		return
+	}
+	s.auditWrite(r, "AUTHORITY_QUEUE_VIEW", string(ScopeAuthority), operatoraudit.Entry{TargetKind: "AuthorityQueue", TargetID: "-", Outcome: operatoraudit.OutcomeOK})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dataSource":     OperatorLiveSource,
+		"authorityQueue": queue,
+		"kinds":          moderation.AuthorityRequestKinds(),
+		"outcomes":       moderation.AuthorityOutcomes(),
+	})
+}
+
+func (s *Server) operatorAuthorityCommand(commandType, auditAction, idField string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.Moderation == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "moderation_not_configured"})
+			return
+		}
+		var payload map[string]any
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload) != nil || payload == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "json_body_required"})
+			return
+		}
+		envelope, ok := s.moderationEnvelope(r, commandType, payload)
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "access_token_required"})
+			return
+		}
+		result := s.Moderation.HandleContext(r.Context(), envelope)
+		target, _ := payload[idField].(string)
+		if target == "" {
+			target, _ = payload["requestRef"].(string)
+		}
+		entry := operatoraudit.Entry{TargetKind: "AuthorityRequest", TargetID: target, Detail: map[string]any{"command": commandType}}
+		if result.Error != nil {
+			entry.Outcome = operatoraudit.OutcomeDenied
+			entry.Detail["error"] = result.Error.ErrorCode
+			s.auditWrite(r, auditAction, string(ScopeAuthority), entry)
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": result.Error.ErrorCode})
+			return
+		}
+		entry.Outcome = operatoraudit.OutcomeOK
+		s.auditWrite(r, auditAction, string(ScopeAuthority), entry)
+		writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "id": result.Aggregate.ID, "state": result.Aggregate.State})
+	}
+}

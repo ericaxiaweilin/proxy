@@ -327,3 +327,25 @@ func (r *MemoryRepository) ListAppealQueue(_ context.Context) ([]AppealQueueEntr
 	}
 	return out, nil
 }
+
+func (r *MemoryRepository) ListAuthorityQueue(_ context.Context) ([]AuthorityQueueEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail {
+		return nil, ErrReportRepositoryDown
+	}
+	out := make([]AuthorityQueueEntry, 0, len(r.authRequests))
+	for _, req := range r.authRequests {
+		e := AuthorityQueueEntry{Request: req}
+		for _, resp := range r.authResponses {
+			if resp.RequestID == req.ID {
+				e.ResponseCount++
+				if e.LastRespondedAt.IsZero() || resp.RespondedAt.After(e.LastRespondedAt) {
+					e.LastOutcome, e.LastRespondedAt = resp.Outcome, resp.RespondedAt
+				}
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}

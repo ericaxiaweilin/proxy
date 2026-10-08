@@ -400,3 +400,39 @@ func (r *ModerationRepository) ListAppealQueue(ctx context.Context) ([]moderatio
 	}
 	return out, rows.Err()
 }
+
+const listAuthorityQueueSQL = `
+SELECT q.id, q.request_ref, q.authority, q.request_kind, q.verified_subject, q.verified_authority, q.verified_scope, q.verified_legality,
+       q.received_at, q.deadline_at, COALESCE(q.note, ''), q.actor_id, q.created_at,
+       COALESCE(c.cnt, 0), COALESCE(l.outcome, ''), l.responded_at
+  FROM moderation.authority_requests q
+  LEFT JOIN LATERAL (SELECT count(*) AS cnt FROM moderation.authority_responses WHERE request_id = q.id) c ON TRUE
+  LEFT JOIN LATERAL (SELECT outcome, responded_at FROM moderation.authority_responses
+                      WHERE request_id = q.id ORDER BY responded_at DESC, id DESC LIMIT 1) l ON TRUE
+ ORDER BY q.deadline_at ASC, q.id ASC`
+
+func (r *ModerationRepository) ListAuthorityQueue(ctx context.Context) ([]moderation.AuthorityQueueEntry, error) {
+	if r == nil || r.pool == nil {
+		return nil, moderation.ErrReportRepositoryDown
+	}
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, listAuthorityQueueSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []moderation.AuthorityQueueEntry{}
+	for rows.Next() {
+		var e moderation.AuthorityQueueEntry
+		var respondedAt *time.Time
+		q := &e.Request
+		if err := rows.Scan(&q.ID, &q.RequestRef, &q.Authority, &q.Kind, &q.VerifiedSubject, &q.VerifiedAuthority, &q.VerifiedScope, &q.VerifiedLegality,
+			&q.ReceivedAt, &q.DeadlineAt, &q.Note, &q.ActorID, &q.CreatedAt, &e.ResponseCount, &e.LastOutcome, &respondedAt); err != nil {
+			return nil, err
+		}
+		if respondedAt != nil {
+			e.LastRespondedAt = *respondedAt
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

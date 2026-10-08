@@ -149,3 +149,47 @@ func TestAppealQueueAndDecisionRunTheDomainRules(t *testing.T) {
 		t.Fatalf("with includeClosed it shows as REJECTED: %s", closed.Body.String())
 	}
 }
+
+// OPS-AUTHORITY-001：受理要四项核验、队列按截止排序且算出超时、响应后离开待办、普通运营（无 AUTHORITY）看不到。
+func TestAuthorityRequestsAreQueuedWithDeadlinesAndNeedTheAuthorityScope(t *testing.T) {
+	server := accessServer(operatoraudit.NewRecorder(&fakeAuditStore{}), []string{"op_all", "op_pay"}, map[string]map[OperatorScope]bool{"op_pay": {ScopePayments: true}})
+	server.Moderation = moderation.New()
+	do := func(method, path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(http.MethodGet, "/v1/operator/authority-requests", "op_pay_token", ""); rec.Code != http.StatusForbidden {
+		t.Fatalf("an operator without AUTHORITY must not see authority requests: %d", rec.Code)
+	}
+	incomplete := `{"requestRef":"CA-1","authority":"公安","requestKind":"USER_INFO","verifiedSubject":true,"verifiedAuthority":true,"verifiedScope":true,"verifiedLegality":false}`
+	if rec := do(http.MethodPost, "/v1/operator/authority-requests", "op_all_token", incomplete); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("incomplete verification must be refused: %d %s", rec.Code, rec.Body.String())
+	}
+	full := `{"requestRef":"CA-1","authority":"公安","requestKind":"USER_INFO","verifiedSubject":true,"verifiedAuthority":true,"verifiedScope":true,"verifiedLegality":true}`
+	rec := do(http.MethodPost, "/v1/operator/authority-requests", "op_all_token", full)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("record: %d %s", rec.Code, rec.Body.String())
+	}
+	var made struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &made)
+	rec = do(http.MethodGet, "/v1/operator/authority-requests", "op_all_token", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"OPEN"`) || !strings.Contains(rec.Body.String(), `"hoursLeft":`) || !strings.Contains(rec.Body.String(), `"overdue":false`) {
+		t.Fatalf("an open request carries its remaining hours: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(http.MethodPost, "/v1/operator/authority-requests/response", "op_all_token", `{"requestId":"`+made.ID+`","outcome":"FULFILLED"}`); rec.Code != http.StatusOK {
+		t.Fatalf("response: %d %s", rec.Code, rec.Body.String())
+	}
+	if open := do(http.MethodGet, "/v1/operator/authority-requests", "op_all_token", ""); strings.Contains(open.Body.String(), made.ID) {
+		t.Fatal("a responded request must leave the open queue")
+	}
+	if closed := do(http.MethodGet, "/v1/operator/authority-requests?includeClosed=1", "op_all_token", ""); !strings.Contains(closed.Body.String(), `"state":"RESPONDED"`) || !strings.Contains(closed.Body.String(), `"overdue":false`) {
+		t.Fatalf("closed view shows RESPONDED and on time: %s", closed.Body.String())
+	}
+}

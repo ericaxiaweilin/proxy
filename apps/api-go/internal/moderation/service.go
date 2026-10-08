@@ -151,6 +151,8 @@ type Repository interface {
 	ListReportQueue(ctx context.Context) ([]ReportQueueEntry, error)
 	// ListAppealQueue（OPS-APPEALS-001）：申诉 + 原举报摘要 + 复核链摘要。
 	ListAppealQueue(ctx context.Context) ([]AppealQueueEntry, error)
+	// ListAuthorityQueue（OPS-AUTHORITY-001）：有权机关请求 + 响应链摘要。
+	ListAuthorityQueue(ctx context.Context) ([]AuthorityQueueEntry, error)
 	AddAppeal(ctx context.Context, appeal Appeal) error
 	FindAppeal(ctx context.Context, appealID string) (Appeal, bool)
 	AddAppealDecision(ctx context.Context, decision AppealDecision) error
