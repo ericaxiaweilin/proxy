@@ -78,8 +78,8 @@ func TestStoreBoardReadModelRunsAgainstRealSchema(t *testing.T) {
 	// 场景 id 只在 payload JSONB 里（037 建表时 activities 没有专列）—— 活动 id 本身
 	// 带 run 后缀，所以 A 店那场除了 id 匹配没有第二条路能命中。
 	exec(`INSERT INTO activity.activities (id, payload, interested_count, joined_count, capacity, created_at) VALUES
-		($1, jsonb_build_object('title','有门店的场景','realitySceneId',$3), 0, 3, 10, now()),
-		($2, jsonb_build_object('title','没人认领的场景','realitySceneId',$4), 0, 1, 10, now())`,
+		($1, jsonb_build_object('title','有门店的场景','realitySceneId',$3::text), 0, 3, 10, now()),
+		($2, jsonb_build_object('title','没人认领的场景','realitySceneId',$4::text), 0, 1, 10, now())`,
 		actA, actUnclaimed, sceneA, sceneUnclaimed)
 
 	// 报名：A 店 2 单 CONFIRMED + 1 单 CANCELLED（窗口外再留一单，边界必须真的生效）；

@@ -125,9 +125,9 @@ func (p *Postgres) Board(ctx context.Context, since time.Time) (Board, error) {
 			SELECT
 				s.id AS store_id, s.name, s.business_id,
 				(SELECT COUNT(*) FROM activity.participants p
-				  WHERE p.store_id = s.id AND p.joined_at >= $1 AND p.state = 'CONFIRMED'),
+				  WHERE p.store_id = s.id AND p.joined_at >= $1 AND p.state = 'CONFIRMED') AS bookings,
 				(SELECT COUNT(*) FROM activity.participants p
-				  WHERE p.store_id = s.id AND p.joined_at >= $1 AND p.state <> 'CONFIRMED'),
+				  WHERE p.store_id = s.id AND p.joined_at >= $1 AND p.state <> 'CONFIRMED') AS cancelled,
 				snap.current_capacity_pct AS capacity_pct,
 				snap.forecast_capacity_pct AS forecast_pct,
 				snap.accepting_traffic AS accepting_traffic,

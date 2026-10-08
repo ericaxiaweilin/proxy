@@ -52,6 +52,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/scenereview"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
+	"github.com/proxy-app/proxy-api/internal/storeboard"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/usermodel"
@@ -724,6 +725,8 @@ func main() {
 		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。
 		matchingStore := matching.NewPostgres(pool)
 		server.Matching = matchingStore
+		// STORE-ATTRIBUTION-P1：门店预约与承载看板（控制台 /v1/operator/store-board）。
+		server.StoreBoard = storeboard.NewPostgres(pool)
 		// MARKET-RANK-001：市场报名人按同一套撮合口径排序（可靠 / 距离 / 新人 / 负载…），给发单方看理由。
 		rankUsers := func(ctx context.Context, ids []string, lat, lng *float64) ([]matching.Ranked, error) {
 			signals, err := matchingStore.UserSignals(ctx, ids)
