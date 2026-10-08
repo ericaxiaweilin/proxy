@@ -136,6 +136,9 @@ type Server struct {
 	Insight      insight.Source
 	// MatchPreview：撮合预览（OPS-MATCH-PREVIEW-001），组合根接线。
 	MatchPreview MatchPreviewFunc
+	// ProviderList / ProviderProfile：小美画像（OPS-PROVIDER-PROFILE-001），组合根接线。
+	ProviderList    ProviderListFunc
+	ProviderProfile ProviderProfileFunc
 	TagStore     tagging.Store
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
@@ -255,6 +258,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/experience/surface", s.experienceSurface)
 	mux.HandleFunc("/v1/experience/delta", s.experienceDelta)
 	mux.HandleFunc("/v1/experience/metrics", s.experienceMetrics)
+	mux.HandleFunc("/v1/operator/providers", s.operatorConsoleGated(http.MethodGet, ScopeMarketplace, s.operatorProviders))
+	mux.HandleFunc("/v1/operator/providers/profile", s.operatorConsoleGated(http.MethodGet, ScopeMarketplace, s.operatorProviderProfile))
 	mux.HandleFunc("/v1/operator/match-preview", s.operatorConsoleGated(http.MethodGet, ScopeMarketplace, s.operatorMatchPreview))
 	mux.HandleFunc("/v1/operator/demand-gap", s.operatorConsole(s.operatorDemandGap))
 	mux.HandleFunc("/v1/operator/insights", s.operatorConsole(s.operatorInsights))

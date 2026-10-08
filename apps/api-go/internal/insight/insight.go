@@ -121,7 +121,19 @@ type InterestRow struct {
 	Confidence float64 `json:"confidence"` // 平均置信度
 }
 
+// ProviderRow 是接单资料已上线（非草稿）的服务方的基本信息。
+type ProviderRow struct {
+	UserID   string   `json:"userId"`
+	Name     string   `json:"name"`
+	Handle   string   `json:"handle"`
+	City     string   `json:"city"`
+	Services []string `json:"services"`
+}
+
 type Source interface {
+	// Providers 列出服务方（limit 上限 500）；Provider 取一个（不存在返回 false）。
+	Providers(ctx context.Context, limit int) ([]ProviderRow, error)
+	Provider(ctx context.Context, userID string) (ProviderRow, bool, error)
 	// TopInterests：各兴趣类轴（话题 / 场景 / 活动 / 场所类型）里最普遍的标签，已做小格子抑制。
 	TopInterests(ctx context.Context, now time.Time, limit int) ([]InterestRow, error)
 	DemandGap(ctx context.Context, now time.Time, days int) (DemandGap, error)

@@ -805,6 +805,10 @@ func main() {
 			}
 			dispatchEngine.Inviter = inviter
 			// OPS-MATCH-PREVIEW-001：撮合预览用同一个 inviter（候选范围与真邀请一致），只读、不发邀约。
+			// OPS-PROVIDER-PROFILE-001：小美画像（列表 + 单个画像），只读。
+			profiles := providerProfiles{providers: server.Insight, signals: matchingStore, tags: &tagging.Service{Store: server.TagStore}}
+			server.ProviderList = profiles.List
+			server.ProviderProfile = profiles.Profile
 			server.MatchPreview = func(ctx context.Context, opportunityID string, limit int) (api.MatchPreviewResult, error) {
 				return inviter.Preview(ctx, opportunityID, limit, &tagging.Service{Store: server.TagStore}, time.Now().UTC())
 			}

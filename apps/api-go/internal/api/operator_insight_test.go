@@ -20,6 +20,10 @@ type fakeInsight struct {
 func (f *fakeInsight) TopInterests(context.Context, time.Time, int) ([]insight.InterestRow, error) {
 	return []insight.InterestRow{{Tag: "话题·摄影", Axis: "INTEREST_TOPIC", Value: "摄影", Users: 7, Score: .6, Confidence: .7}}, nil
 }
+func (f *fakeInsight) Providers(context.Context, int) ([]insight.ProviderRow, error) { return nil, nil }
+func (f *fakeInsight) Provider(context.Context, string) (insight.ProviderRow, bool, error) {
+	return insight.ProviderRow{}, false, nil
+}
 func (f *fakeInsight) DemandGap(context.Context, time.Time, int) (insight.DemandGap, error) {
 	return f.gap, nil
 }
@@ -116,5 +120,28 @@ func TestBehaviorTopInterestsComeFromTheTagLayerOrSayWhyNot(t *testing.T) {
 	got := body()
 	if !strings.Contains(got, "话题·摄影") || strings.Contains(got, "tag-service") {
 		t.Fatalf("interests must come from the tag layer and the old 'not implemented' excuse must be gone: %s", got)
+	}
+}
+
+// OPS-PROVIDER-PROFILE-001：看的是具体的人 → MARKETPLACE；缺参数 400；查无此人 404；没接线诚实说。
+func TestProviderProfileNeedsMarketplaceScopeAndAnId(t *testing.T) {
+	server := accessServer(operatoraudit.NewRecorder(&fakeAuditStore{}), []string{"op_all", "op_pay"}, map[string]map[OperatorScope]bool{"op_pay": {ScopePayments: true}})
+	if rec := consoleGet(server, "providers", "op_pay_token"); rec.Code != http.StatusForbidden {
+		t.Fatalf("without MARKETPLACE: %d", rec.Code)
+	}
+	if rec := consoleGet(server, "providers/profile?userId=x", "op_all_token"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), OperatorNotConnectedSource) {
+		t.Fatalf("unwired must say NOT_CONNECTED: %d", rec.Code)
+	}
+	server.ProviderProfile = func(_ context.Context, id string) (ProviderProfileResult, bool, error) {
+		return ProviderProfileResult{Provider: ProviderListItem{UserID: id}}, id == "known", nil
+	}
+	if rec := consoleGet(server, "providers/profile", "op_all_token"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing userId: %d", rec.Code)
+	}
+	if rec := consoleGet(server, "providers/profile?userId=ghost", "op_all_token"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown provider: %d", rec.Code)
+	}
+	if rec := consoleGet(server, "providers/profile?userId=known", "op_all_token"); rec.Code != http.StatusOK {
+		t.Fatalf("known provider: %d", rec.Code)
 	}
 }

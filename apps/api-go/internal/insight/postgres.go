@@ -304,3 +304,48 @@ func (p *Postgres) TopInterests(ctx context.Context, now time.Time, limit int) (
 	}
 	return out, rows.Err()
 }
+
+const providersSQL = `
+SELECT ap.user_account_id, COALESCE(ip.name, ''), COALESCE(ip.handle, ''), COALESCE(ip.city, ''),
+       COALESCE(array_agg(DISTINCT s.service_type) FILTER (WHERE s.service_type IS NOT NULL), '{}')
+  FROM supply.agent_profiles ap
+  LEFT JOIN identity.profiles ip ON ip.user_account_id = ap.user_account_id
+  LEFT JOIN supply.agent_services s ON s.agent_id = ap.agent_id AND s.status <> 'DRAFT'
+ WHERE ap.user_account_id IS NOT NULL AND ap.status <> 'DRAFT' AND ($1 = '' OR ap.user_account_id = $1)
+ GROUP BY ap.user_account_id, ip.name, ip.handle, ip.city
+ ORDER BY ap.user_account_id LIMIT $2`
+
+func (p *Postgres) providers(ctx context.Context, id string, limit int) ([]ProviderRow, error) {
+	rows, err := p.pool.Query(ctx, providersSQL, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProviderRow{}
+	for rows.Next() {
+		var r ProviderRow
+		if err := rows.Scan(&r.UserID, &r.Name, &r.Handle, &r.City, &r.Services); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Providers(ctx context.Context, limit int) ([]ProviderRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	return p.providers(ctx, "", limit)
+}
+
+func (p *Postgres) Provider(ctx context.Context, userID string) (ProviderRow, bool, error) {
+	if userID == "" {
+		return ProviderRow{}, false, nil
+	}
+	rows, err := p.providers(ctx, userID, 1)
+	if err != nil || len(rows) == 0 {
+		return ProviderRow{}, false, err
+	}
+	return rows[0], true, nil
+}
