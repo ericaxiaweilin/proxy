@@ -702,8 +702,11 @@ export function SceneActivityDiscovery({
             </View>
 
           <View style={[styles.pickerActions, { paddingBottom: Math.max(12, safeArea.bottom) }]}><Pressable onPress={resetAll} style={styles.pickerReset}><Text selectable style={styles.pickerResetText}>重置</Text></Pressable>{/* 2026-10-08（用户：点了咖啡后底下是 重置/完成，完成还是回 home —— 应该是 选择 → 场景 list）：
-              主按钮不再是「完成」回首页，而是进该动作的场景列表；选的动作没有真实场景就不摆主按钮。 */}
-            {actionId && entriesForAction[0] ? <Pressable accessibilityLabel={`选择场景 ${entriesForAction[0].label}`} onPress={() => setDirectoryEntry(entriesForAction[0]!)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>选择场景 · {entriesForAction[0].count} {entriesForAction[0].unit}</Text></Pressable> : null}</View>
+              主按钮不再是「完成」回首页，而是进该动作的场景列表；没有真实场景的动作进去由列表自己说「还没有接入」，不再回首页。 */}
+            {actionId ? (() => {
+              const target = entriesForAction[0] ?? { actionId: actionMatchId(actionId) ?? actionId, label: taxon(ACTIONS, actionMatchId(actionId) ?? actionId).label, unit: "个" as const };
+              return <Pressable accessibilityLabel={`选择场景 ${target.label}`} onPress={() => setDirectoryEntry(target)} style={styles.pickerDone}><Text selectable style={styles.pickerDoneText}>{entriesForAction[0] ? `选择场景 · ${entriesForAction[0].count} ${entriesForAction[0].unit}` : "选择场景"}</Text></Pressable>;
+            })() : null}</View>
         </View>
       </Modal>
 
