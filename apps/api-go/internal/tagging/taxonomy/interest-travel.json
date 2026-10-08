@@ -421,7 +421,8 @@
     "thị thực",
     "签证材料",
     "visa"
-   ]
+   ],
+   "action": "urban-support"
   },
   {
    "id": "interest/travel/planning/translate",
@@ -435,7 +436,8 @@
     "语言不通",
     "phiên dịch hỗ trợ",
     "phrasebook"
-   ]
+   ],
+   "action": "translation"
   },
   {
    "id": "interest/travel/planning/weather",

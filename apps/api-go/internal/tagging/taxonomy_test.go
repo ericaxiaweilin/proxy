@@ -90,3 +90,28 @@ func TestTaxonomyMatchesLanguagesAndRollsUpToAncestors(t *testing.T) {
 	}
 	_ = strings.TrimSpace
 }
+
+// 词典只能挂到产品里已有的活动入口；产品没有的活动（登山徒步）只是兴趣标签。
+func TestTaxonomyHooksOnlyToExistingProductActivities(t *testing.T) {
+	tx, err := DefaultTaxonomy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{
+		"interest/drink/coffee/latte":      "coffee",
+		"interest/sports/cycling/mtb":      "cycling",
+		"interest/sports/badminton":        "sport",
+		"interest/outdoor/mountain":        "",
+		"interest/outdoor/mountain/hiking": "",
+	} {
+		if _, ok := tx.nodes[id]; !ok {
+			continue
+		}
+		if got := tx.ActionOf(id); got != want {
+			t.Fatalf("%s hooks to %q, want %q", id, got, want)
+		}
+	}
+	if _, err := BuildTaxonomy([]Node{{ID: "interest", Name: Names{ZH: "兴趣", VI: "Sở thích", EN: "Interests"}, Action: "hiking"}}); err == nil {
+		t.Fatal("an activity the product does not have must be rejected")
+	}
+}

@@ -146,7 +146,8 @@
     "博物馆",
     "museum",
     "phòng truyền thống"
-   ]
+   ],
+   "action": "exhibition"
   },
   {
    "id": "interest/culture/heritage/history",
@@ -408,7 +409,8 @@
     "mỹ thuật",
     "美术",
     "họa sĩ"
-   ]
+   ],
+   "action": "exhibition"
   },
   {
    "id": "interest/culture/visual_arts/exhibit",
@@ -1002,7 +1004,8 @@
     "không gian văn hóa",
     "文化空间",
     "sinh hoạt tổ dân phố"
-   ]
+   ],
+   "action": "city-walk"
   },
   {
    "id": "interest/culture/city_spaces/walking_street",
@@ -1129,7 +1132,8 @@
     "phiên dịch hiện trường",
     "翻译文件",
     "công chứng"
-   ]
+   ],
+   "action": "translation"
   },
   {
    "id": "interest/culture/lang/dialect",

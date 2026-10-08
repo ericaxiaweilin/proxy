@@ -539,7 +539,8 @@
     "chứng thực",
     "tư pháp",
     "sao y"
-   ]
+   ],
+   "action": "translation"
   },
   {
    "id": "interest/local/errands/bank_queue",
@@ -707,7 +708,8 @@
     "phố phường",
     "đời sống ven đường",
     "lề phố"
-   ]
+   ],
+   "action": "city-walk"
   },
   {
    "id": "interest/local/streets/sidewalk_sit",

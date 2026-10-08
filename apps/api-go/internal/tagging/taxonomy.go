@@ -42,6 +42,30 @@ type Node struct {
 	Status string `json:"status,omitempty"`
 	// Kind: KEYWORD（默认，靠关键词命中）| DERIVED（由规则 / 统计推导，如应用使用与聊天风格，没有关键词）。
 	Kind string `json:"kind,omitempty"`
+	// Action：这个节点挂在产品里**已有**的哪个活动入口上（ProductActions），子节点继承。
+	// 空 = 只是兴趣标签：产品里没有对应的活动，不拿它去造活动、也不当活动词用（例：登山徒步）。
+	Action string `json:"action,omitempty"`
+}
+
+// ProductActions 是产品里已有的活动入口（mobile SCENE_ACTIONS 的 id）。词典只能挂到这里，不自己造活动。
+var ProductActions = map[string]bool{
+	"coffee": true, "dining": true, "city-walk": true, "photo": true, "cycling": true, "exhibition": true, "shopping": true,
+	"movie": true, "music": true, "explore-store": true, "travel": true, "sport": true, "translation": true, "urban-support": true,
+}
+
+// ActionOf 返回节点（或最近的祖先）挂的活动入口；没有 = 只是兴趣。
+func (t *Taxonomy) ActionOf(id string) string {
+	for id != "" {
+		n, ok := t.nodes[id]
+		if !ok {
+			return ""
+		}
+		if n.Action != "" {
+			return n.Action
+		}
+		id = n.Parent
+	}
+	return ""
 }
 
 type taxonomyFile struct {
@@ -170,6 +194,9 @@ func (t *Taxonomy) related(a, b string) bool {
 func validateNode(n Node) error {
 	if !validNodeID(n.ID) {
 		return fmt.Errorf("taxonomy: bad id %q", n.ID)
+	}
+	if n.Action != "" && !ProductActions[n.Action] {
+		return fmt.Errorf("taxonomy: %q hooks to %q, which is not an existing product activity", n.ID, n.Action)
 	}
 	if strings.Count(n.ID, "/") > 3 {
 		return fmt.Errorf("taxonomy: %q is deeper than 4 levels", n.ID)

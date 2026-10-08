@@ -43,7 +43,8 @@
     "xe đạp",
     "đạp xe đi làm",
     "bicycle"
-   ]
+   ],
+   "action": "cycling"
   },
   {
    "id": "interest/transport/twowheel/elebike",

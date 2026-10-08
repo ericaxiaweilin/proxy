@@ -592,7 +592,8 @@
     "giải nghĩa thuốc",
     "bác sĩ giải thích",
     "phiên dịch phòng khám"
-   ]
+   ],
+   "action": "translation"
   },
   {
    "id": "interest/services/health_help/pharmacy_pick",
@@ -990,7 +991,8 @@
     "bản dịch nộp",
     "dịch có dấu",
     "song ngữ giấy"
-   ]
+   ],
+   "action": "translation"
   },
   {
    "id": "interest/services/newcomer",

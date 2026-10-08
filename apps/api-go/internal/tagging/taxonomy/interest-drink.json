@@ -15,7 +15,8 @@
     "cafe",
     "coffee",
     "quán cà phê"
-   ]
+   ],
+   "action": "coffee"
   },
   {
    "id": "interest/drink/coffee/espresso",

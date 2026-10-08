@@ -267,7 +267,8 @@
     "đạp",
     "cycling",
     "biker"
-   ]
+   ],
+   "action": "cycling"
   },
   {
    "id": "interest/sports/cycling/road_bike",

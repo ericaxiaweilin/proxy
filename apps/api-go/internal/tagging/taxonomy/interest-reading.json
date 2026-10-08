@@ -609,7 +609,8 @@
     "biên dịch",
     "dịch sách",
     "dịch giả"
-   ]
+   ],
+   "action": "translation"
   },
   {
    "id": "interest/reading/write/calligraphy",

@@ -36,7 +36,8 @@
     "运动",
     "sports",
     "thể thao"
-   ]
+   ],
+   "action": "sport"
   },
   {
    "id": "interest/food",
@@ -50,7 +51,8 @@
     "美食",
     "ẩm thực",
     "foodie"
-   ]
+   ],
+   "action": "dining"
   },
   {
    "id": "interest/drink",
@@ -78,7 +80,8 @@
     "旅行",
     "du lịch",
     "travel"
-   ]
+   ],
+   "action": "travel"
   },
   {
    "id": "interest/culture",
@@ -106,7 +109,8 @@
     "音乐",
     "âm nhạc",
     "music"
-   ]
+   ],
+   "action": "music"
   },
   {
    "id": "interest/film",
@@ -120,7 +124,8 @@
     "影视",
     "phim ảnh",
     "movies"
-   ]
+   ],
+   "action": "movie"
   },
   {
    "id": "interest/reading",
@@ -260,7 +265,8 @@
     "摄影",
     "nhiếp ảnh",
     "photography"
-   ]
+   ],
+   "action": "photo"
   },
   {
    "id": "interest/games",
@@ -316,7 +322,8 @@
     "购物",
     "mua sắm",
     "shopping"
-   ]
+   ],
+   "action": "shopping"
   },
   {
    "id": "interest/transport",
