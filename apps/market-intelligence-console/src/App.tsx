@@ -21,13 +21,14 @@ import { Merchant } from "./pages/Merchant";
 import { Matching } from "./pages/Matching";
 import { Dispatch } from "./pages/Dispatch";
 import { MarketBoard } from "./pages/MarketBoard";
+import { StoreBoard } from "./pages/StoreBoard";
 import { Retention } from "./pages/Retention";
 import { Trust } from "./pages/Trust";
 import { Quality } from "./pages/Quality";
 import { NumberLookup } from "./pages/NumberLookup";
 import { Access } from "./pages/Access";
 
-type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
+type Page = "overview" | "population" | "behavior" | "tags" | "intent" | "orchestration" | "engine" | "engineapi" | "contextfield" | "surface" | "research" | "clarification" | "supplyactivation" | "executionruntime" | "fulfillmentattr" | "merchant" | "matching" | "dispatch" | "marketboard" | "storeboard" | "retention" | "trust" | "quality" | "workbench" | "providers" | "numberlookup" | "access";
 
 const TITLES: Record<Page, string> = {
   overview: "平台总览",
@@ -49,6 +50,7 @@ const TITLES: Record<Page, string> = {
   matching: "撮合引擎管理",
   dispatch: "派单调度",
   marketboard: "市场发单看板",
+  storeboard: "门店预约与承载",
   retention: "留存与复购",
   trust: "信任与风险",
   providers: "KYC认证审核",
@@ -73,7 +75,7 @@ export function App() {
         {/* DISPATCH-LOOP-001：运营每天真正在用的那一页，放最上面。 */}
         <div className="navgroup">工作台</div>
         <div className="nav">
-          {(["dispatch", "marketboard"] as Page[]).map((p) => (
+          {(["dispatch", "marketboard", "storeboard"] as Page[]).map((p) => (
             <button key={p} className={page === p ? "active" : ""} onClick={() => setPage(p)}>{TITLES[p]}</button>
           ))}
         </div>
@@ -164,6 +166,8 @@ export function App() {
           {page === "dispatch" && <Dispatch />}
           {/* MARKET-FAST-001：市场发单看板 —— 快速发单一段时间内的表现（只读） */}
           {page === "marketboard" && <MarketBoard />}
+          {/* STORE-ATTRIBUTION-P1：门店预约与承载 —— 哪一家店拿到了承载预约、承载快照有多新（只读） */}
+          {page === "storeboard" && <StoreBoard />}
           {page === "retention" && <Retention />}
           {page === "trust" && <Trust />}
           {page === "providers" && <ProviderApplications />}
@@ -171,7 +175,7 @@ export function App() {
           {page === "access" && <Access />}
           {page === "quality" && <Quality />}
           {page === "workbench" && <Quality />}
-          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
+          {!["overview", "contextfield", "surface", "research", "executionruntime", "engine", "engineapi", "clarification", "supplyactivation", "behavior", "fulfillmentattr", "population", "tags", "intent", "orchestration", "merchant", "matching", "dispatch", "marketboard", "storeboard", "retention", "trust", "quality", "workbench", "numberlookup", "access"].includes(page) && (
             <div className="notice">
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>

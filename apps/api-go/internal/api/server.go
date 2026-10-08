@@ -49,6 +49,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/scene"
 	"github.com/proxy-app/proxy-api/internal/scenereview"
 	"github.com/proxy-app/proxy-api/internal/socialspace"
+	"github.com/proxy-app/proxy-api/internal/storeboard"
 	"github.com/proxy-app/proxy-api/internal/storeonboarding"
 	"github.com/proxy-app/proxy-api/internal/supply"
 	"github.com/proxy-app/proxy-api/internal/twininsight"
@@ -145,6 +146,9 @@ type Server struct {
 	// Matching：撮合排序的旋钮存储与决策留痕读模型（OPS-MATCHING-TUNABLES-001）。
 	// nil = 没配库，/v1/operator/matching 返回 NOT_CONNECTED，引擎按出厂默认跑。
 	Matching matching.ConsoleStore
+	// StoreBoard：门店预约与承载读模型（STORE-ATTRIBUTION-P1）。算不出来的数是 null，
+	// 页面显示「—」。nil = 没配库，工作台返回 NOT_CONNECTED，一个数都不给。
+	StoreBoard storeboard.Source
 	// Dispatch：FAST 需求的自动派单（DISPATCH-LOOP-001）。nil = 没配库，工作台返回 NOT_CONNECTED。
 	Dispatch      *dispatch.Engine
 	DispatchStats DispatchStatsSource
@@ -269,6 +273,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/dispatch/actions", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorDispatchAction))
 	// MARKET-FAST-001：市场发单看板 —— 快速发单一段时间内的表现（只读，同一道 ANALYTICS 门）。
 	mux.HandleFunc("/v1/operator/market-dispatch", s.operatorConsole(s.operatorMarketBoard))
+	// STORE-ATTRIBUTION-P1：门店预约与承载 —— 哪一家店拿到了多少承载预约、它自己报的
+	// 承载快照有多新（只读，同一道 ANALYTICS 门）。
+	mux.HandleFunc("/v1/operator/store-board", s.operatorConsole(s.operatorStoreBoard))
 	mux.HandleFunc("/v1/operator/provider-applications", s.operatorConsole(s.operatorProviderApplications))
 	mux.HandleFunc("/v1/operator/provider-applications/review", s.operatorConsoleMethod(http.MethodPost, s.operatorProviderApplicationReview))
 	// OPS-ACCESS-001: 运营权限自己的可观测面 —— 词汇表 / 当前配置 / 我生效的 scope /
