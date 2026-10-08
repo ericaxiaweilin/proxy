@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -38,7 +39,8 @@ func TestInviterInvitesTheBestRankedNearbyPeopleOnly(t *testing.T) {
 	marketCmd(svc, "ApplyToMarketOpportunity", "already", map[string]any{"opportunityId": opp, "quote": "800,000₫", "scope": "中文"})
 	var rankedIDs []string
 	inv := nearbyInviter{
-		market: svc,
+		market:    svc,
+		permitted: everyoneOptedIn,
 		nearby: func(context.Context, float64, float64, float64, int) ([]string, error) {
 			// 离得最近的排在前面 —— 但邀请顺序看撮合排名，不看距离。
 			return []string{"owner", "already", "invited_before", "near_flaky", "far_reliable", "mid"}, nil
@@ -80,7 +82,8 @@ func TestFastOpportunityWithNobodyApplyingInvitesAfterTenMinutes(t *testing.T) {
 		NewID: func() string { return "dr_1" }}
 	wireMarketDispatch(engine, svc)
 	engine.Inviter = nearbyInviter{
-		market: svc,
+		market:    svc,
+		permitted: everyoneOptedIn,
 		nearby: func(context.Context, float64, float64, float64, int) ([]string, error) {
 			return []string{"p1", "p2"}, nil
 		},
@@ -108,3 +111,26 @@ func TestFastOpportunityWithNobodyApplyingInvitesAfterTenMinutes(t *testing.T) {
 		t.Fatalf("10 minutes with no applicants ⇒ nearby people are invited: %v", invited)
 	}
 }
+
+// 2026-10-08 仓库审核：没开通接单的人不能被平台邀进别人的单里。
+func TestInvitesOnlyReachPeopleWhoOptedIntoOrders(t *testing.T) {
+	permitted := func(_ context.Context, id string) (bool, error) {
+		switch id {
+		case "kyc_ok":
+			return true, nil
+		case "broken":
+			return false, errors.New("db down")
+		}
+		return false, nil
+	}
+	got := onlyPermitted(context.Background(), []string{"stranger", "kyc_ok", "broken"}, permitted)
+	if len(got) != 1 || got[0] != "kyc_ok" {
+		t.Fatalf("only the KYC-approved person may be invited (unreadable = no): %v", got)
+	}
+	if onlyPermitted(context.Background(), []string{"kyc_ok"}, nil) != nil {
+		t.Fatal("no permission source at all must invite nobody")
+	}
+}
+
+// 这两个既有用例测的是排序 / 顺延，不是权限：假设候选人都已开通接单。权限本身在上面那条用例里钉。
+func everyoneOptedIn(context.Context, string) (bool, error) { return true, nil }

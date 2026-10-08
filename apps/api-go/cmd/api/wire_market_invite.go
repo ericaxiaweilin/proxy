@@ -19,6 +19,24 @@ type nearbyInviter struct {
 	market *marketplace.Service
 	nearby func(ctx context.Context, lat, lng, maxDistanceM float64, limit int) ([]string, error)
 	rank   func(ctx context.Context, ids []string, lat, lng *float64) ([]matching.Ranked, error)
+	// permitted：这个人有没有接单权限（KYC 通过）。没有就不邀 —— 她没主动开通过接单，
+	// 平台不能替她出现在别人的邀约里（2026-10-08 仓库审核：未经同意被曝光）；而且没通过 KYC
+	// 的人本来也报不了名。读不出来 = 当作没有（fail-closed）。
+	permitted func(ctx context.Context, userID string) (bool, error)
+}
+
+// onlyPermitted 留下有接单权限的人；任何一个人的权限读不出来都当作没有。
+func onlyPermitted(ctx context.Context, ids []string, permitted func(context.Context, string) (bool, error)) []string {
+	if permitted == nil {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if ok, err := permitted(ctx, id); err == nil && ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (n nearbyInviter) Invite(ctx context.Context, run dispatch.Run, exclude map[string]bool, limit int) ([]string, string, error) {
@@ -50,6 +68,7 @@ func (n nearbyInviter) Invite(ctx context.Context, run dispatch.Run, exclude map
 			ids = append(ids, id)
 		}
 	}
+	ids = onlyPermitted(ctx, ids, n.permitted)
 	if len(ids) == 0 {
 		return nil, "", nil // 附近没有可邀的人：引擎记 nobody_suitable_nearby
 	}

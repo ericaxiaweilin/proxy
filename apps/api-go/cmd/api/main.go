@@ -793,6 +793,13 @@ func main() {
 					return ids, nil
 				},
 				rank: rankUsers,
+				// 晚绑定：ProviderApps 在这段之后才建好，邀请发生在运行期，那时 server.OrderPermission 已就位。
+				permitted: func(ctx context.Context, id string) (bool, error) {
+					if server.OrderPermission == nil {
+						return false, nil
+					}
+					return server.OrderPermission(ctx, id)
+				},
 			}
 		}
 		server.Dispatch = dispatchEngine
