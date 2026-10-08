@@ -349,6 +349,8 @@ func (s *Server) dispatchCommand(ctx context.Context, envelope command.Envelope)
 	// STORE-REC-001: store recommendation intake (独立模块：推荐商铺进体系).
 	case s.StoreOnboarding != nil && s.StoreOnboarding.Supports(envelope.CommandType):
 		return s.StoreOnboarding.HandleContext(ctx, envelope)
+	case s.Guidance != nil && s.Guidance.Supports(envelope.CommandType):
+		return s.Guidance.HandleContext(ctx, envelope)
 	// TAG-SYSTEM-001: 粗粒度位置（三道闸：登录 + 采集同意 + 定位同意）。
 	case s.Tagging != nil && s.Tagging.Supports(envelope.CommandType):
 		return s.Tagging.HandleContext(ctx, envelope)

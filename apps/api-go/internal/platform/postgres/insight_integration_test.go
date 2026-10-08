@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 )
@@ -169,5 +170,61 @@ func TestSegmentsSuppressSmallCohortsAndShowCoOccurrenceOnlyForBigOnes(t *testin
 	}
 	if seg.Coverage.ActiveUsers < 0 || len(seg.Coverage.Buckets) != 5 {
 		t.Errorf("coverage buckets: %+v", seg.Coverage)
+	}
+}
+
+// 引导：下一步状态和推送候选对真库——真实计数，窗口按注册时间，非 ACTIVE 不在候选里。
+func TestGuidanceStateCountsRealThingsAndCandidatesFollowTheWindow(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	fresh, mid, old, suspended := "u_gd_f_"+stamp, "u_gd_m_"+stamp, "u_gd_o_"+stamp, "u_gd_s_"+stamp
+	users := []string{fresh, mid, old, suspended}
+	post := "p_gd_" + stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.posts WHERE id = $1`, post)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.profiles WHERE user_account_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.user_accounts WHERE id = ANY($1)`, users)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	mk := func(id, status string, age time.Duration) {
+		exec(`INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,$2,$3,$3)`, id, status, now.Add(-age))
+	}
+	mk(fresh, "ACTIVE", 2*time.Hour)
+	mk(mid, "ACTIVE", 30*time.Hour)
+	mk(old, "ACTIVE", 20*24*time.Hour)
+	mk(suspended, "SUSPENDED", 30*time.Hour)
+	exec(`INSERT INTO identity.profiles (user_account_id, name, handle, city, avatar_path, updated_at) VALUES ($1,'M','m_`+stamp+`','HN','assets/x',$2)`, mid, now)
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'x',$3,'PUBLISHED')`, post, old, now)
+
+	src := guidance.NewPostgres(pool)
+	st, err := src.LoadState(ctx, mid)
+	if err != nil || !st.ProfileComplete || st.Posts != 0 {
+		t.Fatalf("mid has a complete profile and no posts: %+v %v", st, err)
+	}
+	if st, _ := src.LoadState(ctx, old); st.ProfileComplete || st.Posts != 1 {
+		t.Fatalf("old has a post but no profile: %+v", st)
+	}
+	has := func(ids []string, want string) bool {
+		for _, id := range ids {
+			if id == want {
+				return true
+			}
+		}
+		return false
+	}
+	ids, err := src.Candidates(ctx, now, 24*time.Hour, 7*24*time.Hour, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(ids, mid) || has(ids, fresh) || has(ids, old) || has(ids, suspended) {
+		t.Fatalf("window 1-7 days, ACTIVE only: mid yes; fresh (2h), old (20d), suspended no")
 	}
 }

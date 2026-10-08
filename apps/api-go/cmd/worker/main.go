@@ -13,8 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/gravity"
+	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -656,6 +658,24 @@ func main() {
 	recomputeTags(ctx, tagStore)
 	tagTicker := time.NewTicker(time.Hour)
 	defer tagTicker.Stop()
+	// 引导推送（发第一条动态 / 发第一个需求）：每种对每个人终身最多一次，窗口错开，被限制的账号不推。
+	nudger := nudgeEmitter{pipeline: inboxPipeline}
+	nudgeSource := guidance.NewPostgres(pool)
+	accountGate := &accountstatus.Service{Store: accountstatus.NewPostgres(pool)}
+	nudgeTicker := time.NewTicker(time.Hour)
+	defer nudgeTicker.Stop()
+	runNudges := func() {
+		sent, err := guidance.RunNudges(ctx, nudgeSource, nudger, func(c context.Context, id string) bool {
+			lvl, err := accountGate.LevelOf(c, id)
+			return err != nil || lvl != "" // 读不出来也不推：引导推送不是必须的，宁可少推
+		}, time.Now().UTC(), 200)
+		if err != nil {
+			log.Printf("nudges failed: %v", err)
+			return
+		}
+		log.Printf("nudges: sent=%v", sent)
+	}
+	runNudges()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -712,6 +732,8 @@ func main() {
 			}
 		case <-gravityTicker.C:
 			recomputeGravity(ctx, gravityStore)
+		case <-nudgeTicker.C:
+			runNudges()
 		case <-tagTicker.C:
 			recomputeTags(ctx, tagStore)
 		case <-sweeperTicker.C:
@@ -856,4 +878,15 @@ func dedupeKeyFor(e event.DomainEvent, recipient string) string {
 		return "social:" + e.EventType + ":" + e.AggregateID + ":" + recipient + ":" + e.OccurredAt.UTC().Format("2006-01-02")
 	}
 	return notification.EventDedupeKey(e.EventID)
+}
+
+// nudgeEmitter 把引导推送接到通知管线。DedupeKey 含用户和推送种类：同一种推送对同一个人终身只会落一行。
+type nudgeEmitter struct{ pipeline notification.Producer }
+
+func (n nudgeEmitter) Nudge(ctx context.Context, userID, key, title, body, target string) error {
+	_, _, err := n.pipeline.Emit(ctx, notification.Notification{
+		RecipientID: userID, Type: "NUDGE_" + key, Title: title, Body: body,
+		DeepLink: "app://nudge/" + target, DedupeKey: "nudge:" + key + ":" + userID,
+	})
+	return err
 }

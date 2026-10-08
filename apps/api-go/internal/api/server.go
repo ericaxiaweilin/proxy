@@ -34,6 +34,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/accountstatus"
+	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -133,6 +134,8 @@ type Server struct {
 	NumberLookup *numberlookup.Service
 	// Tagging：标签层的写命令（RecordCoarseLocation）与运营读取（TAG-SYSTEM-001）。
 	Tagging      *tagging.Commands
+	// Guidance：下一步引导（GetNextSteps）。
+	Guidance *guidance.Commands
 	// Insight：需求缺口与标签分群读模型（OPS-INSIGHT-001）。
 	Insight      insight.Source
 	// MatchPreview：撮合预览（OPS-MATCH-PREVIEW-001），组合根接线。
