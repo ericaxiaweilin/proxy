@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"log"
 	"os"
 	"os/signal"
@@ -13,12 +15,12 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/gravity"
-	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outbox"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 )
 
 type unavailableDelivery struct{}
@@ -83,6 +85,8 @@ type businessInboxDelivery struct {
 	// 可以直接被日志告警规则抓住。
 	missed       *atomic.Int64
 	missedLogged *atomic.Int64
+	// postAuthor：帖子作者是谁（评论 / 转发事件的 payload 里没有收件人，要回库查）。nil = 这两类通知不发。
+	postAuthor func(ctx context.Context, postID string) (string, error)
 }
 
 func newBusinessInboxDelivery(inner outbox.Delivery, producer notification.Producer) businessInboxDelivery {
@@ -135,6 +139,17 @@ func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.
 		return nil
 	}
 	recipient, title, body, deepLink, ok := inboxForEvent(e)
+	if !ok && (e.EventType == "PostReplied" || e.EventType == "PostReposted") {
+		// 社交互动通知（评论 / 转发）：收件人是帖子作者；自己评论自己的帖子不通知。
+		if d.postAuthor == nil {
+			return nil
+		}
+		author, err := d.postAuthor(ctx, e.AggregateID)
+		if err != nil {
+			return err
+		}
+		recipient, title, body, deepLink, ok = socialInteractionInbox(e, author)
+	}
 	if !ok {
 		return nil
 	}
@@ -146,7 +161,7 @@ func (d businessInboxDelivery) createInboxForEvent(ctx context.Context, e event.
 		Title:       title,
 		Body:        body,
 		DeepLink:    deepLink,
-		DedupeKey:   notification.EventDedupeKey(e.EventID),
+		DedupeKey:   dedupeKeyFor(e, recipient),
 	})
 	return err
 }
@@ -250,6 +265,17 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 		return fallbackRecipient(""), "举报结果", outcome, "/reports/" + e.AggregateID, true
 	case "OrderCreatedFromOffer":
 		return fallbackRecipient(""), "订单已成立", orderCancellationNotice(e.Payload), "/orders/" + e.AggregateID, true
+	case "PostReplied", "PostReposted":
+		// 收件人（帖子作者）不在 payload 里，要回库查——由 createInboxForEvent 通过 postAuthor 解析后
+		// 走 socialInteractionInbox。这里只声明「它是被映射的」，纯映射层返回 ok=false。
+		return "", "", "", "", false
+	case "ProfileFollowed":
+		// 有人关注了你。收件人是 followeeId；payload 里没有就不发（不猜）。
+		followee := payloadString("followeeId")
+		if followee == "" || followee == payloadString("followerId") {
+			return "", "", "", "", false
+		}
+		return followee, "有人关注了你", "去看看对方的主页", "/profiles/" + payloadString("followerId"), true
 	case "InvitationCreated":
 		return fallbackRecipient(payloadString("inviteeId")), "收到场景邀请", "有人邀请你一起去场景看看", "/invitations/" + e.AggregateID, true
 	case "InvitationResponded":
@@ -565,7 +591,15 @@ func main() {
 	var inboxMissed, inboxMissedLogged atomic.Int64
 	// 死信数只在变化时上报（见下面那处的注释：每 tick 都刷 = 没有告警）。
 	var lastReportedStale atomic.Int64
-	inboxDelivery := businessInboxDelivery{inner: deduped, producer: inboxPipeline, missed: &inboxMissed, missedLogged: &inboxMissedLogged}
+	inboxDelivery := businessInboxDelivery{inner: deduped, producer: inboxPipeline, missed: &inboxMissed, missedLogged: &inboxMissedLogged,
+		postAuthor: func(ctx context.Context, postID string) (string, error) {
+			var author string
+			err := pool.QueryRow(ctx, `SELECT author_id FROM localnet.posts WHERE id = $1 AND author_type = 'USER'`, postID).Scan(&author)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return "", nil
+			}
+			return author, err
+		}}
 	log.Printf("%s", inboxPipeline.Describe())
 	log.Printf("%s", pushNote)
 	delivery := outbox.Delivery(inboxDelivery)
@@ -798,4 +832,28 @@ func marketDeepLink(opportunityID string) string {
 		return ""
 	}
 	return "/market/" + opportunityID
+}
+
+// socialInteractionInbox：评论 / 转发通知。收件人 = 帖子作者；作者就是动作发起人时不通知。
+// 评论正文不放进通知（可能很长、也可能是不想在锁屏上露出的内容），只说发生了什么。
+func socialInteractionInbox(e event.DomainEvent, author string) (recipient, title, body, deepLink string, ok bool) {
+	if author == "" || author == e.PrincipalID {
+		return "", "", "", "", false
+	}
+	switch e.EventType {
+	case "PostReplied":
+		return author, "有人评论了你的动态", "点开看看他说了什么", "/posts/" + e.AggregateID, true
+	case "PostReposted":
+		return author, "有人转发了你的动态", "你的内容被更多人看到了", "/posts/" + e.AggregateID, true
+	}
+	return "", "", "", "", false
+}
+
+// dedupeKeyFor：默认一个事件一条通知（outbox 重放不会重复）。评论 / 转发是高频互动：同一个人、同一篇帖子、
+// 同一种互动，一天只通知一次——设置里的「互动通知」开关还不存在，这是它存在之前的节流。
+func dedupeKeyFor(e event.DomainEvent, recipient string) string {
+	if e.EventType == "PostReplied" || e.EventType == "PostReposted" {
+		return "social:" + e.EventType + ":" + e.AggregateID + ":" + recipient + ":" + e.OccurredAt.UTC().Format("2006-01-02")
+	}
+	return notification.EventDedupeKey(e.EventID)
 }

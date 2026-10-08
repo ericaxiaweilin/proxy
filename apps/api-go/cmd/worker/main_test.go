@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -499,8 +500,6 @@ var eventsWithoutNotification = map[string]string{
 
 	// ── 高频互动：逐条通知等于轰炸 ───────────────────────────────────────
 	"PostCreated":         "发帖由用户自己发起，界面立刻可见",
-	"PostReplied":         "回复互动在量级上来后是噪音（应由设置里的开关决定，而设置本身还没有）",
-	"PostReposted":        "同上",
 	"PostBookmarked":      "收藏是用户自己的动作",
 	"PostPinned":          "置顶是作者自己的动作",
 	"PostUnpinned":        "同上",
@@ -606,7 +605,6 @@ var eventsWithoutNotification = map[string]string{
 	"ConversationStarted": "开始会话由会话列表自己呈现",
 	"ConvoCreated":        "同上",
 	"PostReacted":         "点赞逐条通知等于轰炸",
-	"ProfileFollowed":     "关注通知在量级上来后就是噪音（应由设置里的开关决定，而设置本身还没有）",
 	"ProfileUnfollowed":   "取消关注后用户没有可做的动作",
 }
 
@@ -1009,5 +1007,43 @@ func TestMarketSelectionNoticeDependsOnWhoSelectedAndLinksToTheOpportunity(t *te
 	noOpp := event.DomainEvent{EventType: "MarketOpportunityInvited", Payload: map[string]any{"notifyPrincipalId": "user_amy"}}
 	if _, _, _, link, ok := inboxForEvent(noOpp); !ok || link != "" {
 		t.Fatalf("without an opportunity id there is no link to fake: %q", link)
+	}
+}
+
+// 社交互动通知：评论 / 转发通知帖子作者；自己动自己的帖子不通知；关注通知被关注的人。
+func TestSocialInteractionsNotifyTheRightPerson(t *testing.T) {
+	reply := event.DomainEvent{EventType: "PostReplied", AggregateType: "Post", AggregateID: "post_1", PrincipalID: "commenter"}
+	if r, title, _, link, ok := socialInteractionInbox(reply, "author"); !ok || r != "author" || link != "/posts/post_1" || title == "" {
+		t.Fatalf("a reply tells the post's author: %v %q %q", ok, r, link)
+	}
+	if _, _, _, _, ok := socialInteractionInbox(reply, "commenter"); ok {
+		t.Fatal("replying to your own post must not notify you")
+	}
+	if _, _, _, _, ok := socialInteractionInbox(reply, ""); ok {
+		t.Fatal("an unknown author is never guessed")
+	}
+	follow := event.DomainEvent{EventType: "ProfileFollowed", AggregateID: "a|b", Payload: map[string]any{"followerId": "a", "followeeId": "b"}}
+	if r, _, _, link, ok := inboxForEvent(follow); !ok || r != "b" || link != "/profiles/a" {
+		t.Fatalf("a follow notifies the followee: %v %q %q", ok, r, link)
+	}
+	self := event.DomainEvent{EventType: "ProfileFollowed", Payload: map[string]any{"followerId": "a", "followeeId": "a"}}
+	if _, _, _, _, ok := inboxForEvent(self); ok {
+		t.Fatal("following yourself notifies nobody")
+	}
+}
+
+func TestSocialNotificationsAreThrottledToOnePerPostPerDay(t *testing.T) {
+	day := time.Date(2026, 10, 8, 3, 0, 0, 0, time.UTC)
+	a := event.DomainEvent{EventID: "e1", EventType: "PostReplied", AggregateID: "post_1", OccurredAt: day}
+	b := event.DomainEvent{EventID: "e2", EventType: "PostReplied", AggregateID: "post_1", OccurredAt: day.Add(5 * time.Hour)}
+	if dedupeKeyFor(a, "author") != dedupeKeyFor(b, "author") {
+		t.Fatal("two replies to the same post on the same day are one notification")
+	}
+	if dedupeKeyFor(a, "author") == dedupeKeyFor(event.DomainEvent{EventID: "e3", EventType: "PostReplied", AggregateID: "post_2", OccurredAt: day}, "author") {
+		t.Fatal("a different post is a different notification")
+	}
+	other := event.DomainEvent{EventID: "e4", EventType: "OrderCreatedFromOffer", AggregateID: "ord_1", OccurredAt: day}
+	if dedupeKeyFor(other, "x") != notification.EventDedupeKey("e4") {
+		t.Fatal("everything else stays one-event-one-notification")
 	}
 }
