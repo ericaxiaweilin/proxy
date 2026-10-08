@@ -20,9 +20,17 @@ type SharedTag = { axis: string; label: string; value: string; strength: number 
 type Candidate = {
   rank: number; userId: string; breakdown: Breakdown;
   affinity: number; tagCount: number; sharedTags: SharedTag[];
+  reasons?: string[]; exploration?: boolean;
+};
+type Health = { retrieved: number; qualified: number; candidateSet: number; thin: boolean; empty: boolean };
+type Ineligible = { agentId: string; gate: string; reason: string; unknown?: boolean };
+type ExplainRow = {
+  snapshotId: string; agentId: string; eligible: boolean; gate?: string; reason?: string;
+  organicRank?: number; inSet: boolean; exploration?: boolean; rankVersion: string; createdAt: string;
 };
 type Preview = {
   opportunityId: string; reason?: string; ownerTagCount: number; tagFitWeight: number; candidates: Candidate[];
+  snapshotId?: string; rankVersion?: string; supplyHealth?: Health; ineligible?: Ineligible[];
 };
 type Payload = { dataSource: string; preview?: Preview; notes?: string[]; missing?: string };
 
@@ -34,6 +42,14 @@ const REASON: Record<string, string> = {
   opportunity_has_no_location: "这张单发出时没带坐标，说不出「附近」，所以不会邀请任何人",
   nobody_suitable_nearby: "30km 内没有符合条件的人（有接单权限、没报过名）",
 };
+
+// 引擎的资格门原因码（matchengine.Reason*）；没列出的照原样摆出来。
+const GATE: Record<string, string> = {
+  SELF: "自己", ALREADY_APPLIED: "已报名", ALREADY_INVITED: "已邀请", ACCOUNT_RESTRICTED: "账号受限",
+  SAFETY_BLOCKED: "安全封禁", NO_ORDER_PERMISSION: "无接单权限", USER_BLOCKED: "被拉黑",
+  LOCATION_UNKNOWN: "位置未知", OUT_OF_RADIUS: "超出半径", GATE_UNAVAILABLE: "检查不可用",
+};
+const gateName = (r?: string): string => (r ? GATE[r] ?? r : DASH);
 
 // 分项的口径来自 matching.Breakdown；负载是从总分里扣掉的，所以带减号。0 的分项不摆，免得一行全是噪音。
 const parts = (b: Breakdown): string => {
@@ -60,6 +76,17 @@ export function MatchPreview({ initialId }: { initialId?: string | undefined }) 
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<Payload | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [agentId, setAgentId] = useState("");
+  const [rows, setRows] = useState<ExplainRow[] | null>(null);
+
+  const explain = async (): Promise<void> => {
+    const id = opportunityId.trim(), who = agentId.trim();
+    if (id === "" || who === "") return;
+    try {
+      const r = await opFetch<{ rows?: ExplainRow[] }>(`/v1/operator/matching/explain?kind=OPPORTUNITY&subjectId=${encodeURIComponent(id)}&agentId=${encodeURIComponent(who)}`);
+      setRows(r.rows ?? []);
+    } catch { setRows(null); }
+  };
 
   const look = async (): Promise<void> => {
     const id = opportunityId.trim();
@@ -121,6 +148,13 @@ export function MatchPreview({ initialId }: { initialId?: string | undefined }) 
             <div className="kpi"><div className="label">共同兴趣权重</div><div className="value">{live.tagFitWeight}</div><div className="meta">引擎现在给共同标签的分量</div></div>
           </div>
 
+          {live.rankVersion ? (
+            <div className="notice" style={{ marginTop: 8 }}>
+              口径 {live.rankVersion} · 检索 {live.supplyHealth?.retrieved ?? DASH} · 合格 {live.supplyHealth?.qualified ?? DASH} · 入选 {live.supplyHealth?.candidateSet ?? DASH}
+              {live.supplyHealth?.empty ? " · 无人合格" : live.supplyHealth?.thin ? " · 合格的人不够填满候选集" : ""}
+            </div>
+          ) : null}
+
           <div className="table-wrap">
             <table>
               <thead><tr><th>排名</th><th>用户</th><th className="numc">总分</th><th>分项</th><th className="numc">距离</th><th className="numc">相似度</th><th>共同标签</th><th className="numc">标签数</th></tr></thead>
@@ -129,10 +163,10 @@ export function MatchPreview({ initialId }: { initialId?: string | undefined }) 
                   ? <tr><td>{DASH}</td><td colSpan={7} style={META}>这次没有候选</td></tr>
                   : live.candidates.map((c) => (
                     <tr key={c.userId}>
-                      <td><b>{c.rank}</b></td>
+                      <td><b>{c.rank}</b>{c.exploration ? <span className="badge" style={{ marginLeft: 4 }}>探索位</span> : null}</td>
                       <td><span style={META}>{c.userId}</span></td>
                       <td className="numc"><b>{c.breakdown.total}</b></td>
-                      <td style={META}>{parts(c.breakdown) || DASH}</td>
+                      <td style={META}>{parts(c.breakdown) || DASH}{c.reasons?.length ? ` · ${c.reasons.join(" / ")}` : ""}</td>
                       <td className="numc">{c.breakdown.distanceKm == null ? DASH : `${c.breakdown.distanceKm} km`}</td>
                       <td className="numc">{c.tagCount === 0 ? DASH : c.affinity.toFixed(2)}</td>
                       <td>
@@ -148,6 +182,46 @@ export function MatchPreview({ initialId }: { initialId?: string | undefined }) 
               </tbody>
             </table>
           </div>
+
+          {(live.ineligible ?? []).length > 0 ? (
+            <>
+              <div className="section-title" style={{ marginTop: 14 }}><h2>未入选</h2></div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>用户</th><th>门</th><th>原因</th></tr></thead>
+                  <tbody>
+                    {(live.ineligible ?? []).map((x) => (
+                      <tr key={x.agentId}><td><span style={META}>{x.agentId}</span></td><td>{x.gate}</td><td>{gateName(x.reason)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+
+          <form className="card" onSubmit={(e) => { e.preventDefault(); void explain(); }} style={{ maxWidth: 560, marginTop: 12 }}>
+            <input value={agentId} onChange={(e) => setAgentId(e.target.value)} placeholder="查某人的历次结论：用户编号" style={{ width: "100%", padding: 8 }} />
+            <button type="submit" disabled={agentId.trim() === ""} style={{ marginTop: 8 }}>查</button>
+          </form>
+          {rows ? (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>时间</th><th>结论</th><th>名次</th><th>口径</th></tr></thead>
+                <tbody>
+                  {rows.length === 0
+                    ? <tr><td colSpan={4} style={META}>没有记录</td></tr>
+                    : rows.map((r) => (
+                      <tr key={r.snapshotId + r.agentId}>
+                        <td style={META}>{r.createdAt.slice(0, 16).replace("T", " ")}</td>
+                        <td>{r.eligible ? (r.inSet ? "入选" : "合格未入选") : gateName(r.reason)}</td>
+                        <td className="numc">{r.organicRank ? r.organicRank : DASH}</td>
+                        <td style={META}>{r.rankVersion}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </>
       ) : null}
     </>
