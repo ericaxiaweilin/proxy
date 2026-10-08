@@ -60,6 +60,7 @@ var behaviouralCommandToEventType = map[string]string{
 	"RecordProfileOpen":     "PROFILE_OPEN",
 	"RecordCandidateViewed": "CANDIDATE_VIEWED",
 	"RecordActivityView":    "ACTIVITY_VIEW",
+	"RecordSceneView":       "SCENE_VIEW",
 	"RecordScreenView":      "SCREEN_VIEW",
 	"RecordAppSession":      "APP_SESSION",
 }
@@ -312,7 +313,6 @@ func TestConsentRequiresAnExplicitPurpose(t *testing.T) {
 		t.Fatalf("缺 purpose 应当被拒，实际 %s (%+v)", res.Outcome, res.Error)
 	}
 }
-
 
 // ---- COMP-CONSENT-PIPELINE-001：分开同意、统一管线 ----
 

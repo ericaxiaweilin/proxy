@@ -506,6 +506,18 @@ export class LocalNetClient {
     }
   }
 
+  // TAG-DWELL-001：场景详情页停留。形状同 recordActivityView（访客不发、失败静默、不重试）。
+  public async recordSceneView(sceneId: string, watchMs: number): Promise<void> {
+    try {
+      if (!/^[a-z0-9_-]{1,40}$/.test(sceneId)) return;
+      const session = await this.optionalSession();
+      if (!session) return;
+      await this.sendCommand(session, "RecordSceneView", { type: "Scene", id: sceneId }, { targetType: "SCENE", targetId: sceneId, watchMs: Math.max(0, Math.floor(watchMs)) });
+    } catch {
+      // 埋点失败静默。
+    }
+  }
+
   // TAG-PIPELINE：屏幕停留 / 前台会话。形状同 recordActivityView（访客不发、失败静默、不重试）；
   // screenId 会变成标签取值，只能是小写字母数字下划线连字符（服务端同样拒绝别的）。
   public async recordScreenView(screenId: string, watchMs: number): Promise<void> {

@@ -429,6 +429,9 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 	if err := p.loadActivityTopics(ctx, since, valid, push); err != nil {
 		return err
 	}
+	if err := p.loadSceneDwellTopics(ctx, since, valid, push); err != nil {
+		return err
+	}
 	if err := p.loadMarketTopics(ctx, since, push); err != nil {
 		return err
 	}

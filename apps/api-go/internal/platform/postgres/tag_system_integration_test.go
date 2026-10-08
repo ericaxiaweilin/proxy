@@ -487,3 +487,59 @@ func TestUsageAndChatPatternsFromConsentedEventsAndMessageMetadata(t *testing.T)
 		t.Error("without consent app usage must not become a tag")
 	}
 }
+
+// TAG-DWELL-001：场景详情页的停留（被动，过同意）按场景类型归主题；没同意不出标签。
+func TestSceneDetailDwellFeedsTopicTagsOnlyWithConsent(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	consenting, silent := "u_sd_c_"+stamp, "u_sd_n_"+stamp
+	users := []string{consenting, silent}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM tag.user_tags WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.interaction_events WHERE actor_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM privacy.purpose_consents WHERE user_id = ANY($1)`, users)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	var sceneID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM reality.scenes WHERE status = 'ACTIVE' AND type LIKE '咖啡%' LIMIT 1`).Scan(&sceneID); err != nil {
+		t.Skip("no coffee scene in this database")
+	}
+	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_sd_"+stamp, consenting, now.Add(-72*time.Hour))
+	for _, u := range users {
+		for i := 0; i < 5; i++ {
+			exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'SCENE_VIEW',$2,'SCENE',$3,$4,20000)`,
+				fmt.Sprintf("evt_sd_%s_%d", u, i), u, sceneID, now.Add(-time.Duration(i+1)*time.Hour))
+		}
+	}
+	store := tagging.NewPostgres(pool)
+	if _, err := tagging.Recompute(ctx, store, now); err != nil {
+		t.Fatal(err)
+	}
+	topics := func(user string) int {
+		tags, err := store.TagsOf(ctx, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, tg := range tags {
+			if tg.Axis == tagging.AxisInterestTopic {
+				n++
+			}
+		}
+		return n
+	}
+	if topics(consenting) == 0 {
+		t.Error("a consenting user who dwelt on a coffee scene gets topic tags")
+	}
+	if topics(silent) != 0 {
+		t.Error("without consent, scene dwell must not become a tag")
+	}
+}

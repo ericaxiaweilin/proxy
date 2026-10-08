@@ -177,3 +177,21 @@ export function screenIdOf(page: string): string {
   return page.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 40);
 }
 
+
+// 场景详情页停留：同一套采集闸，上报单段停留，不到 1 秒不记；分档（几秒算看过 / 认真看）在服务端。
+export async function endSceneView(
+  localNet: Pick<LocalNetClient, "recordSceneView">,
+  sceneId: string,
+  startedAt: number,
+  store?: BehaviorAnalyticsStore
+): Promise<void> {
+  if (!sceneId) return;
+  if (!(await behaviorAnalyticsEnabled(store))) return;
+  const watchMs = Math.min(Math.max(0, Date.now() - startedAt), MAX_USAGE_MS);
+  if (watchMs < MIN_USAGE_MS) return;
+  try {
+    await localNet.recordSceneView(sceneId, watchMs);
+  } catch {
+    // 埋点永远不抛。
+  }
+}

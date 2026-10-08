@@ -51,6 +51,7 @@ import {
 } from "../scene-activities";
 import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
 import { LocalNetClient } from "../localnet-client";
+import { endSceneView } from "../post-impression";
 import { sendSceneCommand, type AuthenticatedStoredSession } from "../scene-commands";
 import {
   availableShopSorts, sceneDistanceMeters, shopAreaFacets, shopCardChips, shopCardSignal,
@@ -336,6 +337,12 @@ export function SceneShopDirectory({
     () => new LocalNetClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore, baseUrl: apiBaseUrl ?? localApiBaseUrl }),
     [apiBaseUrl],
   );
+  // TAG-DWELL-001：在某个场景详情页停了多久（采集闸在 endSceneView 里：没同意不发请求）。
+  useEffect(() => {
+    if (!selectedId) return;
+    const startedAt = Date.now();
+    return () => { void endSceneView(localNet, selectedId, startedAt); };
+  }, [selectedId, localNet]);
   const [wall, setWall] = useState<readonly ScenePhotoTile[]>([]);
   const [wallState, setWallState] = useState<"LOADING" | "READY" | "ERROR" | "SIGNED_OUT">("LOADING");
   useEffect(() => {

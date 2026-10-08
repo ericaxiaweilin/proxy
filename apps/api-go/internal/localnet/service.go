@@ -1,7 +1,6 @@
 package localnet
 
 import (
-	consentpkg "github.com/proxy-app/proxy-api/internal/consent"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -10,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	consentpkg "github.com/proxy-app/proxy-api/internal/consent"
 	"os"
 	"sort"
 	"strings"
@@ -379,10 +379,10 @@ type MentionRepository interface {
 // 行为追踪的同意闸原来**只在客户端**（apps/mobile 的隐私开关）。客户端的开关
 // 不是闸 —— 客户端可以改、可以绕过、可以在重装后消失，而服务端照收不误。
 // 而 Nghị định 356/2025/NĐ-CP 把举证责任放在**控制者**身上：
-//   * Art. 6.1 同意须是**可验证的形式**；
-//   * Art. 6.2 控制者须**保存**同意，争议时**由控制者举证**；
-//   * Art. 6.3 **禁止默认同意机制**；
-//   * Art. 4.1(l) 社交网络上的「使用行为与活动的数据」= **敏感个人数据**。
+//   - Art. 6.1 同意须是**可验证的形式**；
+//   - Art. 6.2 控制者须**保存**同意，争议时**由控制者举证**；
+//   - Art. 6.3 **禁止默认同意机制**；
+//   - Art. 4.1(l) 社交网络上的「使用行为与活动的数据」= **敏感个人数据**。
 //
 // 所以同意必须落在服务端、必须可撤回、必须在**入库前**被强制。
 // 判据很简单：用户说「我从没同意过」，平台能不能拿出一条带时间戳的记录？
@@ -410,6 +410,8 @@ var behaviouralTrackingEventTypes = map[string]string{
 	"CANDIDATE_VIEWED": capturePurposeAny,
 	// TAG-SYSTEM-001：看活动页多久。进「兴趣标签」的证据之一，和其它浏览事件一样先验同意。
 	"ACTIVITY_VIEW": capturePurposeAny,
+	// 场景详情页停留（TAG-DWELL-001：场景是一类独立对象，停留口径单独分档）。
+	"SCENE_VIEW": capturePurposeAny,
 	// 应用使用（浏览轨迹的原料）：停留的屏幕、前台会话时长。和其它浏览事件同一条闸。
 	"SCREEN_VIEW": capturePurposeAny,
 	"APP_SESSION": capturePurposeAny,
@@ -424,13 +426,13 @@ var behaviouralTrackingEventTypes = map[string]string{
 //
 // 「当前是否有效」由调用方从**最新一条**动作推出来（见 PurposeConsentState）。
 type PurposeConsent struct {
-	UserID        string    `json:"userId"`
-	Purpose       string    `json:"purpose"`
-	PolicyVersion string    `json:"policyVersion"`
+	UserID        string `json:"userId"`
+	Purpose       string `json:"purpose"`
+	PolicyVersion string `json:"policyVersion"`
 	// Action 是这一次动作：GRANT 或 WITHDRAW。
-	Action   string    `json:"action"`
-	ActedAt  time.Time `json:"actedAt"`
-	Source   string    `json:"source"`
+	Action  string    `json:"action"`
+	ActedAt time.Time `json:"actedAt"`
+	Source  string    `json:"source"`
 }
 
 // 同意动作的两个取值（和 migrations/133 的 CHECK 约束一致）。
@@ -447,17 +449,17 @@ func (c PurposeConsent) Active() bool { return c.Action == ConsentActionGrant }
 // InteractionEvent 是网络交互事件（C1 Event Stream 最小底座）。
 // 读侧事件：PROFILE_OPEN / POST_IMPRESSION / CANDIDATE_VIEWED / AGENT_SHORTLISTED。
 type InteractionEvent struct {
-	EventID    string    `json:"eventId"`
-	EventType  string    `json:"eventType"` // PROFILE_OPEN | POST_IMPRESSION | CANDIDATE_VIEWED | AGENT_SHORTLISTED
-	ActorID    string    `json:"actorId"`
-	TargetType string    `json:"targetType"` // PROFILE | POST | CANDIDATE | AGENT
-	TargetID   string    `json:"targetId"`
-	NeedID     string    `json:"needId,omitempty"`
+	EventID    string `json:"eventId"`
+	EventType  string `json:"eventType"` // PROFILE_OPEN | POST_IMPRESSION | CANDIDATE_VIEWED | AGENT_SHORTLISTED
+	ActorID    string `json:"actorId"`
+	TargetType string `json:"targetType"` // PROFILE | POST | CANDIDATE | AGENT
+	TargetID   string `json:"targetId"`
+	NeedID     string `json:"needId,omitempty"`
 	// TWIN-SIGNALS-001: 停留毫秒。曝光是「看到了」，watchMs 是「看了多久」——
 	// 分身偏好 Ingredient 里两者缺一不可（只曝光不看 = 标题党， proven by
 	// completion_rate 为空的老帖）。客户端离开视口时上报，0 = 一划而过。
-	WatchMs int64 `json:"watchMs,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	WatchMs   int64     `json:"watchMs,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // CONTENT-ANALYTICS-001（2026-09-23，用户：「好友关系 动态浏览的日志要折叠起来 不要给用户看这些…给一个分析后的
@@ -493,10 +495,10 @@ type PostAudienceRow struct {
 // 累计看了多久。战绩页（分身中心）只读这个，不读原始事件流 ——
 // 原始行为流是隐私数据，不下发客户端。
 type PostImpressionStats struct {
-	PostID        string `json:"postId"`
-	Impressions   int64  `json:"impressions"`
-	Viewers       int64  `json:"viewers"`
-	TotalWatchMs  int64  `json:"totalWatchMs"`
+	PostID       string `json:"postId"`
+	Impressions  int64  `json:"impressions"`
+	Viewers      int64  `json:"viewers"`
+	TotalWatchMs int64  `json:"totalWatchMs"`
 }
 
 // MEDIA-DWELL-001: 单张照片/视频的曝光聚合——跟 PostImpressionStats 同一个
@@ -505,11 +507,11 @@ type PostImpressionStats struct {
 // 第一张、在第三张停了很久，这个差异之前完全丢失（全记在帖子一个 watchMs
 // 里）。只能查自己帖子里的媒体。
 type MediaImpressionStats struct {
-	PostID        string `json:"postId"`
-	MediaAssetID  string `json:"mediaAssetId"`
-	Impressions   int64  `json:"impressions"`
-	Viewers       int64  `json:"viewers"`
-	TotalWatchMs  int64  `json:"totalWatchMs"`
+	PostID       string `json:"postId"`
+	MediaAssetID string `json:"mediaAssetId"`
+	Impressions  int64  `json:"impressions"`
+	Viewers      int64  `json:"viewers"`
+	TotalWatchMs int64  `json:"totalWatchMs"`
 }
 
 // VIEWER-ACTIVITY-001: 把 PROFILE-VIEWERS-001（谁看了主页）和 MEDIA-DWELL-001
@@ -1454,7 +1456,7 @@ func (s *Service) Supports(commandType string) bool {
 	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "ListPostsAtScene", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
 		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll",
-		"RecordMediaZoom", "RecordActivityView", "RecordScreenView", "RecordAppSession", "GetContentAnalytics", "ListPostAudience",
+		"RecordMediaZoom", "RecordActivityView", "RecordSceneView", "RecordScreenView", "RecordAppSession", "GetContentAnalytics", "ListPostAudience",
 		// COMP-PURPOSE-CONSENT-001：按目的的同意。写侧与读侧都要有，
 		// 否则 App 的开关就只是本地状态 —— 而本地状态不是同意。
 		"RecordPurposeConsent", "GetPurposeConsent":
@@ -1500,6 +1502,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordMediaZoom(ctx, e)
 	case "RecordActivityView":
 		return s.recordActivityView(ctx, e)
+	case "RecordSceneView":
+		return s.recordSceneView(ctx, e)
 	case "RecordScreenView":
 		return s.recordScreenView(ctx, e)
 	case "RecordAppSession":
@@ -2883,6 +2887,19 @@ func (s *Service) recordActivityView(ctx context.Context, e command.Envelope) co
 	return s.appendInteraction(ctx, e, "ACTIVITY_VIEW", "ACTIVITY")
 }
 
+// 场景详情页停留：scene id 会进库做 join，只收小写字母数字下划线连字符（和 reality.scenes 的 id 同一口径），
+// 别的一律拒绝；停留封顶 30 分钟。
+func (s *Service) recordSceneView(ctx context.Context, e command.Envelope) command.Result {
+	var p interactionPayload
+	if decode(e.Payload, &p) && !validScreenID(p.TargetID) {
+		return command.Rejected(e, "INVALID_SCENE", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_scene", nil)
+	}
+	if p.WatchMs > maxUsageMs {
+		e.Payload["watchMs"] = float64(maxUsageMs)
+	}
+	return s.appendInteraction(ctx, e, "SCENE_VIEW", "SCENE")
+}
+
 // 应用使用事件：屏幕停留 / 前台会话。screen id 会变成标签取值，所以只收小写字母数字下划线连字符，
 // 任意字符串（含用户输入）一律拒绝；停留封顶 30 分钟（切后台忘关不造垃圾数据）。
 const maxUsageMs = 30 * 60 * 1000
@@ -2985,8 +3002,8 @@ func (s *Service) appendInteraction(ctx context.Context, e command.Envelope, eve
 		}
 		if !active {
 			return command.Rejected(e, "CONSENT_REQUIRED", "COMPLIANCE", "AFTER_USER_ACTION", "localnet.consent_required", map[string]any{
-				"purpose":         purpose,
-				"anyOfPurposes":   consentpkg.CapturePurposes(),
+				"purpose":       purpose,
+				"anyOfPurposes": consentpkg.CapturePurposes(),
 				"note": "该事件属于对用户在社交网络上的行为与活动的追踪，是敏感个人数据" +
 					"（Nghị định 356/2025/NĐ-CP Art. 4.1(l)），必须先取得该目的的明确同意。" +
 					"客户端的开关不是闸 —— 服务端在这里强制。",
@@ -3151,9 +3168,9 @@ func (s *Service) getPurposeConsent(ctx context.Context, e command.Envelope) com
 	acts := make([]map[string]any, 0, len(history))
 	for _, act := range history {
 		acts = append(acts, map[string]any{
-			"action":   act.Action,
-			"actedAt":  act.ActedAt,
-			"source":   act.Source,
+			"action":  act.Action,
+			"actedAt": act.ActedAt,
+			"source":  act.Source,
 		})
 	}
 	body["consentHistory"] = acts

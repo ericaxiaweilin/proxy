@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONSENT_PURPOSES, createBehaviorAnalyticsStore } from "./behavior-analytics-settings";
-import { endAppSession, endScreenView, screenIdOf } from "./post-impression";
+import { endAppSession, endSceneView, endScreenView, screenIdOf } from "./post-impression";
 
 function memoryDriver() {
   const map = new Map<string, string>();
@@ -23,6 +23,7 @@ describe("usage tracker", () => {
     const client = {
       recordScreenView: async (id: string) => { calls.push(`screen:${id}`); },
       recordAppSession: async () => { calls.push("session"); },
+      recordSceneView: async (id: string) => { calls.push(`scene:${id}`); },
     };
     const store = createBehaviorAnalyticsStore(memoryDriver());
     await endScreenView(client, "home", Date.now() - 5000, store);
@@ -34,6 +35,7 @@ describe("usage tracker", () => {
     expect(calls).toEqual([]); // <1s 不记
     await endScreenView(client, "home", Date.now() - 5000, store);
     await endAppSession(client, Date.now() - 5000, store);
-    expect(calls).toEqual(["screen:home", "session"]);
+    await endSceneView(client, "cafe_giang", Date.now() - 6000, store);
+    expect(calls).toEqual(["screen:home", "session", "scene:cafe_giang"]);
   });
 });

@@ -491,6 +491,8 @@ commands:
     domain: LocalNet
   - command: RecordAggregatedDemandSignal
     domain: Business
+  - command: RecordAppSession
+    domain: LocalNet
   - command: RecordAppealDecision
     domain: Moderation
   - command: RecordAttendance
@@ -537,6 +539,10 @@ commands:
     domain: Fulfillment
   - command: RecordSceneCommerceVisit
     domain: CityCompanion
+  - command: RecordSceneView
+    domain: LocalNet
+  - command: RecordScreenView
+    domain: LocalNet
   - command: RecordScreenshot
     domain: Conversation
   - command: RedeemBenefit

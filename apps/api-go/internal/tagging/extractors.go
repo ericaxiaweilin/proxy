@@ -148,3 +148,30 @@ func (p *Postgres) loadMarketTopics(ctx context.Context, since time.Time, push f
 	}
 	return nil
 }
+
+// loadSceneDwellTopics：场景详情页的停留（被动，过同意）。场景的类型 + 名字按分类库归主题；
+// 只给主题加分，不碰「收藏的店」那几个轴（那些只认用户自己做的收藏 / 打卡）。
+func (p *Postgres) loadSceneDwellTopics(ctx context.Context, since time.Time, valid string, push func(string, Signal)) error {
+	rows, err := p.pool.Query(ctx, `
+		SELECT e.actor_id, sc.type || ' ' || sc.name, COALESCE(SUM(`+dwellCreditSQL(DwellScene, "e.watch_ms")+`), 0)::float8, MIN(e.created_at), MAX(e.created_at), COUNT(*)
+		  FROM localnet.interaction_events e JOIN reality.scenes sc ON sc.id = e.target_id AND sc.status = 'ACTIVE'
+		 WHERE e.event_type = 'SCENE_VIEW' AND e.target_type = 'SCENE' AND e.created_at >= $1 AND e.watch_ms > 0 AND `+valid+`
+		 GROUP BY e.actor_id, sc.id, sc.type, sc.name`, since)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var user, text string
+		var w float64
+		var first, last time.Time
+		var n int
+		if err := rows.Scan(&user, &text, &w, &first, &last, &n); err != nil {
+			return err
+		}
+		if w > 0 {
+			pushTopics(push, user, text, w, n, first, last, false)
+		}
+	}
+	return rows.Err()
+}

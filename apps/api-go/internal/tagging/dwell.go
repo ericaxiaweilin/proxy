@@ -21,6 +21,8 @@ const (
 	DwellPost DwellClass = "POST_FEED"
 	// DwellActivity：主动点进的活动详情页。
 	DwellActivity DwellClass = "ACTIVITY_DETAIL"
+	// DwellScene：主动点进的场景（门店 / 景点）详情页。
+	DwellScene DwellClass = "SCENE_DETAIL"
 )
 
 type dwellTier struct {
@@ -33,6 +35,7 @@ type dwellTier struct {
 var dwellTiers = map[DwellClass][]dwellTier{
 	DwellPost:     {{3000, 0.30}, {10000, 1.00}},
 	DwellActivity: {{5000, 0.50}, {15000, 1.00}},
+	DwellScene:    {{5000, 0.50}, {15000, 1.00}},
 }
 
 // DwellCredit：一次停留（毫秒）折成的信用。未知对象类型 = 0（不认识的不给分）。
