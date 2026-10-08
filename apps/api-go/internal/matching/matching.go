@@ -21,6 +21,7 @@
 package matching
 
 import (
+	"context"
 	"math"
 	"sort"
 )
@@ -39,6 +40,9 @@ type Signals struct {
 	DistanceM  *float64 `json:"distanceM,omitempty"` // 到这一单需求地点的距离；nil = 算不出来
 	Lat        *float64 `json:"-"`                   // 她的位置（只用来算距离，不出现在任何返回里）
 	Lng        *float64 `json:"-"`
+	// TAG-SYSTEM-001：她和发单方的共同兴趣（标签重合度，0..1）。nil = 没算（没有标签 / 标签层没接）→ 0 分，
+	// 不是「完全不合」。tagFitWeight 出厂为 0：标签层上线不改任何人的排名，运营在控制台打开才生效。
+	TagFit *float64 `json:"-"`
 }
 
 // Breakdown 是一个候选的得分明细。
@@ -52,6 +56,7 @@ type Breakdown struct {
 	Distance      float64  `json:"distance"`
 	NewcomerBoost float64  `json:"newcomerBoost"`
 	LoadPenalty   float64  `json:"loadPenalty"`          // 正数，总分里减掉它
+	TagFit        float64  `json:"tagFit"`               // TAG-SYSTEM-001：共同兴趣加分（出厂权重 0）
 	DistanceKm    *float64 `json:"distanceKm,omitempty"` // 给人看的距离（只出公里数，不出坐标）
 	Total         float64  `json:"total"`
 	// 用户侧能说的人话（不含任何曝光数据）。
@@ -104,11 +109,14 @@ func (t Tunables) Score(s Signals, price, budget int64) Breakdown {
 	if t.NewcomerOrders > 0 && float64(s.Completed) < t.NewcomerOrders {
 		b.NewcomerBoost = round2(t.NewcomerBoost * (1 - float64(s.Completed)/t.NewcomerOrders))
 	}
+	if s.TagFit != nil && t.TagFitWeight > 0 {
+		b.TagFit = round2(t.TagFitWeight * math.Max(0, math.Min(1, *s.TagFit)))
+	}
 	if s.ActiveLoad > 0 {
 		b.LoadPenalty = round2(math.Min(t.LoadPenaltyCap, t.LoadPenaltyPerJob*float64(s.ActiveLoad)))
 	}
 	b.Total = round2(b.Reliability + b.Satisfaction + b.Experience + b.Response + b.Fit +
-		b.Distance + b.NewcomerBoost - b.LoadPenalty)
+		b.Distance + b.NewcomerBoost + b.TagFit - b.LoadPenalty)
 	if ended > 0 {
 		b.FulfillmentRate = round2(float64(s.Completed) / ended)
 	}
@@ -180,4 +188,17 @@ func WithDistances(signals map[string]Signals, ids []string, lat, lng *float64) 
 		}
 	}
 	return out
+}
+
+type requesterKey struct{}
+
+// WithRequester 把「这次排名是替谁排的」（发单方）带进排序器——标签契合需要知道另一端是谁。
+func WithRequester(ctx context.Context, requesterID string) context.Context {
+	return context.WithValue(ctx, requesterKey{}, requesterID)
+}
+
+// RequesterFrom 取出发单方；没有就是空串（排序器不算标签契合）。
+func RequesterFrom(ctx context.Context) string {
+	id, _ := ctx.Value(requesterKey{}).(string)
+	return id
 }

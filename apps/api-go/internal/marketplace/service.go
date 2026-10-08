@@ -1134,6 +1134,8 @@ func (s *Service) rankApplications(ctx context.Context, opportunityID string, ap
 	var lat, lng *float64
 	if opp, err := s.repository.Get(ctx, opportunityID); err == nil {
 		lat, lng = opp.Lat, opp.Lng
+		// TAG-SYSTEM-001：排序器要知道「替谁排」才能算共同兴趣。
+		ctx = matching.WithRequester(ctx, opp.OwnerID)
 	}
 	ids := []string{}
 	for _, a := range applications {

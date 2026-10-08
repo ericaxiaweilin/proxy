@@ -1,6 +1,9 @@
 package matching
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // MATCH-RANK-001：撮合排序只看履约质量 / 需求方评价 / 经验 / 响应 / 预算适配；新人有先验，不是 0 也不是满分。
 
@@ -42,5 +45,43 @@ func TestResponsivenessOnlyBreaksNearTies(t *testing.T) {
 	ranked = Rank([]string{"flaky_online", "steady_offline"}, nil, map[string]Signals{"flaky_online": flakyOnline, "steady_offline": offline}, 0)
 	if ranked[0].AgentID != "steady_offline" {
 		t.Fatalf("responsiveness must not outweigh reliability: %+v", ranked)
+	}
+}
+
+// TAG-SYSTEM-001：共同兴趣出厂权重为 0 —— 标签层上线不改任何人的排名；运营打开后才加分，
+// 没标签（nil）的人这一项是 0，不是被扣分。
+func TestTagFitIsOffByDefaultAndNeverPunishesPeopleWithoutTags(t *testing.T) {
+	half, none := 0.5, 0.0
+	base := Signals{Completed: 3, OnTime: 3}
+	withTags := base
+	withTags.TagFit = &half
+	noOverlap := base
+	noOverlap.TagFit = &none
+
+	def := DefaultTunables()
+	if def.TagFitWeight != 0 {
+		t.Fatalf("factory weight must be 0, got %v", def.TagFitWeight)
+	}
+	if def.Score(withTags, 0, 0).Total != def.Score(base, 0, 0).Total {
+		t.Fatal("with weight 0 the tag fit must not move the score")
+	}
+
+	on := def
+	on.TagFitWeight = 10
+	if got := on.Score(withTags, 0, 0); got.TagFit != 5 || got.Total != on.Score(base, 0, 0).Total+5 {
+		t.Fatalf("0.5 overlap × 10 = 5 points, got %+v", got)
+	}
+	if on.Score(noOverlap, 0, 0).Total != on.Score(base, 0, 0).Total {
+		t.Fatal("zero overlap adds nothing and subtracts nothing")
+	}
+	if on.Score(base, 0, 0).TagFit != 0 {
+		t.Fatal("no tags (nil) is not a penalty")
+	}
+}
+
+func TestRequesterTravelsInTheContext(t *testing.T) {
+	ctx := WithRequester(context.Background(), "owner_1")
+	if RequesterFrom(ctx) != "owner_1" || RequesterFrom(context.Background()) != "" {
+		t.Fatal("requester must round-trip through the context and default to empty")
 	}
 }

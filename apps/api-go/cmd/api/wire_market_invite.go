@@ -53,7 +53,7 @@ func (n nearbyInviter) Invite(ctx context.Context, run dispatch.Run, exclude map
 	if len(ids) == 0 {
 		return nil, "", nil // 附近没有可邀的人：引擎记 nobody_suitable_nearby
 	}
-	ranked, err := n.rank(ctx, ids, opp.Lat, opp.Lng)
+	ranked, err := n.rank(matching.WithRequester(ctx, run.RequesterID), ids, opp.Lat, opp.Lng)
 	if err != nil {
 		return nil, "", err
 	}

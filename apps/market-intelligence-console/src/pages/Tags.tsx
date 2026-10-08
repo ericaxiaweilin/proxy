@@ -28,7 +28,11 @@ type Payload = {
     contextPosts: number; contextIdTerms: number; interestRows: number;
   };
   notes?: string[];
+  userTags?: UserTags | null;
 };
+type AxisStat = { axis: string; label: string; polarity: string; users: number; tags: number; avgConfidence: number; top: Array<{ value: string; users: number }> };
+type UserTags = { usersWithTags: number; totalTags: number; lastComputedAt?: string; ruleVersion: string; axes: AxisStat[] };
+const polarityLabel: Record<string, string> = { POSITIVE: "正向", NEGATIVE: "回避", NEUTRAL: "中性" };
 
 const axisLabel: Record<string, string> = {
   capability: "能力", service: "服务类型", vertical: "垂类标签",
@@ -53,13 +57,13 @@ export function Tags() {
 
   return (
     <>
+      {d.userTags ? <UserTagLayer u={d.userTags} /> : null}
       <div className="section-title">
-        <h2>标签中心 · 词典盘点</h2>
+        <h2>词典盘点 · 供给侧 / 内容侧已落库的词</h2>
         <span>全量口径 —— 词典是状态，不是事件</span>
       </div>
       <div className="notice" style={{ marginBottom: 10 }}>
-        <b>标签体系（tag-service）不存在</b>：没有受控词表、没有别名合并与废弃治理、没有「一个标签挂在多少东西上」的统一索引。
-        下面是今天实际在当标签用的 {d.axes.length} 个轴 —— 它们是建 tag-service 时要接管的全部东西。
+        这一段不是用户标签：它是今天已经落库的 {d.axes.length} 个轴，回答「哪些轴可以先当标签用、哪些得先治理」。
       </div>
 
       <div className="kpi-grid">
@@ -114,6 +118,35 @@ export function Tags() {
       {(d.notes ?? []).map((n, i) => (
         <div className="notice" key={i} style={{ marginTop: 8 }}>{n}</div>
       ))}
+    </>
+  );
+}
+
+function UserTagLayer({ u }: { u: UserTags }) {
+  return (
+    <>
+      <div className="section-title">
+        <h2>用户标签 · 撮合读的就是这一层</h2>
+        <span>规则 {u.ruleVersion} · 每小时按事件重算</span>
+      </div>
+      <div className="kpi-grid">
+        <div className="kpi"><div className="label">有标签的人</div><div className="value">{u.usersWithTags.toLocaleString()}</div><div className="meta">没同意过的人没有标签，这是设计</div></div>
+        <div className="kpi"><div className="label">标签条数</div><div className="value">{u.totalTags.toLocaleString()}</div><div className="meta">未过期的</div></div>
+        <div className="kpi"><div className="label">上次重算</div><div className="value">{u.lastComputedAt ? new Date(u.lastComputedAt).toLocaleString() : "—"}</div><div className="meta">{u.lastComputedAt ? "" : "还没有任何标签"}</div></div>
+      </div>
+      <div className="table-wrap"><table>
+        <thead><tr><th>轴</th><th>性质</th><th className="numc">人数</th><th className="numc">条数</th><th className="numc">平均置信</th><th>最多的取值</th></tr></thead>
+        <tbody>{u.axes.map((a) => (
+          <tr key={a.axis}>
+            <td><b>{a.label}</b><div style={{ color: "#8a8190", fontSize: 11 }}>{a.axis}</div></td>
+            <td>{polarityLabel[a.polarity] ?? a.polarity}</td>
+            <td className="numc">{a.users.toLocaleString()}</td>
+            <td className="numc">{a.tags.toLocaleString()}</td>
+            <td className="numc">{a.tags ? a.avgConfidence.toFixed(2) : "—"}</td>
+            <td>{a.top.length ? a.top.map((v) => `${v.value}（${v.users}）`).join("、") : <span style={{ color: "#8a8190" }}>—</span>}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
     </>
   );
 }

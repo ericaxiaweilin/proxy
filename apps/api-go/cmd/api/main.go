@@ -758,6 +758,21 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
+			// TAG-SYSTEM-001：共同兴趣。标签读不出来 / 没标签 = 不算（TagFit 留 nil），排序照旧。
+			if requester := matching.RequesterFrom(ctx); requester != "" && server.TagStore != nil {
+				tagSvc := &tagging.Service{Store: server.TagStore}
+				mine := tagSvc.TagsFor(ctx, requester, tagging.UseMatching)
+				if len(mine) > 0 {
+					for _, id := range ids {
+						if theirs := tagSvc.TagsFor(ctx, id, tagging.UseMatching); len(theirs) > 0 {
+							fit := tagging.Overlap(mine, theirs)
+							sig := signals[id]
+							sig.TagFit = &fit
+							signals[id] = sig
+						}
+					}
+				}
+			}
 			return matching.Rank(ids, nil, matching.WithDistances(signals, ids, lat, lng), 0), nil
 		}
 		marketplaceService.SetApplicantRanker(rankUsers)

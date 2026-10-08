@@ -39,6 +39,8 @@ type Tunables struct {
 	NewcomerOrders    float64 // 新人加权覆盖前多少单
 	LoadPenaltyPerJob float64 // 手上每一张未结束的邀约 / 订单扣多少分
 	LoadPenaltyCap    float64 // 负载扣分封顶
+	// TAG-SYSTEM-001
+	TagFitWeight float64 // 共同兴趣（标签重合度）满分；出厂 0 = 不参与排名
 }
 
 // DefaultTunables 就是接线之前 Score 里写死的那批数：40 / 30 / 0.7-0.3 / 15 / log1p(50) /
@@ -72,6 +74,7 @@ func DefaultTunables() Tunables {
 		NewcomerOrders:    10,
 		LoadPenaltyPerJob: 6,
 		LoadPenaltyCap:    18,
+		TagFitWeight:      0,
 	}
 }
 
@@ -113,6 +116,7 @@ var tunableDefs = []TunableDef{
 	{"newcomerBoost", 0, 50, "新人加权满分：0 单时拿满，按完成单量线性递减", func(t Tunables) float64 { return t.NewcomerBoost }, func(t *Tunables, v float64) { t.NewcomerBoost = v }},
 	{"newcomerOrders", 0, 100, "新人加权覆盖前多少单（0 = 关掉新人加权）", func(t Tunables) float64 { return t.NewcomerOrders }, func(t *Tunables, v float64) { t.NewcomerOrders = v }},
 	{"loadPenaltyPerJob", 0, 50, "负载扣分：手上每一张未结束的邀约 / 订单扣多少分", func(t Tunables) float64 { return t.LoadPenaltyPerJob }, func(t *Tunables, v float64) { t.LoadPenaltyPerJob = v }},
+	{"tagFitWeight", 0, 30, "共同兴趣满分：她和发单方的兴趣标签重合度 × 这个数（出厂 0 = 不参与；没有标签的人这一项为 0，不是扣分）", func(t Tunables) float64 { return t.TagFitWeight }, func(t *Tunables, v float64) { t.TagFitWeight = v }},
 	{"loadPenaltyCap", 0, 100, "负载扣分封顶", func(t Tunables) float64 { return t.LoadPenaltyCap }, func(t *Tunables, v float64) { t.LoadPenaltyCap = v }},
 }
 
