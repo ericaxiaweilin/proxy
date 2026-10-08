@@ -151,6 +151,22 @@ func TestSegmentsSuppressSmallCohortsAndShowCoOccurrenceOnlyForBigOnes(t *testin
 	if tiny.CohortSize == nil || !tiny.CohortSize.Suppressed || len(tiny.AlsoHave) != 0 {
 		t.Errorf("a 2-person cohort must neither show its size nor what else its members have: %+v", tiny)
 	}
+	top, err := src.TopInterests(ctx, now, 50)
+	if err != nil {
+		t.Fatalf("TopInterests: %v", err)
+	}
+	var sawBig, sawSmall bool
+	for _, r := range top {
+		if r.Value == "测试摄影" && r.Users >= 6 && r.Tag == "话题·测试摄影" {
+			sawBig = true
+		}
+		if r.Value == "测试手作" {
+			sawSmall = true
+		}
+	}
+	if !sawBig || sawSmall {
+		t.Errorf("TopInterests must list the 6-person tag and drop the 2-person one entirely: big=%v small=%v", sawBig, sawSmall)
+	}
 	if seg.Coverage.ActiveUsers < 0 || len(seg.Coverage.Buckets) != 5 {
 		t.Errorf("coverage buckets: %+v", seg.Coverage)
 	}

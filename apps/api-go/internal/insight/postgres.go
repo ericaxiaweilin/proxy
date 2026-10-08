@@ -272,3 +272,35 @@ func (p *Postgres) Segments(ctx context.Context, now time.Time, axis, withAxis, 
 	}
 	return out, nil
 }
+
+var interestAxes = map[string]string{
+	"INTEREST_TOPIC": "话题", "INTEREST_SCENE": "场景", "INTEREST_ACTIVITY": "活动", "VENUE_KIND": "场所",
+}
+
+func (p *Postgres) TopInterests(ctx context.Context, now time.Time, limit int) ([]InterestRow, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT axis, value, COUNT(DISTINCT user_id), AVG(strength)::float8, AVG(confidence)::float8
+		  FROM tag.user_tags
+		 WHERE expires_at > $1 AND axis IN ('INTEREST_TOPIC','INTEREST_SCENE','INTEREST_ACTIVITY','VENUE_KIND')
+		 GROUP BY axis, value HAVING COUNT(DISTINCT user_id) >= $2
+		 ORDER BY 3 DESC, 4 DESC, 1, 2 LIMIT $3`, now, MinCell, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []InterestRow{}
+	for rows.Next() {
+		var r InterestRow
+		if err := rows.Scan(&r.Axis, &r.Value, &r.Users, &r.Score, &r.Confidence); err != nil {
+			return nil, err
+		}
+		r.Tag = interestAxes[r.Axis] + "·" + r.Value
+		r.Score = float64(int(r.Score*1000+0.5)) / 1000
+		r.Confidence = float64(int(r.Confidence*1000+0.5)) / 1000
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

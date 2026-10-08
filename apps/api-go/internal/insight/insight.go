@@ -111,7 +111,19 @@ type Segments struct {
 	CohortSize *Cell  `json:"cohort,omitempty"`
 }
 
+// InterestRow 是「行为与兴趣」页的一行：人群里最普遍的兴趣类标签。Users < MinCell 的整行不出现（不是显示 0）。
+type InterestRow struct {
+	Tag        string  `json:"tag"` // 如 "话题·摄影"
+	Axis       string  `json:"axis"`
+	Value      string  `json:"value"`
+	Users      int     `json:"users"`
+	Score      float64 `json:"score"`      // 这些人对该标签的平均强度
+	Confidence float64 `json:"confidence"` // 平均置信度
+}
+
 type Source interface {
+	// TopInterests：各兴趣类轴（话题 / 场景 / 活动 / 场所类型）里最普遍的标签，已做小格子抑制。
+	TopInterests(ctx context.Context, now time.Time, limit int) ([]InterestRow, error)
 	DemandGap(ctx context.Context, now time.Time, days int) (DemandGap, error)
 	Segments(ctx context.Context, now time.Time, axis, withAxis, withValue string) (Segments, error)
 }

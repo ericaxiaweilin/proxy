@@ -17,6 +17,9 @@ type fakeInsight struct {
 	gap                                insight.DemandGap
 }
 
+func (f *fakeInsight) TopInterests(context.Context, time.Time, int) ([]insight.InterestRow, error) {
+	return []insight.InterestRow{{Tag: "话题·摄影", Axis: "INTEREST_TOPIC", Value: "摄影", Users: 7, Score: .6, Confidence: .7}}, nil
+}
 func (f *fakeInsight) DemandGap(context.Context, time.Time, int) (insight.DemandGap, error) {
 	return f.gap, nil
 }
@@ -100,5 +103,18 @@ func TestMatchPreviewNeedsMarketplaceScopeAndAnOpportunity(t *testing.T) {
 	rec = consoleGet(server, "match-preview?opportunityId=opp1", "op_all_token")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"userId":"u1"`) || !strings.Contains(rec.Body.String(), "共同兴趣的权重现在是 0") {
 		t.Fatalf("preview: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBehaviorTopInterestsComeFromTheTagLayerOrSayWhyNot(t *testing.T) {
+	server := operatorConsoleServer()
+	body := func() string { return consoleGet(server, "behavior", "ops_token").Body.String() }
+	if !strings.Contains(body(), "标签层没有接入") {
+		t.Fatalf("without the tag layer the page must say so: %s", body())
+	}
+	server.Insight = &fakeInsight{}
+	got := body()
+	if !strings.Contains(got, "话题·摄影") || strings.Contains(got, "tag-service") {
+		t.Fatalf("interests must come from the tag layer and the old 'not implemented' excuse must be gone: %s", got)
 	}
 }

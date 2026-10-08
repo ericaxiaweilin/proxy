@@ -222,6 +222,21 @@ func (s *Server) operatorBehavior(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "behavior_query_failed"})
 		return
 	}
+	// TAG-SYSTEM-001：兴趣来自标签层（各兴趣轴最普遍的标签）。少于 5 人的标签整行不出现；
+	// 一条都没有时说清为什么，而不是显示一个空榜单。
+	topInterests := []any{}
+	topInterestsMissing := "标签层没有接入（没有配数据库）"
+	if s.Insight != nil {
+		topInterestsMissing = "还没有任何兴趣标签达到 5 人：标签只来自同意过浏览的人和主动行为，人数少时不显示（少于 5 人的分群等于在指认个人）。"
+		if rows, err := s.Insight.TopInterests(r.Context(), time.Now().UTC(), 20); err != nil {
+			log.Printf("operator behavior top interests: %v", err)
+			topInterestsMissing = "兴趣标签这次没读出来（库错误）。"
+		} else {
+			for _, row := range rows {
+				topInterests = append(topInterests, map[string]any{"tag": row.Tag, "score": row.Score, "confidence": row.Confidence, "users": row.Users})
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dataSource": OperatorLiveSource,
 		"windowDays": 30,
@@ -234,9 +249,8 @@ func (s *Server) operatorBehavior(w http.ResponseWriter, r *http.Request) {
 			"weak_negative":   b.WeakNegative,
 			"strong_negative": b.StrongNegative,
 		},
-		// 兴趣分需要标签体系（spec §3），现在没有：给空，并写明缺什么。
-		"top_interests":       []any{},
-		"topInterestsMissing": "标签体系（tag-service）未实现，兴趣分无从计算",
+		"top_interests":       topInterests,
+		"topInterestsMissing": topInterestsMissing,
 	})
 }
 
