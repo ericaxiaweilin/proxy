@@ -695,8 +695,10 @@ export function SceneActivityDiscovery({
                     大图卡 —— 首页那格让给场景入口卡之后，Moment 浏览整条挪进来，
                     内容与交互原样保留，只是换了个入口。 */}
                 {/* 选了动作且该动作有真实场地：直接摆场地入口卡（点进去就是场地列表）；
-                    运动没有 Moment 种子，不摆这个就是一块空白（2026-10-08）。 */}
-                {actionId && entriesForAction.length > 0 ? entriesForAction.map(renderEntryCard) : null}
+                    运动没有 Moment 种子，不摆这个就是一块空白（2026-10-08）。
+                    有 Moment 的动作（用餐 → 夜市探吃…）只摆 Moment：「更多」是给大类目做路由，
+                    动作本身（用餐）不是一张卡（用户 2026-10-08）。 */}
+                {actionId && filtered.length === 0 && entriesForAction.length > 0 ? entriesForAction.map(renderEntryCard) : null}
                 {filtered.length > 0 ? filtered.map((moment) => renderMomentCard(moment)) : entriesForAction.length > 0 && actionId ? null : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>这类还没有完全匹配的 Moment</Text><Text selectable style={styles.emptyText}>减少一个金额/时间/场合筛选，看看更多组合。</Text></View>}
               </ScrollView>
             </View>
