@@ -289,7 +289,7 @@ function sceneMatches(brief: { name: string; area: string; type: string }, scene
   const haystack = `${brief.name} ${brief.area} ${brief.type}`.toLowerCase();
   const words: Record<string, readonly string[]> = {
     cafe: ["咖啡", "cafe", "coffee"], lake: ["湖", "lake", "westlake", "西湖"],
-    "old-town": ["老城", "old town", "old quarter"], "night-market": ["夜市", "night market"],
+    "old-town": ["老城", "old town", "old quarter", "hoàn kiếm", "phố cổ"], "night-market": ["夜市", "night market"],
     gallery: ["美术馆", "画廊", "gallery", "museum"], beach: ["海边", "沙滩", "beach", "coast"],
     park: ["公园", "park"], mall: ["商场", "mall"], restaurant: ["餐厅", "restaurant"], event: ["活动", "event"],
     hospital: ["医院", "hospital", "clinic", "诊所"],

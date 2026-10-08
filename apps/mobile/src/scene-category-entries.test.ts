@@ -134,4 +134,9 @@ describe("sceneCategoryEntries: 首页场景入口卡的计数只有真实来源
     ], acts);
     expect(entries.map((entry) => [entry.actionId, entry.count])).toEqual([["sport", 2]]);
   });
+
+  it("运动场地只归运动，名字里的 Park 不会把它算进 City Walk", () => {
+    const arena = scene({ name: "Khu Thể thao · Ocean Park", type: "运动 · 综合体育馆", category: "其他" });
+    expect(sceneCategoryEntries([arena], [{ id: "city-walk", label: "City Walk" }, { id: "sport", label: "运动" }]).map((e) => e.actionId)).toEqual(["sport"]);
+  });
 });

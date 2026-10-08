@@ -96,6 +96,8 @@ export function scenesForAction<T extends SceneMatchFields>(
   const words = ACTION_SCENE_KEYWORDS[actionId] ?? [];
   if (words.length === 0) return [];
   return scenes.filter((scene) => {
+    // 运动场地只归运动：名字里带 Park（Ocean Park 体育馆）不该混进 City Walk 的「park」。
+    if (actionId !== "sport" && scene.type.startsWith("运动")) return false;
     const haystack = `${scene.name} ${scene.area} ${scene.type}`.toLowerCase();
     return words.some((word) => haystack.includes(word.toLowerCase()));
   });
