@@ -183,6 +183,21 @@ func TestStoreBoardReadModelRunsAgainstRealSchema(t *testing.T) {
 			sceneUnclaimed, board.UnclaimedScenes)
 	}
 
+	// 承载估算（2026-10-08）：单场活动里的人数（一对 2 人、没有同行人 1 人），相对 50 人上限。
+	// A 店的两单 CONFIRMED 都在同一场活动上；峰值必须等于那一场的人数，且 LoadPct 与它自洽。
+	if board.CapacityPeople != storeboard.CapacityPeople || storeboard.CapacityPeople != 50 {
+		t.Fatalf("上限是 50 人（≈25 对），页面照抄 board.CapacityPeople: %d", board.CapacityPeople)
+	}
+	if a.PeakPeople == nil || a.LoadPct == nil || *a.LoadPct != *a.PeakPeople*100/storeboard.CapacityPeople || a.PeakActivity == nil {
+		t.Fatalf("A 店有预约，必须有峰值人数、负载百分比与是哪一场: %+v", a)
+	}
+	if *a.PeakPeople < 2 {
+		t.Fatalf("两单 CONFIRMED 在同一场活动上，峰值至少 2 人: %d", *a.PeakPeople)
+	}
+	if b.PeakPeople != nil || b.LoadPct != nil || b.PeakActivity != nil {
+		t.Fatalf("没有预约的店没有峰值，也不是 0%%: %+v", b)
+	}
+
 	// 排序：bookings DESC（同数按店名）。这个断言不依赖全库别的行 —— 只检查列表自身
 	// 单调不增，且预约多的 A 店必须排在 0 单的 B 店前面。
 	for i := 1; i < len(board.Stores); i++ {

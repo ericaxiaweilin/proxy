@@ -18,12 +18,14 @@ type StoreRow = {
   bookings: number; cancelled: number; cancelRate: number | null;
   capacityPct: number | null; forecastPct: number | null; acceptingTraffic: boolean | null;
   snapshotAt: string | null; snapshotAgeMinutes: number | null;
+  peakPeople: number | null; peakActivity: string | null; peakTime: string | null; loadPct: number | null;
 };
 type Board = {
   coverage: Coverage;
   attributedSince: string | null;
   stores: StoreRow[];
   unclaimedScenes: number;
+  capacityPeople: number;
 };
 type BoardPayload = { dataSource: string; windowDays: number; board?: Board; notes?: string[] };
 
@@ -35,6 +37,10 @@ const STALE_MINUTES = 60;
 
 const pct = (v: number | null): string => (v == null ? DASH : `${(v * 100).toFixed(1)}%`);
 const load = (v: number | null): string => (v == null ? DASH : `${v}%`);
+// 估算承载：80% 起偏满（琥珀），100% 起满（红）。线是 2026-10-08 用户定的：一家店 90 分钟内按 50 人（≈25 对）算。
+const WARN_PCT = 80;
+const estimateStyle = (v: number | null): { color: string; fontWeight: number } | undefined =>
+  v == null ? undefined : v >= 100 ? { color: "#d9534f", fontWeight: 800 } : v >= WARN_PCT ? { color: "#c9a227", fontWeight: 800 } : undefined;
 const traffic = (v: boolean | null): string => (v == null ? DASH : v ? "是" : "否");
 // 运营在越南：按浏览器本地时间显示（接口里存的是 UTC）。
 const day = (iso: string): string => {
@@ -103,6 +109,8 @@ export function StoreBoard() {
                   <th style={{ textAlign: "right" }}>预约</th>
                   <th style={{ textAlign: "right" }}>取消</th>
                   <th style={{ textAlign: "right" }}>取消率</th>
+                  <th style={{ textAlign: "right" }}>单场最高人数</th>
+                  <th style={{ textAlign: "right" }}>估算承载</th>
                   <th style={{ textAlign: "right" }}>承载</th>
                   <th style={{ textAlign: "right" }}>预测</th>
                   <th>接流量</th>
@@ -111,7 +119,7 @@ export function StoreBoard() {
               </thead>
               <tbody>
                 {board.stores.length === 0
-                  ? <tr><td>{DASH}</td><td colSpan={7} style={META}>没有在营门店</td></tr>
+                  ? <tr><td>{DASH}</td><td colSpan={9} style={META}>没有在营门店</td></tr>
                   : board.stores.map((s) => (
                     <tr key={s.storeId}>
                       <td>
@@ -121,6 +129,11 @@ export function StoreBoard() {
                       <td className="numc">{s.bookings}</td>
                       <td className="numc">{s.cancelled}</td>
                       <td className="numc">{pct(s.cancelRate)}</td>
+                      <td className="numc">
+                        {s.peakPeople == null ? DASH : s.peakPeople}
+                        {s.peakActivity ? <div style={{ ...META, fontSize: 11 }}>{s.peakActivity}{s.peakTime ? ` · ${s.peakTime}` : ""}</div> : null}
+                      </td>
+                      <td className="numc" style={estimateStyle(s.loadPct)}>{load(s.loadPct)}</td>
                       <td className="numc">{load(s.capacityPct)}</td>
                       <td className="numc">{load(s.forecastPct)}</td>
                       <td>{traffic(s.acceptingTraffic)}</td>
@@ -133,6 +146,10 @@ export function StoreBoard() {
             </table>
           </div>
           <div className="notice" style={{ marginTop: 10 }}>
+            估算承载 = 窗口内「单场活动」里该店最高的预约人数（一对 2 人）÷ {data.board?.capacityPeople ?? 50} 人：
+            一家店我们不知道它什么时候真的满，一家正常咖啡店 90 分钟按 50 人（约 25 对）算，再多就吵闹拥挤、
+            也和「鼓励线下一对一约」相悖；80% 起偏满，100% 起满。活动时间目前只是文字标签，还不能精确到
+            90 分钟窗口，同一家店同一时段开两场会被低估。<br />
             承载 / 预测 / 接流量 / 数据新鲜度来自该店最新一条 scene_supply_snapshots 快照：
             从来没上报过的店这四列是「—」，不是 0。预约 = 窗口内 CONFIRMED 的报名行，
             取消 = 窗口内其余状态（取消 / 候补 / 爽约），取消率的分母是两者之和。

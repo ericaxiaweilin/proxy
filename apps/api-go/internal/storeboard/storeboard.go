@@ -26,6 +26,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// 承载估算（2026-10-08 用户定）：一家店我们**不知道**它什么时候真的满，只能估算。
+// 一家正常的咖啡店 90 分钟内放得下几十人，按 50 人（≈ 25 对）算：同一时段往一家店安排 25 对，
+// 50 个人就吵闹拥挤、体验差，而且产品鼓励线下一对一约，几十对挤在一起本身就尴尬。
+//
+//   - 一单 = 一对（有同行小美，2 人）；没有同行人的报名算 1 人。
+//   - 上限 50 人，进入「偏满」的线是 80%（40 人）。以后某家店能报真实承载再按店覆盖。
+//
+// 活动的时间在库里只是一段中文标签（「周六 15:00–17:00」），没有结构化的开始时间，所以这里
+// 还算不出「任意 90 分钟窗口内的峰值」，先按**单场活动**数：一场活动的预约人数就是同一时段来的
+// 人数的下限（同一家店同一时段开两场活动会被低估，页面上写明）。等活动带上结构化开始时间，
+// 把 PeakPeople 的分组换成 90 分钟滑动窗口即可，字段和页面都不用动。
+const (
+	CapacityPeople = 50
+	LoadWarnPct    = 80
+)
+
 // Coverage 是「窗口内一共多少单 / 其中多少单能归属到某家门店」。
 //
 // Bookings **不过滤状态**：已取消的单也是一单，它只是不算进那家店的 bookings。
@@ -57,6 +73,13 @@ type StoreRow struct {
 	AcceptingTraffic   *bool      `json:"acceptingTraffic"`
 	SnapshotAt         *time.Time `json:"snapshotAt"`
 	SnapshotAgeMinutes *int       `json:"snapshotAgeMinutes"`
+	// PeakPeople：窗口内**单场活动**里该店的最高预约人数（一对 2 人）；没有预约就是 null。
+	// PeakActivity / PeakTime 是那一场的标题与时间标签，运营能直接点到是哪场。
+	PeakPeople   *int    `json:"peakPeople"`
+	PeakActivity *string `json:"peakActivity"`
+	PeakTime     *string `json:"peakTime"`
+	// LoadPct = PeakPeople / CapacityPeople（取整，可以超过 100）；PeakPeople 为 null 时为 null。
+	LoadPct *int `json:"loadPct"`
 }
 
 // Board 是这一页一次读出来的全部内容（三组各一条参数化查询）。
@@ -68,6 +91,8 @@ type Board struct {
 	// 记 store_id）。它非 nil 时，页面上必须说清楚这一点，否则运营会把整段历史的
 	// 「未归属」当成今天才冒出来的数据问题去查。
 	AttributedSince *time.Time `json:"attributedSince"`
+	// CapacityPeople 是估算用的单店上限（人），页面照抄，不各写一份。
+	CapacityPeople int `json:"capacityPeople"`
 	// Stores 恒为 []，不是 null：页面直接遍历它，不该为此写一层判空。
 	Stores []StoreRow `json:"stores"`
 	// UnclaimedScenes：窗口内有报名、而**没有任何 ACTIVE 门店认领**其场景的
@@ -88,7 +113,7 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
 // Board 一次读三组，每组一条参数化查询（不拼字符串，见 sql 注释里各组的口径）。
 func (p *Postgres) Board(ctx context.Context, since time.Time) (Board, error) {
-	out := Board{Stores: []StoreRow{}}
+	out := Board{Stores: []StoreRow{}, CapacityPeople: CapacityPeople}
 	now := time.Now().UTC()
 
 	// 组 1：覆盖率 + 归属起点。
@@ -120,7 +145,8 @@ func (p *Postgres) Board(ctx context.Context, since time.Time) (Board, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT
 			b.store_id, b.name, b.business_id, b.bookings, b.cancelled,
-			b.capacity_pct, b.forecast_pct, b.accepting_traffic, b.snapshot_at
+			b.capacity_pct, b.forecast_pct, b.accepting_traffic, b.snapshot_at,
+			b.peak_people, b.peak_activity, b.peak_time
 		FROM (
 			SELECT
 				s.id AS store_id, s.name, s.business_id,
@@ -131,7 +157,8 @@ func (p *Postgres) Board(ctx context.Context, since time.Time) (Board, error) {
 				snap.current_capacity_pct AS capacity_pct,
 				snap.forecast_capacity_pct AS forecast_pct,
 				snap.accepting_traffic AS accepting_traffic,
-				snap.recorded_at AS snapshot_at
+				snap.recorded_at AS snapshot_at,
+				peak.people AS peak_people, peak.title AS peak_activity, peak.time_label AS peak_time
 			FROM business.stores s
 			LEFT JOIN LATERAL (
 				SELECT ss.current_capacity_pct, ss.forecast_capacity_pct,
@@ -141,6 +168,16 @@ func (p *Postgres) Board(ctx context.Context, since time.Time) (Board, error) {
 				ORDER BY ss.recorded_at DESC
 				LIMIT 1
 			) snap ON TRUE
+			LEFT JOIN LATERAL (
+				SELECT SUM(CASE WHEN COALESCE(p.companion_id, '') <> '' THEN 2 ELSE 1 END)::int AS people,
+				       a.payload->>'title' AS title, a.payload->>'time' AS time_label
+				FROM activity.participants p
+				JOIN activity.activities a ON a.id = p.activity_id
+				WHERE p.store_id = s.id AND p.joined_at >= $1 AND p.state = 'CONFIRMED'
+				GROUP BY a.id, a.payload->>'title', a.payload->>'time'
+				ORDER BY people DESC
+				LIMIT 1
+			) peak ON TRUE
 			WHERE s.status = 'ACTIVE'
 		) b
 		ORDER BY b.bookings DESC, b.name`, since)
@@ -151,8 +188,13 @@ func (p *Postgres) Board(ctx context.Context, since time.Time) (Board, error) {
 	for rows.Next() {
 		var row StoreRow
 		if err := rows.Scan(&row.StoreID, &row.Name, &row.BusinessID, &row.Bookings, &row.Cancelled,
-			&row.CapacityPct, &row.ForecastPct, &row.AcceptingTraffic, &row.SnapshotAt); err != nil {
+			&row.CapacityPct, &row.ForecastPct, &row.AcceptingTraffic, &row.SnapshotAt,
+			&row.PeakPeople, &row.PeakActivity, &row.PeakTime); err != nil {
 			return Board{}, err
+		}
+		if row.PeakPeople != nil {
+			pct := *row.PeakPeople * 100 / CapacityPeople
+			row.LoadPct = &pct
 		}
 		if total := row.Bookings + row.Cancelled; total > 0 {
 			rate := float64(row.Cancelled) / float64(total)
