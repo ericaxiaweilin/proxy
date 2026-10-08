@@ -171,3 +171,71 @@ func TestOverlapRewardsSharedInterestAndPenalisesAversion(t *testing.T) {
 		t.Fatal("an aversion to the shared scene must lower the score")
 	}
 }
+
+// TAG-SYSTEM-002：一条显式场所行为同时贡献 店 / 类型 / 风格 / 区 四个轴；一条孤立信号不是画像。
+func TestAffinityNeedsMoreThanOneSignalAndKeepsTheFineGrainedValues(t *testing.T) {
+	sig := func(axis, value string, w float64) Signal {
+		return Signal{Axis: axis, Value: value, Weight: w, N: 1, First: ago(72 * time.Hour), Last: ago(time.Hour), Explicit: true}
+	}
+	ev := Evidence{UserID: "u", Signals: []Signal{
+		sig(AxisVenueFavorite, "cafe_giang", 3), sig(AxisVenueKind, "咖啡", 3), sig(AxisVenueStyle, "店招", 3), sig(AxisDistrict, "Hoàn Kiếm", 3),
+		sig(AxisVenueFavorite, "cafe_dinh", 1), sig(AxisVenueKind, "咖啡", 1), sig(AxisVenueStyle, "店招", 1), sig(AxisDistrict, "Hoàn Kiếm", 1),
+		sig(AxisVenueKind, "餐厅", 1), // 只有一条：不够出标签
+	}}
+	tags := Derive(ev, now)
+	if _, ok := find(tags, AxisVenueFavorite, "cafe_giang"); !ok {
+		t.Fatal("one explicit save of a specific venue is enough for the venue itself")
+	}
+	if kind, ok := find(tags, AxisVenueKind, "咖啡"); !ok || kind.EvidenceCount != 2 || kind.Source != SourceExplicit {
+		t.Fatalf("two coffee venues give a kind tag (unicode value, explicit source): %+v ok=%v", kind, ok)
+	}
+	if _, ok := find(tags, AxisVenueKind, "餐厅"); ok {
+		t.Fatal("a single restaurant is not a kind preference yet")
+	}
+	if d, ok := find(tags, AxisDistrict, "Hoàn_Kiếm"); !ok || d.Strength < 0.6 {
+		t.Fatalf("district value is normalised (space -> underscore) and saturates: %+v ok=%v", d, ok)
+	}
+	if len(tags) < 5 {
+		t.Fatalf("a single behaviour pair should already give a fine-grained set, got %d: %v", len(tags), tags)
+	}
+}
+
+func TestDeclaredTagsAreAlwaysCurrentAndNeverExpireFromStaleness(t *testing.T) {
+	long := ago(300 * 24 * time.Hour)
+	ev := Evidence{UserID: "u", Signals: []Signal{
+		{Axis: AxisSkill, Value: "CITY_COMPANION", Weight: 1, N: 1, First: long, Last: long, Explicit: true},
+		{Axis: AxisLanguage, Value: "zh", Weight: 1, N: 1, First: long, Last: long, Explicit: true},
+	}}
+	tags := Derive(ev, now)
+	skill, ok := find(tags, AxisSkill, "CITY_COMPANION")
+	if !ok || !skill.LastSeen.Equal(now) || skill.Source != SourceExplicit || skill.Strength < 0.8 {
+		t.Fatalf("a declared skill is a present-tense fact: %+v ok=%v", skill, ok)
+	}
+	if _, ok := find(tags, AxisLanguage, "zh"); !ok {
+		t.Fatal("declared language must survive")
+	}
+}
+
+func TestPassiveAndExplicitSignalsMixIntoMixedSource(t *testing.T) {
+	ev := Evidence{UserID: "u", Signals: []Signal{
+		{Axis: AxisCreatorAffinity, Value: "user_xiaomei", Weight: 2, N: 2, First: ago(48 * time.Hour), Last: ago(time.Hour)},
+		{Axis: AxisCreatorAffinity, Value: "user_xiaomei", Weight: 3, N: 1, First: ago(24 * time.Hour), Last: ago(time.Hour), Explicit: true},
+	}}
+	tag, ok := find(Derive(ev, now), AxisCreatorAffinity, "user_xiaomei")
+	if !ok || tag.Source != SourceMixed || tag.SourceDiversity != 2 || tag.EvidenceCount != 3 {
+		t.Fatalf("mixed provenance expected: %+v ok=%v", tag, ok)
+	}
+}
+
+func TestUnicodeValuesAreFineButPunctuationInjectionIsNot(t *testing.T) {
+	for _, ok := range []string{"咖啡", "Hoàn_Kiếm", "city-walk", "21.03,105.85"} {
+		if !ValidValue(ok) {
+			t.Errorf("%q should be a valid controlled value", ok)
+		}
+	}
+	for _, bad := range []string{"", "a b", "<script>", "x\ny", "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二"} {
+		if ValidValue(bad) {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+}

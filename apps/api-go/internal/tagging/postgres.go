@@ -2,6 +2,7 @@ package tagging
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -198,7 +199,138 @@ func (p *Postgres) LoadEvidence(ctx context.Context, since time.Time) (map[strin
 		out[id] = ev
 	}
 	rows.Close()
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := p.loadSignals(ctx, since, valid, get, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// splitVenueType 把场景的自由文本类型（"咖啡 · 店招"）拆成「类型」和「风格」两个取值。
+// 没有「·」就只有类型，没有风格——不编。
+func splitVenueType(t string) (kind, style string) {
+	parts := strings.SplitN(t, "·", 2)
+	kind = strings.TrimSpace(parts[0])
+	if len(parts) == 2 {
+		style = strings.TrimSpace(parts[1])
+	}
+	return kind, style
+}
+
+// loadSignals：细粒度亲和信号（TAG-SYSTEM-002）。每个抽取只回答一个问题，加一个轴 = 加一段抽取。
+func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid string, get func(string) Evidence, out map[string]Evidence) error {
+	push := func(user string, sg Signal) {
+		ev := get(user)
+		ev.Signals = append(ev.Signals, sg)
+		out[user] = ev
+	}
+
+	// 1) 显式场所行为：收藏 / 计划去 / 去过 / 打卡。用户自己做的事，不需要浏览同意。
+	//    一条行为同时贡献四个轴：这家店本身、它的类型、它的风格、它所在的区——越细越好。
+	rows, err := p.pool.Query(ctx, `
+		SELECT x.actor_id, sc.id, sc.type, sc.area, x.w::float8, x.first_at, x.last_at
+		FROM (
+			SELECT actor_id, scene_id,
+			       (CASE WHEN saved THEN 1.0 ELSE 0 END + CASE WHEN planned THEN 1.5 ELSE 0 END + CASE WHEN visited_at IS NOT NULL THEN 2.0 ELSE 0 END) AS w,
+			       created_at AS first_at, updated_at AS last_at
+			  FROM reality.user_scene_states WHERE updated_at >= $1
+			UNION ALL
+			SELECT actor_id, scene_id, 2.0, declared_at, declared_at FROM reality.scene_checkins WHERE declared_at >= $1
+		) x
+		JOIN reality.scenes sc ON sc.id = x.scene_id AND sc.status = 'ACTIVE'
+		WHERE x.w > 0`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, id, typ, area string
+		var w float64
+		var first, last time.Time
+		if err := rows.Scan(&user, &id, &typ, &area, &w, &first, &last); err != nil {
+			rows.Close()
+			return err
+		}
+		kind, style := splitVenueType(typ)
+		for _, sg := range []Signal{
+			{Axis: AxisVenueFavorite, Value: id},
+			{Axis: AxisVenueKind, Value: kind},
+			{Axis: AxisVenueStyle, Value: style},
+			{Axis: AxisDistrict, Value: area},
+		} {
+			if strings.TrimSpace(sg.Value) == "" {
+				continue
+			}
+			sg.Weight, sg.N, sg.First, sg.Last, sg.Explicit = w, 1, first, last, true
+			push(user, sg)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 2) 创作者偏好：看谁的内容停得久（被动，过同意）。30 秒停留 = 1 点权重。
+	rows, err = p.pool.Query(ctx, `
+		SELECT e.actor_id, p.author_id, COUNT(*), COALESCE(SUM(e.watch_ms), 0)::float8 / 30000.0, MIN(e.created_at), MAX(e.created_at)
+		FROM localnet.interaction_events e
+		JOIN localnet.posts p ON p.id = e.target_id
+		WHERE e.event_type = 'POST_IMPRESSION' AND e.target_type = 'POST'
+		  AND e.created_at >= $1 AND e.watch_ms > 0
+		  AND p.author_type = 'USER' AND p.author_id <> e.actor_id
+		  AND `+valid+`
+		GROUP BY e.actor_id, p.author_id`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, author string
+		var n int
+		var w float64
+		var first, last time.Time
+		if err := rows.Scan(&user, &author, &n, &w, &first, &last); err != nil {
+			rows.Close()
+			return err
+		}
+		push(user, Signal{Axis: AxisCreatorAffinity, Value: author, Weight: w, N: n, First: first, Last: last})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 3) 声明：她自己写在接单资料里的服务能力 / 垂类 / 语种。当前状态，不是行为，不需要浏览同意。
+	for _, q := range []struct{ axis, sql string }{
+		{AxisSkill, `SELECT ap.user_account_id, s.service_type FROM supply.agent_profiles ap
+			JOIN supply.agent_services s ON s.agent_id = ap.agent_id
+			WHERE ap.user_account_id IS NOT NULL AND ap.status <> 'DRAFT' AND s.status <> 'DRAFT'
+			UNION
+			SELECT ap.user_account_id, t FROM supply.agent_profiles ap
+			JOIN supply.agent_services s ON s.agent_id = ap.agent_id, jsonb_array_elements_text(s.vertical_tags) t
+			WHERE ap.user_account_id IS NOT NULL AND ap.status <> 'DRAFT' AND s.status <> 'DRAFT'`},
+		{AxisLanguage, `SELECT ap.user_account_id, lower(l) FROM supply.agent_profiles ap, jsonb_array_elements_text(ap.languages) l
+			WHERE ap.user_account_id IS NOT NULL AND ap.status <> 'DRAFT'`},
+	} {
+		rows, err = p.pool.Query(ctx, q.sql)
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		for rows.Next() {
+			var user, value string
+			if err := rows.Scan(&user, &value); err != nil {
+				rows.Close()
+				return err
+			}
+			push(user, Signal{Axis: q.axis, Value: value, Weight: 1, N: 1, First: now, Last: now, Explicit: true})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) UsersWithTags(ctx context.Context) ([]string, error) {

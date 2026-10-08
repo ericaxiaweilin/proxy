@@ -154,3 +154,89 @@ func TestAccountErasureDeletesTagsAndCoarseLocations(t *testing.T) {
 		t.Fatalf("%d derived rows survived the erasure", n)
 	}
 }
+
+// TAG-SYSTEM-002：细粒度标签对真库。显式场所行为（不需要浏览同意）一条就出 店 / 类型 / 风格 / 区；
+// 创作者偏好是被动的，要同意；声明的服务能力 / 语种来自接单资料。
+func TestFineGrainedTagsFromVenuesCreatorsAndDeclaredProfile(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	saver, watcher, noConsentWatcher, provider := "u_ft_s_"+stamp, "u_ft_w_"+stamp, "u_ft_n_"+stamp, "u_ft_p_"+stamp
+	users := []string{saver, watcher, noConsentWatcher, provider}
+	author := "u_ft_author_" + stamp
+	post := "p_ft_" + stamp
+	agent := "agent_ft_" + stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM tag.user_tags WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM reality.user_scene_states WHERE actor_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.interaction_events WHERE actor_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM privacy.purpose_consents WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.posts WHERE id = $1`, post)
+		_, _ = pool.Exec(bg, `DELETE FROM supply.agent_services WHERE agent_id = $1`, agent)
+		_, _ = pool.Exec(bg, `DELETE FROM supply.agent_profiles WHERE agent_id = $1`, agent)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+
+	// 两家咖啡店 + 一家餐厅，saver 都收藏了；餐厅只有一条。
+	exec(`INSERT INTO reality.user_scene_states (actor_id, scene_id, saved, planned, created_at, updated_at) VALUES ($1,'cafe_giang',true,false,$2,$2),($1,'cafe_dinh',true,true,$2,$2),($1,'buncha_ta',true,false,$2,$2)`, saver, now.Add(-time.Hour))
+
+	// 创作者偏好：被动，要同意。watcher 同意了，noConsentWatcher 没有。
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, scene_type) VALUES ($1,'USER',$2,'x',$3,'COFFEE')`, post, author, now)
+	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_ft_"+stamp, watcher, now.Add(-72*time.Hour))
+	for _, u := range []string{watcher, noConsentWatcher} {
+		for i := 0; i < 4; i++ {
+			exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'POST_IMPRESSION',$2,'POST',$3,$4,40000)`,
+				fmt.Sprintf("evt_ft_%s_%d", u, i), u, post, now.Add(-time.Duration(i+1)*time.Hour))
+		}
+	}
+
+	// 声明：接单资料。
+	exec(`INSERT INTO supply.agent_profiles (agent_id, name, languages, status, created_at, updated_at, user_account_id) VALUES ($1,'t','["ZH","vi"]'::jsonb,'ACTIVE',$2,$2,$3)`, agent, now, provider)
+	exec(`INSERT INTO supply.agent_services (agent_id, service_type, status, updated_at, vertical_tags) VALUES ($1,'CITY_COMPANION','ACTIVE',$2,'["RESTAURANT"]'::jsonb)`, agent, now)
+
+	store := tagging.NewPostgres(pool)
+	if _, err := tagging.Recompute(ctx, store, now); err != nil {
+		t.Fatalf("Recompute: %v", err)
+	}
+	has := func(user, axis, value string) bool {
+		tags, err := store.TagsOf(ctx, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tg := range tags {
+			if tg.Axis == axis && tg.Value == value {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range [][2]string{
+		{tagging.AxisVenueFavorite, "cafe_giang"}, {tagging.AxisVenueFavorite, "cafe_dinh"}, {tagging.AxisVenueFavorite, "buncha_ta"},
+		{tagging.AxisVenueKind, "咖啡"}, {tagging.AxisVenueStyle, "店招"}, {tagging.AxisDistrict, "Hoàn_Kiếm"},
+	} {
+		if !has(saver, want[0], want[1]) {
+			t.Errorf("saver should have %s:%s", want[0], want[1])
+		}
+	}
+	if has(saver, tagging.AxisVenueKind, "餐厅") {
+		t.Error("a single restaurant must not become a kind preference")
+	}
+	if !has(watcher, tagging.AxisCreatorAffinity, author) {
+		t.Error("a consenting viewer who dwelt on one creator's posts has a creator-affinity tag")
+	}
+	if has(noConsentWatcher, tagging.AxisCreatorAffinity, author) {
+		t.Error("without consent, passive viewing must not become a tag")
+	}
+	for _, want := range [][2]string{{tagging.AxisSkill, "CITY_COMPANION"}, {tagging.AxisSkill, "RESTAURANT"}, {tagging.AxisLanguage, "zh"}, {tagging.AxisLanguage, "vi"}} {
+		if !has(provider, want[0], want[1]) {
+			t.Errorf("declared profile should give %s:%s", want[0], want[1])
+		}
+	}
+}

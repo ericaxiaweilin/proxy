@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // RuleVersion 随规则变化而变；写进每个标签，方便回放「这个标签是哪一版规则算的」。
@@ -34,6 +35,16 @@ const (
 	AxisRhythm           = "RHYTHM"
 	AxisCity             = "CITY"
 	AxisArea             = "AREA"
+	// 细粒度亲和轴（TAG-SYSTEM-002，用户：「一个用户帖 n 个标签拿到画像，越细越好」）。
+	// 它们不靠专门写一条规则，而是「信号 → 同轴同值累加 → 饱和成强度」的通用路径：新增一个轴 =
+	// 一行 tag.axes + 一条抽取 SQL（postgres.go 的 loadSignals），不改 Derive。
+	AxisVenueFavorite   = "VENUE_FAVORITE"
+	AxisVenueKind       = "VENUE_KIND"
+	AxisVenueStyle      = "VENUE_STYLE"
+	AxisDistrict        = "DISTRICT"
+	AxisCreatorAffinity = "CREATOR_AFFINITY"
+	AxisSkill           = "SKILL"
+	AxisLanguage        = "LANGUAGE"
 )
 
 // Use 是读标签的人报上的用途（规格 §3.2 allowed_use）。
@@ -60,15 +71,31 @@ type Axis struct {
 	TTL             time.Duration
 	RequiredPurpose string
 	AllowedUse      []Use
+	// 亲和轴的通用参数。Scale = 信号权重累计到多少算强度约 0.63（饱和曲线的尺度）；
+	// MinSignals = 至少几条独立信号才出标签；Declared = 用户自己声明的当前状态（总是「现在」，不随时间过期）。
+	// Scale == 0 表示这不是通用亲和轴（走各自的专门规则）。
+	Scale      float64
+	MinSignals int
+	Declared   bool
 }
 
 var axes = []Axis{
-	{AxisInterestScene, "场景兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
-	{AxisAversionScene, "场景回避", "NEGATIVE", 14 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
-	{AxisInterestActivity, "活动兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
-	{AxisRhythm, "活跃节律", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
-	{AxisCity, "常在城市", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
-	{AxisArea, "常去区域", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+	{AxisInterestScene, "场景兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	{AxisAversionScene, "场景回避", "NEGATIVE", 14 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	{AxisInterestActivity, "活动兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	{AxisRhythm, "活跃节律", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	{AxisCity, "常在城市", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	{AxisArea, "常去区域", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0, 0, false},
+	// 显式场所行为（收藏 / 计划去 / 去过 / 打卡）：用户自己做的事，不需要浏览同意，保留得久一些。
+	{AxisVenueFavorite, "常去 / 收藏的店", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 3, 1, false},
+	{AxisVenueKind, "场所类型", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
+	{AxisVenueStyle, "场所风格", "POSITIVE", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
+	{AxisDistrict, "常活动的区", "NEUTRAL", 60 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
+	// 被动：看哪个创作者的内容停得久（要浏览同意）。
+	{AxisCreatorAffinity, "偏爱的创作者", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 6, 3, false},
+	// 声明：她自己写在接单资料里的能力 / 语种，是当前状态。
+	{AxisSkill, "声明的服务能力", "POSITIVE", 365 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0.5, 1, true},
+	{AxisLanguage, "声明的语种", "POSITIVE", 365 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0.5, 1, true},
 }
 
 // Axes 返回词表（拷贝）。
@@ -114,11 +141,15 @@ type Tag struct {
 // ID 是 axis:value，对人和日志都可读。
 func (t Tag) ID() string { return t.Axis + ":" + t.Value }
 
-var valuePattern = regexp.MustCompile(`^[A-Za-z0-9_.,:+-]{1,48}$`)
+var valuePattern = regexp.MustCompile(`^[\p{L}\p{N}_.,:+-]{1,48}$`)
+var spaces = regexp.MustCompile(`\s+`)
+
+// NormalizeValue：首尾去空白、内部空白折成下划线（"City Walk" → "City_Walk"）。折完仍不合格的是脏数据，Derive 会拒。
+func NormalizeValue(v string) string { return spaces.ReplaceAllString(strings.TrimSpace(v), "_") }
 
 // ValidValue：取值只允许这一小撮字符。事实里可能出现任意字符串（帖子的 scene_type、事件的 city），
 // 但标签是受控词的一部分，不收带空格 / 标点 / 中文长句的东西——那是脏数据，不是词。
-func ValidValue(v string) bool { return valuePattern.MatchString(v) }
+func ValidValue(v string) bool { return utf8.RuneCountInString(v) <= 48 && valuePattern.MatchString(v) }
 
 // ---------------------------------------------------------------- 证据
 
@@ -148,8 +179,21 @@ type CellEvidence struct {
 	Last  time.Time
 }
 
+// Signal 是一条已聚合的亲和信号：某人对某轴某值累计了多少权重。抽取在存储层完成（SQL 聚合），
+// 这里只做「同轴同值累加 → 饱和」。Explicit = 来自用户自己做的事（收藏 / 声明…），否则是被动行为。
+type Signal struct {
+	Axis     string
+	Value    string
+	Weight   float64
+	N        int
+	First    time.Time
+	Last     time.Time
+	Explicit bool
+}
+
 // Evidence 是一个人在窗口内的全部证据（已经过同意过滤）。
 type Evidence struct {
+	Signals    []Signal
 	UserID     string
 	Scenes     map[string]SceneEvidence
 	Activities map[string]ActivityEvidence
@@ -253,12 +297,87 @@ func Derive(ev Evidence, now time.Time) []Tag {
 		}
 	}
 
+	out = append(out, deriveAffinity(ev, now)...)
+
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Axis != out[j].Axis {
 			return out[i].Axis < out[j].Axis
 		}
 		return out[i].Value < out[j].Value
 	})
+	return out
+}
+
+type affinityKey struct{ axis, value string }
+
+type affinityAcc struct {
+	weight          float64
+	n               int
+	first, last     time.Time
+	explicit, behav bool
+}
+
+// deriveAffinity：通用亲和轴。同一 (轴, 值) 的信号累加权重，按轴的 Scale 饱和成强度；
+// 独立信号条数不到 MinSignals 不出（一条孤立信号不是画像）。声明类轴取「现在」作为 last_seen。
+func deriveAffinity(ev Evidence, now time.Time) []Tag {
+	acc := map[affinityKey]*affinityAcc{}
+	for _, sg := range ev.Signals {
+		axis, ok := LookupAxis(sg.Axis)
+		if !ok || axis.Scale <= 0 || sg.Weight <= 0 {
+			continue
+		}
+		value := NormalizeValue(sg.Value)
+		if !ValidValue(value) {
+			continue
+		}
+		k := affinityKey{sg.Axis, value}
+		a := acc[k]
+		if a == nil {
+			a = &affinityAcc{first: sg.First, last: sg.Last}
+			acc[k] = a
+		}
+		a.weight += sg.Weight
+		a.n += max(sg.N, 1)
+		if sg.First.Before(a.first) {
+			a.first = sg.First
+		}
+		if sg.Last.After(a.last) {
+			a.last = sg.Last
+		}
+		if sg.Explicit {
+			a.explicit = true
+		} else {
+			a.behav = true
+		}
+	}
+	var out []Tag
+	for k, a := range acc {
+		axis, _ := LookupAxis(k.axis)
+		if a.n < axis.MinSignals {
+			continue
+		}
+		source, diversity := SourceBehavior, 1
+		switch {
+		case a.explicit && a.behav:
+			source, diversity = SourceMixed, 2
+		case a.explicit:
+			source = SourceExplicit
+		}
+		first, last := a.first, a.last
+		if axis.Declared {
+			last = now
+			if first.IsZero() || first.After(now) {
+				first = now
+			}
+		}
+		t := Tag{UserID: ev.UserID, Axis: k.axis, Value: k.value, Strength: saturate(a.weight, axis.Scale), Confidence: confidence(a.n, diversity),
+			Source: source, EvidenceCount: a.n, SourceDiversity: diversity, FirstSeen: first, LastSeen: last,
+			ExpiresAt: last.Add(axis.TTL), ComputedAt: now, RuleVersion: RuleVersion}
+		if !t.ExpiresAt.After(now) {
+			continue
+		}
+		out = append(out, t)
+	}
 	return out
 }
 
