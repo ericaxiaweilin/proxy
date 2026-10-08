@@ -487,6 +487,8 @@ commands:
     domain: Engagement
   - command: RecommendStore
     domain: StoreOnboarding
+  - command: RecordActivityView
+    domain: LocalNet
   - command: RecordAggregatedDemandSignal
     domain: Business
   - command: RecordAppealDecision

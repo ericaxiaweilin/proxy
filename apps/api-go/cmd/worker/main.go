@@ -13,6 +13,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/gravity"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -616,6 +617,11 @@ func main() {
 	recomputeGravity(ctx, gravityStore)
 	gravityTicker := time.NewTicker(time.Hour)
 	defer gravityTicker.Stop()
+	// TAG-SYSTEM-001：用户标签每小时按事件重算（派生数据，可整表重来；同意撤回的下一轮就清掉）。
+	tagStore := tagging.NewPostgres(pool)
+	recomputeTags(ctx, tagStore)
+	tagTicker := time.NewTicker(time.Hour)
+	defer tagTicker.Stop()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -672,6 +678,8 @@ func main() {
 			}
 		case <-gravityTicker.C:
 			recomputeGravity(ctx, gravityStore)
+		case <-tagTicker.C:
+			recomputeTags(ctx, tagStore)
 		case <-sweeperTicker.C:
 			// MERCHANT-CREATOR-NOTIFY-001：收件箱回收（migration 176，90 天保留期）。
 			// 不做的话它只增不减（现在 926 行），而 ListInbox 会把它整页整页发给客户端。
@@ -693,6 +701,16 @@ func main() {
 			sweepPrivacyDeletions(ctx, privacyService)
 		}
 	}
+}
+
+// recomputeTags 重算所有人的用户标签；失败只记日志（派生数据，下个小时再来）。
+func recomputeTags(ctx context.Context, store tagging.Store) {
+	n, err := tagging.Recompute(ctx, store, time.Now().UTC())
+	if err != nil {
+		log.Printf("tag recompute failed: %v", err)
+		return
+	}
+	log.Printf("tag recompute: users_with_tags=%d rule=%s", n, tagging.RuleVersion)
 }
 
 // recomputeGravity 重算所有人的引力状态；失败只记日志（派生数据，下个小时再来）。

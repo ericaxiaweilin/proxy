@@ -1,0 +1,429 @@
+// Package tagging 是规格 §3 的「Tag 层」：把事实（事件 / 粗粒度位置 / 主动表态）压成可解释的
+// 用户标签，供撮合与推荐读取。
+//
+//	Event = 事实（localnet.interaction_events，append-only，不动）
+//	Tag   = 可解释状态（本包：tag.user_tags，**派生物，可整表重算**）
+//
+// 三条边界，改之前先读：
+//
+//  1. 标签不是事实。任何时候都可以按事件重算；同意撤回后下一轮重算标签就消失。
+//     所以重算必须覆盖「已经有标签的人」，不能只覆盖「最近有事件的人」（见 Recompute）。
+//  2. 每个轴声明 required_purpose 和 allowed_use。取证据时过 consent.ValidAtSQL（事件那一刻同意有效
+//     且现在没撤回），读标签时报用途（Use），不在清单里读不到。
+//  3. 不编数。证据不足就不出标签；强度 / 置信度都由证据条数和停留时长算出来，公式写在下面，
+//     不是拍脑袋的权重。
+package tagging
+
+import (
+	"fmt"
+	"math"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// RuleVersion 随规则变化而变；写进每个标签，方便回放「这个标签是哪一版规则算的」。
+const RuleVersion = "2026-10-08"
+
+// 轴（词表）。取值来自事实，轴本身是受控的。
+const (
+	AxisInterestScene    = "INTEREST_SCENE"
+	AxisAversionScene    = "AVERSION_SCENE"
+	AxisInterestActivity = "INTEREST_ACTIVITY"
+	AxisRhythm           = "RHYTHM"
+	AxisCity             = "CITY"
+	AxisArea             = "AREA"
+)
+
+// Use 是读标签的人报上的用途（规格 §3.2 allowed_use）。
+type Use string
+
+const (
+	UseRecommendation Use = "recommendation"
+	UseMatching       Use = "matching"
+	UseAnalytics      Use = "analytics"
+)
+
+// 来源。
+const (
+	SourceBehavior = "BEHAVIOR"
+	SourceExplicit = "EXPLICIT"
+	SourceMixed    = "MIXED"
+)
+
+// Axis 是一个标签轴的定义（与 tag.axes 一一对应）。
+type Axis struct {
+	Axis            string
+	Label           string
+	Polarity        string
+	TTL             time.Duration
+	RequiredPurpose string
+	AllowedUse      []Use
+}
+
+var axes = []Axis{
+	{AxisInterestScene, "场景兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+	{AxisAversionScene, "场景回避", "NEGATIVE", 14 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+	{AxisInterestActivity, "活动兴趣", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+	{AxisRhythm, "活跃节律", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+	{AxisCity, "常在城市", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+	{AxisArea, "常去区域", "NEUTRAL", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}},
+}
+
+// Axes 返回词表（拷贝）。
+func Axes() []Axis { return append([]Axis(nil), axes...) }
+
+// LookupAxis 按名字找轴。
+func LookupAxis(name string) (Axis, bool) {
+	for _, a := range axes {
+		if a.Axis == name {
+			return a, true
+		}
+	}
+	return Axis{}, false
+}
+
+// Allows 报告这个轴是否允许该用途读取。
+func (a Axis) Allows(use Use) bool {
+	for _, u := range a.AllowedUse {
+		if u == use {
+			return true
+		}
+	}
+	return false
+}
+
+// Tag 是一个用户标签（规格 §3.2 user_tag）。
+type Tag struct {
+	UserID          string    `json:"userId,omitempty"`
+	Axis            string    `json:"axis"`
+	Value           string    `json:"value"`
+	Strength        float64   `json:"strength"`
+	Confidence      float64   `json:"confidence"`
+	Source          string    `json:"source"`
+	EvidenceCount   int       `json:"evidenceCount"`
+	SourceDiversity int       `json:"sourceDiversity"`
+	FirstSeen       time.Time `json:"firstSeen"`
+	LastSeen        time.Time `json:"lastSeen"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+	ComputedAt      time.Time `json:"computedAt"`
+	RuleVersion     string    `json:"ruleVersion"`
+}
+
+// ID 是 axis:value，对人和日志都可读。
+func (t Tag) ID() string { return t.Axis + ":" + t.Value }
+
+var valuePattern = regexp.MustCompile(`^[A-Za-z0-9_.,:+-]{1,48}$`)
+
+// ValidValue：取值只允许这一小撮字符。事实里可能出现任意字符串（帖子的 scene_type、事件的 city），
+// 但标签是受控词的一部分，不收带空格 / 标点 / 中文长句的东西——那是脏数据，不是词。
+func ValidValue(v string) bool { return valuePattern.MatchString(v) }
+
+// ---------------------------------------------------------------- 证据
+
+// SceneEvidence：某类场景内容上的行为证据。
+type SceneEvidence struct {
+	Events     int
+	DwellMs    int64
+	QuickSkips int // 停留 < QuickSkipMs 的曝光
+	First      time.Time
+	Last       time.Time
+}
+
+// ActivityEvidence：某类活动上的证据。Views/DwellMs 是被动的（要同意），Interested/Joined 是用户主动做的。
+type ActivityEvidence struct {
+	Views      int
+	DwellMs    int64
+	Interested int
+	Joined     int
+	First      time.Time
+	Last       time.Time
+}
+
+// CellEvidence：一个粗粒度网格里出现过的天数。
+type CellEvidence struct {
+	Days  int
+	First time.Time
+	Last  time.Time
+}
+
+// Evidence 是一个人在窗口内的全部证据（已经过同意过滤）。
+type Evidence struct {
+	UserID     string
+	Scenes     map[string]SceneEvidence
+	Activities map[string]ActivityEvidence
+	// HourCounts[weekday*24+hour] = 该时段的事件数（越南时间）。
+	HourCounts [168]int
+	Cities     map[string]int
+	Cells      map[string]CellEvidence
+}
+
+// ---------------------------------------------------------------- 规则常量（公式依据写在 Derive 里）
+
+const (
+	// QuickSkipMs：停留不到 1 秒算「快速划走」。
+	QuickSkipMs = 1000
+	// 场景兴趣：至少 5 次曝光才出标签；停留 90 秒时强度约 0.63。
+	minSceneEvents  = 5
+	sceneDwellScale = 90_000.0
+	// 回避：至少 5 次曝光，且快速划走占比 ≥ 70%。
+	minAversionEvents = 5
+	aversionRatio     = 0.70
+	// 活动兴趣：主动点「感兴趣」比被动看 60 秒更重。
+	activityDwellScale   = 60_000.0
+	activityInterestGain = 0.35
+	activityJoinGain     = 0.55
+	minActivitySignals   = 1
+	// 节律：至少 12 个事件，且最大时段占比 ≥ 40%。
+	minRhythmEvents = 12
+	rhythmShare     = 0.40
+	// 城市：至少 5 个事件，且占比 ≥ 60%。
+	minCityEvents = 5
+	cityShare     = 0.60
+	// 区域：至少 3 个不同的天。
+	minAreaDays = 3
+)
+
+// Derive 把一个人的证据压成标签。纯函数：同样的证据同样的结果，方便单测钉住。
+//
+// 强度 strength = 1 - exp(-x / scale)：证据越多越饱和，永远在 [0,1)，不会出现「100%」。
+// 置信度 confidence = n/(n+5) × (0.7 + 0.15×(来源数-1))，上限 1：条数少就低，多个来源互相印证才高。
+func Derive(ev Evidence, now time.Time) []Tag {
+	var out []Tag
+	add := func(t Tag) {
+		axis, ok := LookupAxis(t.Axis)
+		if !ok || !ValidValue(t.Value) {
+			return
+		}
+		t.UserID = ev.UserID
+		t.ComputedAt = now
+		t.RuleVersion = RuleVersion
+		t.ExpiresAt = t.LastSeen.Add(axis.TTL)
+		if !t.ExpiresAt.After(now) {
+			return // 证据已经老到标签一出生就过期：不出
+		}
+		out = append(out, t)
+	}
+
+	for scene, s := range ev.Scenes {
+		if s.Events >= minSceneEvents {
+			skipRatio := float64(s.QuickSkips) / float64(s.Events)
+			if skipRatio >= aversionRatio {
+				add(Tag{Axis: AxisAversionScene, Value: scene, Strength: round3(skipRatio), Confidence: confidence(s.Events, 1),
+					Source: SourceBehavior, EvidenceCount: s.Events, SourceDiversity: 1, FirstSeen: s.First, LastSeen: s.Last})
+			} else if s.DwellMs > 0 {
+				add(Tag{Axis: AxisInterestScene, Value: scene, Strength: saturate(float64(s.DwellMs), sceneDwellScale), Confidence: confidence(s.Events, 1),
+					Source: SourceBehavior, EvidenceCount: s.Events, SourceDiversity: 1, FirstSeen: s.First, LastSeen: s.Last})
+			}
+		}
+	}
+
+	for category, a := range ev.Activities {
+		explicit := a.Interested + a.Joined
+		if a.Views+explicit < minActivitySignals {
+			continue
+		}
+		strength := saturate(float64(a.DwellMs), activityDwellScale)
+		strength = clamp01(1 - (1-strength)*math.Exp(-activityInterestGain*float64(a.Interested))*math.Exp(-activityJoinGain*float64(a.Joined)))
+		source, diversity := SourceBehavior, 1
+		switch {
+		case a.Views > 0 && explicit > 0:
+			source, diversity = SourceMixed, 2
+		case explicit > 0:
+			source = SourceExplicit
+		}
+		add(Tag{Axis: AxisInterestActivity, Value: category, Strength: round3(strength), Confidence: confidence(a.Views+explicit, diversity),
+			Source: source, EvidenceCount: a.Views + explicit, SourceDiversity: diversity, FirstSeen: a.First, LastSeen: a.Last})
+	}
+
+	if t, ok := rhythmTag(ev, now); ok {
+		add(t)
+	}
+
+	if city, n, total := topCity(ev.Cities); total >= minCityEvents && float64(n)/float64(total) >= cityShare {
+		add(Tag{Axis: AxisCity, Value: city, Strength: round3(float64(n) / float64(total)), Confidence: confidence(total, 1),
+			Source: SourceBehavior, EvidenceCount: total, SourceDiversity: 1, FirstSeen: now, LastSeen: now})
+	}
+
+	for cell, c := range ev.Cells {
+		if c.Days >= minAreaDays {
+			add(Tag{Axis: AxisArea, Value: cell, Strength: saturate(float64(c.Days), 7), Confidence: confidence(c.Days, 1),
+				Source: SourceBehavior, EvidenceCount: c.Days, SourceDiversity: 1, FirstSeen: c.First, LastSeen: c.Last})
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Axis != out[j].Axis {
+			return out[i].Axis < out[j].Axis
+		}
+		return out[i].Value < out[j].Value
+	})
+	return out
+}
+
+// 时段桶。越南时间；周末 = 周六 / 周日。
+func bucketOf(weekday time.Weekday, hour int) string {
+	weekend := weekday == time.Saturday || weekday == time.Sunday
+	switch {
+	case hour < 5:
+		return "LATE_NIGHT"
+	case hour >= 18:
+		if weekend {
+			return "WEEKEND_EVENING"
+		}
+		return "WEEKDAY_EVENING"
+	default:
+		if weekend {
+			return "WEEKEND_DAY"
+		}
+		return "WEEKDAY_DAY"
+	}
+}
+
+func rhythmTag(ev Evidence, now time.Time) (Tag, bool) {
+	counts := map[string]int{}
+	total := 0
+	for slot, n := range ev.HourCounts {
+		if n == 0 {
+			continue
+		}
+		// slot = weekday*24+hour，weekday 0 = 周日（time.Weekday）
+		counts[bucketOf(time.Weekday(slot/24), slot%24)] += n
+		total += n
+	}
+	if total < minRhythmEvents {
+		return Tag{}, false
+	}
+	best, bestN := "", 0
+	for _, bucket := range []string{"LATE_NIGHT", "WEEKDAY_DAY", "WEEKDAY_EVENING", "WEEKEND_DAY", "WEEKEND_EVENING"} {
+		if counts[bucket] > bestN {
+			best, bestN = bucket, counts[bucket]
+		}
+	}
+	share := float64(bestN) / float64(total)
+	if share < rhythmShare {
+		return Tag{}, false
+	}
+	return Tag{Axis: AxisRhythm, Value: best, Strength: round3(share), Confidence: confidence(total, 1),
+		Source: SourceBehavior, EvidenceCount: total, SourceDiversity: 1, FirstSeen: now, LastSeen: now}, true
+}
+
+func topCity(cities map[string]int) (string, int, int) {
+	best, bestN, total := "", 0, 0
+	keys := make([]string, 0, len(cities))
+	for k := range cities {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // 平局时取字典序小的，结果稳定
+	for _, k := range keys {
+		total += cities[k]
+		if cities[k] > bestN {
+			best, bestN = k, cities[k]
+		}
+	}
+	return best, bestN, total
+}
+
+func saturate(x, scale float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	return round3(1 - math.Exp(-x/scale))
+}
+
+func confidence(n, sources int) float64 {
+	if n <= 0 {
+		return 0
+	}
+	v := float64(n) / (float64(n) + 5) * math.Min(1, 0.7+0.15*float64(sources-1))
+	return round3(clamp01(v))
+}
+
+func clamp01(v float64) float64 { return math.Max(0, math.Min(1, v)) }
+func round3(v float64) float64  { return math.Round(v*1000) / 1000 }
+
+// ---------------------------------------------------------------- 粗粒度位置
+
+// CoarseCell 把经纬度取整到 0.01°（约 1.1km）的网格，返回 "21.03,105.85"。
+// 原始坐标不出这个函数：调用方只存返回值。越界 / NaN 返回 false。
+func CoarseCell(lat, lng float64) (string, bool) {
+	if math.IsNaN(lat) || math.IsNaN(lng) || math.IsInf(lat, 0) || math.IsInf(lng, 0) || lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return "", false
+	}
+	return fmt.Sprintf("%.2f,%.2f", math.Floor(lat*100)/100, math.Floor(lng*100)/100), true
+}
+
+// VietnamTime：越南没有夏令时，固定 UTC+7。
+func VietnamTime(t time.Time) time.Time { return t.UTC().Add(7 * time.Hour) }
+
+// HourSlot 返回 weekday*24+hour（越南时间）。
+func HourSlot(t time.Time) int {
+	v := VietnamTime(t)
+	return int(v.Weekday())*24 + v.Hour()
+}
+
+// ---------------------------------------------------------------- 读取
+
+// Reader 是撮合 / 推荐读标签的入口，所有读取必须报用途。
+type Reader interface {
+	TagsFor(userID string, use Use, now time.Time) []Tag
+}
+
+// FilterForUse：只留下「该用途被允许」且「没过期」的标签。读取的唯一过滤点。
+func FilterForUse(tags []Tag, use Use, now time.Time) []Tag {
+	out := make([]Tag, 0, len(tags))
+	for _, t := range tags {
+		axis, ok := LookupAxis(t.Axis)
+		if !ok || !axis.Allows(use) || !t.ExpiresAt.After(now) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// Overlap 是两个标签集合在「正向轴」上的重合度，0..1：撮合想知道「她的擅长 / 常去，和你的兴趣对不对得上」。
+// 只比较同轴同值的正向标签，取强度的最小值再求平均；负向标签（回避）命中会扣分，下限 0。
+func Overlap(a, b []Tag) float64 {
+	index := func(tags []Tag) map[string]Tag {
+		m := map[string]Tag{}
+		for _, t := range tags {
+			m[t.ID()] = t
+		}
+		return m
+	}
+	ia, ib := index(a), index(b)
+	var sum, count float64
+	for id, ta := range ia {
+		tb, ok := ib[id]
+		if !ok {
+			continue
+		}
+		axis, _ := LookupAxis(ta.Axis)
+		if axis.Polarity != "POSITIVE" {
+			continue
+		}
+		sum += math.Min(ta.Strength, tb.Strength)
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	score := sum / count
+	for _, ta := range a {
+		if ta.Axis != AxisAversionScene {
+			continue
+		}
+		if tb, ok := ib[AxisInterestScene+":"+ta.Value]; ok {
+			score -= 0.5 * math.Min(ta.Strength, tb.Strength)
+		}
+	}
+	return round3(clamp01(score))
+}
+
+// Describe 给运营看的一句话，不含个人信息。
+func (t Tag) Describe() string {
+	axis, _ := LookupAxis(t.Axis)
+	return fmt.Sprintf("%s · %s（强度 %.2f，置信 %.2f，%d 条证据）", axis.Label, strings.ReplaceAll(t.Value, "_", " "), t.Strength, t.Confidence, t.EvidenceCount)
+}

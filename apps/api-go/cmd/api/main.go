@@ -41,6 +41,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
 	"github.com/proxy-app/proxy-api/internal/research"
@@ -722,6 +723,10 @@ func main() {
 	if pool != nil {
 		server.OpsMetrics = opsmetrics.NewPostgres(pool)
 		server.Gravity = gravity.NewPostgres(pool)
+		// TAG-SYSTEM-001：标签层（粗粒度位置写入 + 运营读取）。
+		tagPG := tagging.NewPostgres(pool)
+		server.Tagging = &tagging.Commands{Sink: tagPG}
+		server.TagStore = tagPG
 		// OPS-RESEARCH-001：实验注册 + 影子评估（控制台 /v1/operator/research）。
 		// 判定内核包 runtime.Decide —— 组合根做 map↔struct 适配，research 包不依赖 experience/runtime。
 		server.Research = research.NewService(postgres.NewResearchRepository(pool))

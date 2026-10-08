@@ -408,6 +408,8 @@ var behaviouralTrackingEventTypes = map[string]string{
 	"MEDIA_ZOOM":       capturePurposeAny,
 	"PROFILE_OPEN":     capturePurposeAny,
 	"CANDIDATE_VIEWED": capturePurposeAny,
+	// TAG-SYSTEM-001：看活动页多久。进「兴趣标签」的证据之一，和其它浏览事件一样先验同意。
+	"ACTIVITY_VIEW": capturePurposeAny,
 }
 
 // PurposeConsent 是**一次**同意动作（授予或撤回），不是「当前状态」。
@@ -1449,7 +1451,7 @@ func (s *Service) Supports(commandType string) bool {
 	case "CreatePost", "UpdatePostAudience", "ListFeedPosts", "ListPostsByIds", "ListPostsMentioning", "ListPostsAtScene", "CreateNeedFromPost", "RecordAttribution",
 		"RecordProfileOpen", "RecordPostImpression", "RecordCandidateViewed", "RecordMediaImpression",
 		"ShortlistAgent", "ListInteractionEvents", "ListPostImpressionStats", "ListProfileViewStats", "ListProfileViewers", "ListMediaImpressionStats", "ListMediaActivityForViewer", "VotePostPoll",
-		"RecordMediaZoom", "GetContentAnalytics", "ListPostAudience",
+		"RecordMediaZoom", "RecordActivityView", "GetContentAnalytics", "ListPostAudience",
 		// COMP-PURPOSE-CONSENT-001：按目的的同意。写侧与读侧都要有，
 		// 否则 App 的开关就只是本地状态 —— 而本地状态不是同意。
 		"RecordPurposeConsent", "GetPurposeConsent":
@@ -1493,6 +1495,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.recordMediaImpression(ctx, e)
 	case "RecordMediaZoom":
 		return s.recordMediaZoom(ctx, e)
+	case "RecordActivityView":
+		return s.recordActivityView(ctx, e)
 	case "RecordPurposeConsent":
 		return s.recordPurposeConsent(ctx, e)
 	case "GetPurposeConsent":
@@ -2864,6 +2868,12 @@ func (s *Service) recordMediaImpression(ctx context.Context, e command.Envelope)
 // CONTENT-ANALYTICS-001: 全屏看图时双击 / 捏合放大 —— 运营侧「这张照片被认真看了」的信号，用户侧不展示。
 func (s *Service) recordMediaZoom(ctx context.Context, e command.Envelope) command.Result {
 	return s.appendInteraction(ctx, e, "MEDIA_ZOOM", "MEDIA")
+}
+
+// TAG-SYSTEM-001：用户在一个活动页上停留了多久（watchMs）。和其它浏览事件同一条闸：先验同意，
+// 再入库；标签层只在「事件那一刻同意有效且现在没撤回」时才读它。
+func (s *Service) recordActivityView(ctx context.Context, e command.Envelope) command.Result {
+	return s.appendInteraction(ctx, e, "ACTIVITY_VIEW", "ACTIVITY")
 }
 
 func (s *Service) shortlistAgent(ctx context.Context, e command.Envelope) command.Result {

@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // OPS-CONSOLE-PAGES-001（2026-10-07）：运营后台里那四页**打不开**的页面。
@@ -262,8 +265,9 @@ func TestOperatorTagsServesVocabularyInventoryAndRefusesAHeatmap(t *testing.T) {
 		}
 	}
 	joined := strings.Join(p.Notes, "\n")
-	if !strings.Contains(joined, "tag-service") {
-		t.Errorf("必须说明标签体系本身不存在: %q", p.Notes)
+	// TAG-SYSTEM-001：标签层已经存在。没接存储时必须明说「没接入」，而不是假装有。
+	if !strings.Contains(joined, "用户标签层没有接入") {
+		t.Errorf("没配标签存储时必须说明用户标签层没接入: %q", p.Notes)
 	}
 	if p.Totals.InterestRows < 10 && !strings.Contains(joined, "兴趣") {
 		t.Errorf("兴趣事件几乎为零时必须说明需求侧兴趣没有数据源: %q", p.Notes)
@@ -425,5 +429,31 @@ func TestOperatorConsolePagesWithoutADBAreNotConnected(t *testing.T) {
 				t.Fatalf("%s 在 NOT_CONNECTED 状态下不许带指标字段，发现 %q", path, key)
 			}
 		}
+	}
+}
+
+// TAG-SYSTEM-001：接了标签存储，页面给真实覆盖；一个人都没有时明说「还没有任何标签」。
+func TestOperatorTagsShowsTheUserTagLayerWhenWired(t *testing.T) {
+	store := tagging.NewMemory()
+	server := operatorConsoleServer()
+	server.TagStore = store
+	rec := consoleGet(server, "tags", "ops_token")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "还没有任何标签") {
+		t.Fatalf("an empty tag layer must say so: %s", rec.Body.String())
+	}
+	now := time.Now().UTC()
+	_ = store.ReplaceUserTags(context.Background(), "u1", []tagging.Tag{{Axis: tagging.AxisInterestScene, Value: "COFFEE", Strength: 0.7, Confidence: 0.8, ExpiresAt: now.Add(time.Hour), ComputedAt: now}})
+	rec = consoleGet(server, "tags", "ops_token")
+	var body struct {
+		UserTags *tagging.Stats `json:"userTags"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.UserTags == nil {
+		t.Fatalf("decode userTags: %v %s", err, rec.Body.String())
+	}
+	if body.UserTags.UsersWithTags != 1 || body.UserTags.TotalTags != 1 || body.UserTags.LastComputedAt == nil {
+		t.Fatalf("stats: %+v", body.UserTags)
 	}
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
@@ -128,6 +129,9 @@ type Server struct {
 	// NumberLookup：客服 / 运营按全数字公共编号反查（PUBLIC-NO-LOOKUP-001）。operator 门 +
 	// CASE scope，每次查询留痕。nil = 命令按未实现处理。
 	NumberLookup *numberlookup.Service
+	// Tagging：标签层的写命令（RecordCoarseLocation）与运营读取（TAG-SYSTEM-001）。
+	Tagging      *tagging.Commands
+	TagStore     tagging.Store
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
 	// CONFIRMED transition for PLATFORM_PAY orders. Wired

@@ -9,6 +9,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/experience/runtime"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
+	"github.com/proxy-app/proxy-api/internal/tagging"
 )
 
 // OPS-CONSOLE-PAGES-001（2026-10-07）：把运营后台里**打不开**的那几页建起来。
@@ -268,10 +269,27 @@ func (s *Server) operatorTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	notes := []string{
-		"标签体系（tag-service / tag-factory）不存在：没有受控词表、没有别名合并与废弃治理、没有「一个标签挂在多少东西上」的统一索引。",
-		"这一页给的是「已落库的词典盘点」—— 7 个轴今天在当标签用（4 个供给侧 + 3 个内容侧），全量口径（词典是状态不是事件）。",
+	// TAG-SYSTEM-001：标签层（用户标签）。有存储就给真实覆盖；没有就明说没接。
+	var userTags any
+	notes := []string{}
+	if src, ok := s.TagStore.(tagging.StatsSource); ok && s.TagStore != nil {
+		stats, err := src.Stats(r.Context(), time.Now().UTC())
+		if err != nil {
+			log.Printf("operator tags (user tags): %v", err)
+			notes = append(notes, "用户标签层的统计这次没读出来（库错误），下面只有词典盘点。")
+		} else {
+			userTags = stats
+			if stats.LastComputedAt == nil {
+				notes = append(notes, "用户标签层已建好，但还没有任何标签：worker 每小时按事件重算；没有同意过的用户不会有标签，这是设计，不是故障。")
+			}
+		}
+	} else {
+		notes = append(notes, "用户标签层没有接入（没有配数据库）。")
 	}
+	notes = append(notes,
+		"下面「词典盘点」是供给侧 / 内容侧已落库的词，不是用户标签：它回答「哪些轴可以先当标签用、哪些得先治理」。",
+		"用户标签只来自两类事实：用户主动做的事（感兴趣 / 报名），和用户同意后产生的浏览 / 粗粒度位置事件；撤回同意后下一轮重算就清掉。",
+	)
 	if len(v.CaseCollisions) > 0 {
 		notes = append(notes, fmt.Sprintf("语种大小写没归一：%s —— 同一个语种在库里算两个词（原始 %d 个 / 归一后 %d 个）。合并前别拿语种数做筛选。",
 			strings.Join(v.CaseCollisions, "、"), v.LanguageRawTerms, v.LanguageNormTerms))
@@ -313,6 +331,7 @@ func (s *Server) operatorTags(w http.ResponseWriter, r *http.Request) {
 		"kpis":       kpis,
 		"top_tags":   top,
 		"axes":       v.Axes,
+		"userTags":   userTags,
 		"totals": map[string]any{
 			"agents":            v.Agents,
 			"posts":             v.Posts,
