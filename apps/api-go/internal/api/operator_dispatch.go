@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -168,4 +170,73 @@ func (s *Server) operatorDispatchAction(w http.ResponseWriter, r *http.Request) 
 	detail["status"] = run.Status
 	s.auditWrite(r, "DISPATCH_RUN_ACTION", string(ScopeMarketplace), entry)
 	writeJSON(w, http.StatusOK, map[string]any{"dataSource": OperatorLiveSource, "run": viewOfRun(run, time.Now().UTC())})
+}
+
+// MARKET-FAST-001：市场发单看板。
+//
+//	GET /v1/operator/market-dispatch?days=   快速发单（kind='MARKET'）的表现：状态分布、确认率、
+//	                                         中位成单时长、代选超时率、等人报名、主动邀请的效果。
+//
+// 跟 /v1/operator/dispatch 的分工：那一页是**现在**——逐条单卡在哪一步、为什么；这一页是
+// **一段时间内**——快速发单到底成不成得了、邀人有没有用。口径写在 dispatch.MarketStats 上，
+// 界面照抄，不各算一遍。
+//
+// 算不出来的数是 null（界面显示「—」）：分母为 0 时返回 0 会让运营以为「确认率 0% = 一单没成」，
+// 而真相常常是「这段时间没有单跑到终态」。宁可空着，也不要编。
+
+// marketDispatchStatsSource 是市场发单看板那几个数的来源。
+// DispatchStats 上没有 MarketStats 时（只接了 dispatch.Stats 的旧接线）回答 503 ——
+// 页面必须知道自己缺的是数据源，而不是把一片空白当成「这段时间一单都没跑」。
+type marketDispatchStatsSource interface {
+	MarketStats(ctx context.Context, since time.Time) (dispatch.MarketStats, error)
+}
+
+const (
+	marketBoardDefaultDays = 7
+	marketBoardMinDays     = 1
+	marketBoardMaxDays     = 90
+)
+
+// marketBoardWindow：?days= 解析成 [1, 90]。写坏的值（abc、0、-3）落回默认 7，而不是报错 ——
+// 运营手敲一个 500 不该看到 400，只该看到被夹住的 90。
+func marketBoardWindow(raw string) int {
+	days := marketBoardDefaultDays
+	if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+		days = v
+	}
+	if days < marketBoardMinDays {
+		return marketBoardMinDays
+	}
+	if days > marketBoardMaxDays {
+		return marketBoardMaxDays
+	}
+	return days
+}
+
+func (s *Server) operatorMarketBoard(w http.ResponseWriter, r *http.Request) {
+	if s.Dispatch == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"dataSource": OperatorNotConnectedSource,
+			"notes":      []string{"没配库：自动派单没有启用（dispatch.runs 在 migration 190）。"},
+		})
+		return
+	}
+	source, ok := s.DispatchStats.(marketDispatchStatsSource)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "market_stats_unavailable"})
+		return
+	}
+	days := marketBoardWindow(r.URL.Query().Get("days"))
+	now := time.Now().UTC()
+	stats, err := source.MarketStats(r.Context(), now.Add(-time.Duration(days)*24*time.Hour))
+	if err != nil {
+		log.Printf("operator market board: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "market_stats_query_failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dataSource": OperatorLiveSource,
+		"windowDays": days,
+		"stats":      stats,
+	})
 }
