@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/proxy-app/proxy-api/internal/weather"
 	"net/http"
 	"os"
 	"time"
@@ -146,6 +147,8 @@ type Server struct {
 	MatchPreview MatchPreviewFunc
 	// MATCH-ENGINE-001：撮合决策账查询（matching.decisions）。
 	MatchExplain MatchExplainFunc
+	// WEATHER-001：天气与见面时间建议；nil = 503。
+	Weather *weather.Service
 	// MatchEval：撮合离线回放评估（OPS-MATCH-EVAL-001），组合根接线。
 	MatchEval MatchEvalSource
 	// ProviderList / ProviderProfile：小美画像（OPS-PROVIDER-PROFILE-001），组合根接线。
@@ -359,6 +362,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/media/variant/", s.mediaVariantFile)
 	mux.HandleFunc("/v1/feed", s.publicFeed)
 	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
+	mux.HandleFunc("/v1/weather", s.publicWeather)
 	mux.HandleFunc("/v1/scene-assets", s.publicSceneAssets)
 	mux.HandleFunc("/v1/reality-scenes/nearby", s.nearbyRealityScenes)
 	mux.HandleFunc("/v1/scenes/", s.dynamicSceneRead)
