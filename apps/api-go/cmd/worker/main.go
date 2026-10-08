@@ -8,16 +8,20 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/accountstatus"
+	"github.com/proxy-app/proxy-api/internal/benefit"
+	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identity"
+	"github.com/proxy-app/proxy-api/internal/incentive"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/outbox"
@@ -676,6 +680,27 @@ func main() {
 		log.Printf("nudges: sent=%v", sent)
 	}
 	runNudges()
+	// 激励发放（券 / 成长值，没有现金）：每 5 分钟一轮；规则默认不生效，运营打开才发。
+	incentiveStore := incentive.NewPostgres(pool)
+	benefitSvc := benefit.NewService(postgres.NewBenefitRepository(pool))
+	incentiveClaimer := benefitClaimer{svc: benefitSvc}
+	incentiveNotifier := incentiveNotifier{pipeline: inboxPipeline}
+	incentiveTicker := time.NewTicker(5 * time.Minute)
+	defer incentiveTicker.Stop()
+	runIncentives := func() {
+		n, err := incentive.RunGrants(ctx, incentiveStore, incentiveClaimer, incentiveNotifier, func(c context.Context, id string) bool {
+			lvl, err := accountGate.LevelOf(c, id)
+			return err != nil || lvl != "" // 被限制或读不出来：不发
+		}, time.Now().UTC(), 100, func() string { return "ig_" + strconv.FormatInt(time.Now().UnixNano(), 36) })
+		if err != nil {
+			log.Printf("incentives failed: %v", err)
+			return
+		}
+		if n > 0 {
+			log.Printf("incentives: granted=%d", n)
+		}
+	}
+	runIncentives()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -732,6 +757,8 @@ func main() {
 			}
 		case <-gravityTicker.C:
 			recomputeGravity(ctx, gravityStore)
+		case <-incentiveTicker.C:
+			runIncentives()
 		case <-nudgeTicker.C:
 			runNudges()
 		case <-tagTicker.C:
@@ -887,6 +914,43 @@ func (n nudgeEmitter) Nudge(ctx context.Context, userID, key, title, body, targe
 	_, _, err := n.pipeline.Emit(ctx, notification.Notification{
 		RecipientID: userID, Type: "NUDGE_" + key, Title: title, Body: body,
 		DeepLink: "/nudge/" + target, DedupeKey: "nudge:" + key + ":" + userID,
+	})
+	return err
+}
+
+// benefitClaimer 替用户领一份福利（走 benefit 域自己的资格 / 容量检查）。
+type benefitClaimer struct{ svc *benefit.Service }
+
+func (b benefitClaimer) Claim(ctx context.Context, userID, campaignID, benefitID string) (string, incentive.ClaimOutcome, string, error) {
+	res := b.svc.HandleClaimBenefit(ctx, command.Envelope{
+		CommandType: "ClaimBenefit", CommandID: "inc-" + userID + "-" + benefitID, IdempotencyKey: "inc-" + userID + "-" + benefitID,
+		Actor: command.Actor{Type: "USER", ID: userID}, Principal: command.Principal{Type: "INDIVIDUAL", ID: userID},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": benefitID},
+	})
+	if res.Error == nil {
+		id, _ := res.Body["claimId"].(string)
+		return id, incentive.ClaimOK, "", nil
+	}
+	switch res.Error.ErrorCode {
+	case "ELIGIBILITY_FAILED":
+		return "", incentive.ClaimFinal, res.Error.ErrorCode, nil // 这个人就是领不了：记下来，不再试
+	case "CAPACITY_EXHAUSTED", "CAMPAIGN_NOT_ACTIVE", "CAMPAIGN_NOT_FOUND":
+		return "", incentive.ClaimTransient, res.Error.ErrorCode, nil // 补上名额 / 打开活动后再试
+	}
+	return "", incentive.ClaimTransient, res.Error.ErrorCode, nil
+}
+
+// incentiveNotifier 告诉用户拿到了东西。DedupeKey 含规则和用户：同一条规则对同一个人只有一条通知。
+type incentiveNotifier struct{ pipeline notification.Producer }
+
+func (n incentiveNotifier) Granted(ctx context.Context, userID, ruleID, label string, points int) error {
+	title, body := "你有一份新福利", label
+	if points > 0 {
+		title, body = "成长值 +"+strconv.Itoa(points), label
+	}
+	_, _, err := n.pipeline.Emit(ctx, notification.Notification{
+		RecipientID: userID, Type: "INCENTIVE_GRANTED", Title: title, Body: body,
+		DeepLink: "", DedupeKey: "incentive:" + ruleID + ":" + userID,
 	})
 	return err
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/moderation"
 	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/guidance"
+	"github.com/proxy-app/proxy-api/internal/incentive"
 	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/notification"
@@ -136,6 +137,9 @@ type Server struct {
 	Tagging      *tagging.Commands
 	// Guidance：下一步引导（GetNextSteps）。
 	Guidance *guidance.Commands
+	// Incentive：激励规则与用户读自己的奖励（INCENTIVE-001）。
+	IncentiveStore    incentive.Store
+	IncentiveCommands *incentive.Commands
 	// Insight：需求缺口与标签分群读模型（OPS-INSIGHT-001）。
 	Insight      insight.Source
 	// MatchPreview：撮合预览（OPS-MATCH-PREVIEW-001），组合根接线。
@@ -311,6 +315,14 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 	mux.HandleFunc("/v1/operator/authority-requests/response", s.operatorConsoleGated(http.MethodPost, ScopeAuthority, s.operatorAuthorityCommand("RecordAuthorityResponse", "AUTHORITY_RESPONSE_RECORD", "requestId")))
+	mux.HandleFunc("/v1/operator/incentives", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			s.operatorConsoleGated(http.MethodGet, ScopePayments, s.operatorIncentives)(w, r)
+			return
+		}
+		s.operatorConsoleGated(http.MethodPost, ScopePayments, s.operatorIncentiveUpsert)(w, r)
+	})
+	mux.HandleFunc("/v1/operator/incentives/active", s.operatorConsoleGated(http.MethodPost, ScopePayments, s.operatorIncentiveActive))
 	mux.HandleFunc("/v1/operator/restrictions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.operatorConsoleGated(http.MethodGet, ScopeModeration, s.operatorRestrictions)(w, r)
