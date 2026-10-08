@@ -87,13 +87,13 @@ func TestTagLayerOnlyBuildsFromConsentedFactsAndClearsOnWithdrawal(t *testing.T)
 		}
 		return false
 	}
-	if !has(granted, tagging.AxisInterestTopic, "咖啡") {
+	if !has(granted, tagging.AxisInterestTopic, "drink/coffee") {
 		t.Fatal("six consented, long-dwell impressions on COFFEE posts must give an interest tag")
 	}
-	if has(never, tagging.AxisInterestTopic, "咖啡") {
+	if has(never, tagging.AxisInterestTopic, "drink/coffee") {
 		t.Fatal("events without any consent must never become a tag")
 	}
-	if !has(withdrawn, tagging.AxisInterestTopic, "咖啡") {
+	if !has(withdrawn, tagging.AxisInterestTopic, "drink/coffee") {
 		t.Fatal("before withdrawal she has the tag")
 	}
 	if !has(explicit, tagging.AxisInterestActivity, "HIKING") {
@@ -111,10 +111,10 @@ func TestTagLayerOnlyBuildsFromConsentedFactsAndClearsOnWithdrawal(t *testing.T)
 	if _, err := tagging.Recompute(ctx, store, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("Recompute after withdrawal: %v", err)
 	}
-	if has(withdrawn, tagging.AxisInterestTopic, "咖啡") {
+	if has(withdrawn, tagging.AxisInterestTopic, "drink/coffee") {
 		t.Fatal("withdrawn consent must clear the tag on the next recompute")
 	}
-	if !has(granted, tagging.AxisInterestTopic, "咖啡") {
+	if !has(granted, tagging.AxisInterestTopic, "drink/coffee") {
 		t.Fatal("the other user's tag must survive")
 	}
 	stats, err := store.Stats(ctx, now.Add(2*time.Second))
@@ -268,7 +268,7 @@ func TestTopicAndOrderTagsBuildAFinePictureAndCosineSeparatesPeople(t *testing.T
 	now := time.Now().UTC()
 
 	// poster 发了两篇带话题的帖子（主动）：摄影 + 徒步 / 咖啡 + 摄影。
-	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'周末徒步，路上拍了好多照片 #摄影',$3,'PUBLISHED'),($4,'USER',$2,'新发现一家咖啡店，出片很好看',$3,'PUBLISHED')`, posts[0], poster, now.Add(-2*time.Hour), posts[1])
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'周末去爬山，路上拍了好多照片 #摄影',$3,'PUBLISHED'),($4,'USER',$2,'新发现一家咖啡店，出片很好看',$3,'PUBLISHED')`, posts[0], poster, now.Add(-2*time.Hour), posts[1])
 	// viewer 同意后各看了两篇 40 秒。
 	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_tp_"+stamp, viewer, now.Add(-72*time.Hour))
 	for i, pid := range []string{posts[0], posts[1], posts[0], posts[1]} {
@@ -304,15 +304,15 @@ func TestTopicAndOrderTagsBuildAFinePictureAndCosineSeparatesPeople(t *testing.T
 		}
 		return false
 	}
-	for _, topic := range []string{"摄影", "徒步", "咖啡"} {
+	for _, topic := range []string{"photography", "outdoor/mountain", "drink/coffee"} {
 		if !has(viewer, tagging.AxisInterestTopic, topic) {
 			t.Errorf("viewer dwelt on posts about %s: should have the topic tag", topic)
 		}
 	}
-	if !has(poster, tagging.AxisInterestTopic, "摄影") {
+	if !has(poster, tagging.AxisInterestTopic, "photography") {
 		t.Error("poster wrote two posts touching 摄影 (explicit)")
 	}
-	if has(stranger, tagging.AxisInterestTopic, "摄影") {
+	if has(stranger, tagging.AxisInterestTopic, "photography") {
 		t.Error("someone who never saw or wrote anything has no topic tags")
 	}
 	for _, want := range [][2]string{{tagging.AxisOrderService, "CITY_COMPANION"}, {tagging.AxisPriceBand, "100K_300K"}, {tagging.AxisOrderScenario, "ordinary"}, {tagging.AxisTimeSlot, "WEEKEND_EVENING"}} {
@@ -359,7 +359,7 @@ func TestEveryBehaviourSourceFeedsTopicTags(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'周末去徒步',$3,'PUBLISHED')`, post, author, now)
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'周末去爬山',$3,'PUBLISHED')`, post, author, now)
 	exec(`INSERT INTO engagement.reactions (id, post_id, actor_id, kind, created_at) VALUES ($1,$2,$3,'LIKE',$4)`, "rx_"+stamp, post, liker, now)
 	exec(`INSERT INTO activity.activities (id, payload) VALUES ($1,$2::jsonb)`, activity, `{"title":"咖啡拉花体验课","category":"WORKSHOP"}`)
 	exec(`INSERT INTO activity.participants (activity_id, actor_id, joined_at) VALUES ($1,$2,$3)`, activity, joiner, now)
@@ -373,13 +373,13 @@ func TestEveryBehaviourSourceFeedsTopicTags(t *testing.T) {
 	hasTopic := func(user, label string) bool {
 		tags, _ := store.TagsOf(ctx, user)
 		for _, tg := range tags {
-			if tg.Axis == tagging.AxisInterestTopic && tagging.TopicLabel(tg.Value) == label {
+			if tg.Axis == tagging.AxisInterestTopic && tg.Value == label {
 				return true
 			}
 		}
 		return false
 	}
-	for who, label := range map[string]string{liker: "徒步", joiner: "咖啡", publisher: "摄影", applicant: "摄影"} {
+	for who, label := range map[string]string{liker: "outdoor/mountain", joiner: "drink/coffee", publisher: "photography", applicant: "photography"} {
 		if !hasTopic(who, label) {
 			t.Errorf("%s should have the topic %q from an active behaviour", who, label)
 		}
