@@ -12246,23 +12246,37 @@ require_test "COMP-PURPOSE-CONSENT-001" "./internal/localnet" \
   "TestEveryGatedEventTypeHasAnEndToEndCase" \
   "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
 
-# 跨语言钉：客户端和服务端的 purpose 字面量必须**完全一致**。
-# 只取「= "字面量"」这种赋值形式，所以注释里提到的符号名不会被误伤。
-PURPOSE_SERVER=$(sed -n 's/.*PurposeBehaviorAnalytics *= *"\([A-Za-z_]*\)".*/\1/p' apps/api-go/internal/localnet/service.go | head -1)
-PURPOSE_CLIENT=$(sed -n 's/.*BEHAVIOR_ANALYTICS_PURPOSE *= *"\([A-Za-z_]*\)".*/\1/p' apps/mobile/src/behavior-analytics-settings.ts | head -1)
+# 跨语言钉：客户端和服务端的「已开放用途」集合必须**完全一致**（COMP-CONSENT-PIPELINE-001：同意按用途分开，
+# 服务端 internal/consent 的登记表是唯一来源）。只取「= "字面量"」这种赋值形式，注释里提到的符号名不会被误伤。
+PURPOSE_SERVER=$(grep -E '^[[:space:]]*(Recommendation|TwinInsight|OperatorAudienceDetail)[[:space:]]*=[[:space:]]*"[A-Z_]+"' apps/api-go/internal/consent/consent.go | grep -oE '"[A-Z_]+"' | tr -d '"' | sort | tr '\n' ' ')
+PURPOSE_CLIENT=$(grep 'export const CONSENT_PURPOSES' apps/mobile/src/behavior-analytics-settings.ts | grep -oE '"[A-Z_]+"' | tr -d '"' | sort | tr '\n' ' ')
 if [ -z "${PURPOSE_SERVER}" ] || [ -z "${PURPOSE_CLIENT}" ]; then
-  echo "  FAIL [COMP-PURPOSE-CONSENT-001]: 有一侧的 purpose 常量找不到了 ——" >&2
+  echo "  FAIL [COMP-CONSENT-PIPELINE-001]: 有一侧的用途集合找不到了 ——" >&2
   echo "        server='${PURPOSE_SERVER}' client='${PURPOSE_CLIENT}'" >&2
-  echo "        这个常量是两端唯一的约定，改名/删除都要同时改这一条钉。" >&2
+  echo "        服务端是 internal/consent/consent.go 的三个用途常量，客户端是 CONSENT_PURPOSES；改名/删除都要同时改这一条钉。" >&2
   exit 1
 fi
 if [ "${PURPOSE_SERVER}" != "${PURPOSE_CLIENT}" ]; then
-  echo "  FAIL [COMP-PURPOSE-CONSENT-001]: 客户端与服务端的 purpose 不一致 ——" >&2
+  echo "  FAIL [COMP-CONSENT-PIPELINE-001]: 客户端与服务端的同意用途不一致 ——" >&2
   echo "        server='${PURPOSE_SERVER}' client='${PURPOSE_CLIENT}'" >&2
-  echo "        后果很隐蔽：用户以为开了，服务端仍按 CONSENT_REQUIRED 拒收，" >&2
-  echo "        而客户端埋点静默失败 ⇒ 「开了也没数据」且不报任何错。" >&2
+  echo "        后果很隐蔽：用户以为开了，服务端仍按 CONSENT_REQUIRED 拒收，而客户端埋点静默失败 ⇒ 「开了也没数据」且不报任何错。" >&2
   exit 1
 fi
+# 旧的单一大开关已退役：客户端不能再把它当同意写出去（服务端会回 CONSENT_PURPOSE_NOT_AVAILABLE）。
+if grep -q 'recordPurposeConsent([^)]*"BEHAVIOR_ANALYTICS"' apps/mobile/src/surfaces/me.tsx apps/mobile/src/behavior-analytics-settings.ts; then
+  echo "  FAIL [COMP-CONSENT-PIPELINE-001]: 客户端又在授予已退役的 BEHAVIOR_ANALYTICS ——" >&2
+  echo "        一个开关批准多个用途不是明确的同意；三个用途必须各自表态。" >&2
+  exit 1
+fi
+require_test "COMP-CONSENT-PIPELINE-001" "./internal/localnet" \
+  "TestConsentsAreSeparatePerPurposeAndOneDoesNotStandInForAnother" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+require_test "COMP-CONSENT-PIPELINE-001" "./internal/localnet" \
+  "TestOnlyRegisteredAndOfferedPurposesCanBeGrantedButAnythingRegisteredCanBeWithdrawn" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
+require_test "COMP-CONSENT-PIPELINE-001" "./internal/localnet" \
+  "TestTheRetiredOneSwitchConsentNoLongerOpensTheCaptureGate" \
+  "apps/api-go/internal/localnet/purpose_consent_test.go" || exit $?
 # 开关必须**写服务端**，不能退回成本地布尔。本地布尔不是同意：
 # 用户以为关掉了、服务端还在采，是这条链路最坏的失败模式。
 if ! grep -q 'recordPurposeConsent' apps/mobile/src/surfaces/me.tsx; then
@@ -12270,7 +12284,7 @@ if ! grep -q 'recordPurposeConsent' apps/mobile/src/surfaces/me.tsx; then
   echo "        只改本地存储等于用户撤回了一个不存在的同意（服务端照采）。" >&2
   exit 1
 fi
-echo "    COMP-PURPOSE-CONSENT-001: PASS (服务端入库前强制目的性同意；fail-closed 且错误码可区分；同意动作 append-only；两端 purpose 一致；开关写服务端)"
+echo "    COMP-PURPOSE-CONSENT-001: PASS (服务端入库前强制目的性同意；fail-closed 且错误码可区分；同意动作 append-only；两端同意用途集合一致且旧大开关不再授予；开关写服务端)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COMP-SENSITIVE-CONSENT-001 / COMP-DPO-HONEST-001 / COMP-MERCHANT-GAP-HONEST-001
