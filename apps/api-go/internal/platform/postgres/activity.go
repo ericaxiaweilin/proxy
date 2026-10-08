@@ -167,10 +167,17 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		}
 		if found {
 			// 取消过的同一组 (活动, 我, 同行人) 重新下：沿用原编号。
+			// STORE-ATTRIBUTION-P1：重新确认也是此刻发生的一单 —— 已有门店就保留，没有（迁移前的老行）
+			// 就按此刻的同一条规则补上；场景无人认领仍是 NULL。
+			storeID, err := storeIDForScene(txCtx, tx, result.RealitySceneID)
+			if err != nil {
+				return err
+			}
 			if _, err := tx.Exec(txCtx, `
 				UPDATE activity.participants
-				SET state='CONFIRMED', order_no=COALESCE(order_no, $4), order_snapshot=$5, slot_key=$6, updated_at=NOW()
-				WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`, activityID, actorID, companionID, orderNo, snapshot, slotKey); err != nil {
+				SET state='CONFIRMED', order_no=COALESCE(order_no, $4), order_snapshot=$5, slot_key=$6, updated_at=NOW(),
+					store_id=COALESCE(store_id, NULLIF($7,''))
+				WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`, activityID, actorID, companionID, orderNo, snapshot, slotKey, storeID); err != nil {
 				return mapCompanionSlotViolation(err)
 			}
 		} else {
