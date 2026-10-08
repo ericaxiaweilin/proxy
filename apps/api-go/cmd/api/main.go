@@ -16,8 +16,10 @@ import (
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/emergency"
 	"github.com/proxy-app/proxy-api/internal/engagement"
+	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/experience"
 	"github.com/proxy-app/proxy-api/internal/facet"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
@@ -136,6 +138,8 @@ func main() {
 	conversationService.SetMediaStoreDir(mediaStoreDir)
 	engagementService := engagement.New()
 	fulfillmentService := fulfillment.New()
+	var dispatchEngine *dispatch.Engine
+	var dispatchStore *dispatch.Postgres
 	supplyService := supply.New()
 	mediaService := media.New()
 	mediaService.SetStoreDir(mediaStoreDir)
@@ -201,7 +205,7 @@ func main() {
 	// on realitySceneService.ListMyCheckinHistory (read-only), same pattern
 	// as ratingService above.
 	sceneReviewService := scenereview.New(scenereview.NewMemoryRepository(), realitySceneService)
-	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
+	demandService.SetBatchCreator(newSupplyBatchCreator(supplyService, nil))
 	authenticator = identityService
 	var transactions api.TransactionRunner
 	var databaseCloser func()
@@ -391,7 +395,21 @@ func main() {
 		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
 		benefitService = benefit.NewService(postgres.NewBenefitRepository(pool))
 		ratingService = rating.New(postgres.NewRatingRepository(pool), fulfillmentService.Repository())
-		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService))
+		// DISPATCH-LOOP-001：FAST 需求的自动派单（存储 migration 190，推进在下面的 runDispatchLoop）。
+		dispatchStore = dispatch.NewPostgres(pool)
+		dispatchEngine = newDispatchEngine(dispatchStore, fulfillmentService)
+		// MARKET-FAST-001：同一个引擎也代选快速市场发单的报名人。
+		wireMarketDispatch(dispatchEngine, marketplaceService)
+		// MARKET-SELECT-NOTIFY-001：发单方自己选了人 ⇒ 告诉被选中的那位（平台代选的由派单发，不重复）。
+		marketplaceService.SetManualSelectHook(func(ctx context.Context, ownerID string, app marketplace.Application) {
+			ev := event.New("MarketApplicationSelected", "MarketApplication", app.ID, 1, ownerID, app.ID, app.ID, time.Now().UTC(), map[string]any{
+				"notifyPrincipalId": app.ApplicantID, "opportunityId": app.OpportunityID, "applicationId": app.ID, "byPlatform": false,
+			})
+			if err := outboxRepository.Publish(ctx, ev); err != nil {
+				log.Printf("market select notify: outbox publish failed application=%s: %v", app.ID, err)
+			}
+		})
+		demandService.SetBatchCreator(newSupplyBatchCreator(supplyService, dispatchEngine))
 		authenticator = identityService
 		transactions = postgres.NewTransactionRunner(pool)
 	}
@@ -706,6 +724,37 @@ func main() {
 		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。
 		matchingStore := matching.NewPostgres(pool)
 		server.Matching = matchingStore
+		// MARKET-RANK-001：市场报名人按同一套撮合口径排序（可靠 / 距离 / 新人 / 负载…），给发单方看理由。
+		rankUsers := func(ctx context.Context, ids []string, lat, lng *float64) ([]matching.Ranked, error) {
+			signals, err := matchingStore.UserSignals(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			return matching.Rank(ids, nil, matching.WithDistances(signals, ids, lat, lng), 0), nil
+		}
+		marketplaceService.SetApplicantRanker(rankUsers)
+		// MARKET-INVITE-001：快速发单 10 分钟没人报名 ⇒ 按同一套排名邀请 30km 内合适的人（两轮，各 5 人）。
+		if dispatchEngine != nil {
+			nearbyProfiles := postgres.NewIdentityRepository(pool)
+			dispatchEngine.Inviter = nearbyInviter{
+				market: marketplaceService,
+				nearby: func(ctx context.Context, lat, lng, maxDistanceM float64, limit int) ([]string, error) {
+					profiles, err := nearbyProfiles.ListProfilesNearby(ctx, lat, lng, maxDistanceM, nil, nil, limit)
+					if err != nil {
+						return nil, err
+					}
+					ids := make([]string, 0, len(profiles))
+					for _, p := range profiles {
+						ids = append(ids, p.UserAccountID)
+					}
+					return ids, nil
+				},
+				rank: rankUsers,
+			}
+		}
+		server.Dispatch = dispatchEngine
+		server.DispatchStats = dispatchStore
+		go runDispatchLoop(ctx, dispatchEngine)
 		log.Printf("proxy api go: %s", matching.ApplyStoredTunables(ctx, matchingStore))
 		// PROVIDER-APPLY-001：申请成为小美 + 运营审核。资料门与发帖同一道（profileCompleteness）。
 		providerStore := providerapp.NewPostgres(pool)

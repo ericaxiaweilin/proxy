@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/demand"
+	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
 	"github.com/proxy-app/proxy-api/internal/jurisdiction"
@@ -20,7 +21,8 @@ import (
 	"time"
 )
 
-func newSupplyBatchCreator(supplyService *supply.Service) demand.BatchCreator {
+// dispatchEngine 可以是 nil（无库模式）：那时只建批次、不派单。
+func newSupplyBatchCreator(supplyService *supply.Service, dispatchEngine *dispatch.Engine) demand.BatchCreator {
 	return &demand.SupplyBatchCreator{
 		CreateFunc: func(ctx context.Context, draft demand.TaskDraft) error {
 			startAt, _ := draft.Changes["startAt"].(string)
@@ -95,6 +97,18 @@ func newSupplyBatchCreator(supplyService *supply.Service) demand.BatchCreator {
 			if len(capabilities) > 0 {
 				payload["capabilities"] = capabilities
 			}
+			// DISPATCH-RANK-002：精确地点 / 场所带坐标的需求才参与距离排序。
+			if loc, ok := draft.Changes["location"].(map[string]any); ok {
+				lat, latOK := loc["lat"].(float64)
+				lng, lngOK := loc["lng"].(float64)
+				if latOK && lngOK && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 {
+					payload["lat"], payload["lng"] = lat, lng
+				}
+			}
+			// 预算以前从没进过批次，所以「预算适配」那 5 分在线上一次都没生效过（MATCH-RANK-001 的漏接）。
+			if budget := fixedVNDBudget(draft.Changes); budget > 0 {
+				payload["budgetVnd"] = budget
+			}
 			env := command.Envelope{
 				CommandID:      "batch_" + draft.ID,
 				CommandType:    "CreateCandidateBatch",
@@ -115,6 +129,7 @@ func newSupplyBatchCreator(supplyService *supply.Service) demand.BatchCreator {
 				return nil
 			}
 			log.Printf("auto batch: created for need=%s market=%s duration=%d", draft.ID, marketID, durationH)
+			startDispatchFromBatch(ctx, dispatchEngine, draft, result.OperationRef)
 			return nil
 		},
 	}

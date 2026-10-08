@@ -289,6 +289,10 @@ export type DemandSpecs = {
   // 无 = 老行为（纯文字地点、无钉）。草稿持久化顺带存取。
   lat?: number | undefined;
   lng?: number | undefined;
+  // MARKET-FAST-001: 快速撮合（可选，缺省 false = 自己挑报名的人）。
+  // true = 发布带 matchingMode:"FAST"，由平台按撮合排名代选报名人
+  // （她 5 分钟内确认即成单，超时自动换下一位）。
+  fast?: boolean;
 };
 
 // DEMAND-HEADCOUNT-002（2026-10-07，用户：「你们几人是输入框 改为选择 默认1人
@@ -414,7 +418,8 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     place: "",
     prefs: ["公共场所见面"],
     price: template.defaultPrice,
-    notes: ""
+    notes: "",
+    fast: false
   };
 }
 
@@ -476,7 +481,10 @@ export function defaultSpecsFor(template: MomentTemplate): DemandSpecs {
     // 是为了让「没选人」这条路径的 wire 形状与改动前逐字节相同。
     ...(targetUserId === undefined || targetUserId.trim() === ""
       ? {}
-      : { targetUserId: targetUserId.trim() })
+      : { targetUserId: targetUserId.trim() }),
+    // MARKET-FAST-001: 只有选了「快速」才带这个键；默认（自己挑）输出与改动前一致。
+    // 定向邀约（直接约）已经点名了一个人，没有「代选报名人」可言，所以带 targetUserId 时一律不带 FAST。
+    ...(specs.fast && (targetUserId === undefined || targetUserId.trim() === "") ? { matchingMode: "FAST" as const } : {})
   };
 }
 

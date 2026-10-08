@@ -1,6 +1,7 @@
 package marketplace
 
 import (
+	"sort"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/proxy-app/proxy-api/internal/aiboundary"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/modelstack"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 )
@@ -30,6 +32,13 @@ import (
 // pulling the fulfillment package into the marketplace compile graph.
 type Service struct {
 	repository Repository
+	// MARKET-RANK-001：报名人排序。nil = 按报名时间（无库 / 测试）。
+	applicantRanker ApplicantRanker
+	// MARKET-FAST-001：快速发单的派单钩子。nil = 不派（无库 / 测试）。
+	onFastPublished func(ctx context.Context, opportunity Opportunity)
+	onApplied       func(ctx context.Context, opportunityID, applicantID string)
+	// MARKET-SELECT-NOTIFY-001：发单方**自己**选了人之后（平台代选的由派单自己通知，不重复）。
+	onManualSelect func(ctx context.Context, ownerID string, application Application)
 	// numbers 给发布的需求 / 邀约分配全数字编号（PUBLIC-NO-001）。与订单编号同一个
 	// 分配器：一个号只指向一样东西。PG 仓默认用共享序列；main.go 注入同一个实例。
 	numbers      ordernumber.Allocator
@@ -249,6 +258,9 @@ type Opportunity struct {
 	// OwnerID keeps pointing at the publisher so Owned/接单/屏蔽 stay
 	// intact; this field only narrows VISIBILITY + eligibility.
 	TargetAccountID string `json:"targetAccountId,omitempty"`
+	// MARKET-FAST-001：FAST = 发单方同意平台按撮合排名代选报名人（她 5 分钟内确认即成单，超时换下一位）；
+	// 空 = 自己挑（默认）。只认这两个值。
+	MatchingMode string `json:"matchingMode,omitempty"`
 	// ORDER-SCENARIO-001: 消费场景 —— ordinary 普通消费 / assistance 城市协助。
 	// 发布向导按 moment 家族填；订单流程按它分档。空 = 历史数据，按金额档兜底。
 	Scenario string `json:"scenario,omitempty"`
@@ -504,8 +516,13 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		// lens 默认已收敛到 normalizeOpportunityMoney（List/Publish 单一 choke
 		// 点），这里不再重复设，避免两处漂移。
+		p.MatchingMode = normalizeMatchingMode(p.MatchingMode)
 		if err := s.repository.Create(ctx, p); err != nil {
 			return command.Rejected(e, "MARKET_PUBLISH_FAILED", "INTERNAL", "SAFE_RETRY", "market.publish_failed", nil)
+		}
+		// MARKET-FAST-001：选了「快速」= 同意平台代选；派单从这里开始（失败只记日志，发单本身已成功）。
+		if p.MatchingMode == "FAST" && s.onFastPublished != nil {
+			s.onFastPublished(ctx, p)
 		}
 		return payload(e, "MarketOpportunity", p.ID, "PUBLISHED", map[string]any{"opportunity": p})
 	case "ApplyToMarketOpportunity":
@@ -544,9 +561,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 			return rejected(e, "OWNER_CANNOT_APPLY", "market.owner_cannot_apply")
 		}
 		a := Application{ID: newID("app_"), OpportunityID: id, ApplicantID: e.Actor.ID, Quote: quote, Scope: scope, Status: "SUBMITTED", CreatedAt: time.Now().UTC(), Scenario: stored.Scenario}
-		a, _, err = s.repository.Apply(ctx, a)
+		var isNew bool
+		a, isNew, err = s.repository.Apply(ctx, a)
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_failed", nil)
+		}
+		// MARKET-FAST-001：新报名可能让一条已经试完的快速派单重新有人可选。
+		if isNew && s.onApplied != nil {
+			s.onApplied(ctx, a.OpportunityID, a.ApplicantID)
 		}
 		return payload(e, "MarketApplication", a.ID, a.Status, map[string]any{"application": a})
 	case "ListMarketApplications":
@@ -561,7 +583,7 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_LIST_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_list_failed", nil)
 		}
-		return payload(e, "MarketOpportunity", id, "APPLICATIONS_READY", map[string]any{"applications": applications})
+		return payload(e, "MarketOpportunity", id, "APPLICATIONS_READY", map[string]any{"applications": s.rankApplications(ctx, id, applications)})
 	case "SelectMarketApplication":
 		if !aiboundary.Allows(aiboundary.FromCommandIdentity(e.Actor.Type, e.Principal.Type), aiboundary.SelectOpportunityApplication) {
 			return rejected(e, "AI_ACTION_FORBIDDEN", "ai.action_forbidden")
@@ -580,6 +602,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		if err != nil {
 			return command.Rejected(e, "MARKET_APPLICATION_SELECT_FAILED", "INTERNAL", "SAFE_RETRY", "market.application_select_failed", nil)
+		}
+		// MARKET-SELECT-NOTIFY-001：被选中的人以前收不到任何通知，只能自己刷到。平台代选的那次
+		// （AuthContext.delegatedBy=dispatch）由派单引擎在同一事务里发，这里跳过，免得她收到两条。
+		if delegated, _ := e.AuthContext["delegatedBy"].(string); delegated != "dispatch" && s.onManualSelect != nil {
+			s.onManualSelect(ctx, e.Actor.ID, selected)
 		}
 		return payload(e, "MarketApplication", selected.ID, selected.Status, map[string]any{"application": selected})
 	case "ConfirmMarketApplication":
@@ -1058,4 +1085,204 @@ func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 			math.Sin(dLng/2)*math.Sin(dLng/2)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return earthRadiusKm * c
+}
+
+
+// ---------- MARKET-RANK-001：报名人按撮合排序 ----------
+//
+// 以前发单方看到的报名列表是「谁先报名谁在前」。现在用同一套撮合口径（internal/matching：可靠 /
+// 满意 / 经验 / 响应 / 距离 / 新人 / 负载）排，并给出排在前面的理由 —— 理由是**结构化的代码 + 数值**，
+// 由 App 按用户语言渲染（服务端不拼中文 / 越南文句子）。仍在等结果的报名（已报名 / 已选中 / 已确认）
+// 按名次在前；已经落选、已过期的排在后面，按报名时间。没接排序器（无库 / 测试）= 原样返回。
+
+// ApplicantRanker 给一组报名人打分排序。lat/lng 是机会地点（没有就是 nil，不算距离）。
+type ApplicantRanker func(ctx context.Context, applicantIDs []string, lat, lng *float64) ([]matching.Ranked, error)
+
+func (s *Service) SetApplicantRanker(r ApplicantRanker) { s.applicantRanker = r }
+
+// RankReason 是「为什么她排在前面」的一条。Code 封闭集合：
+// FULFILLMENT_RATE（完成率，0-1）/ SATISFACTION_RATE（满意率，0-1）/ COMPLETED_ORDERS（完成单数）/
+// DISTANCE_KM（离机会地点公里数）/ NEWCOMER（新人，无数值）/ BUSY（手上未结束的单数）/ RESPONSIVE（近期常在线）。
+type RankReason struct {
+	Code  string   `json:"code"`
+	Value *float64 `json:"value,omitempty"`
+}
+
+// RankedApplication 是返回给发单方的一条报名：原有字段不变，加上名次、得分明细与理由。
+type RankedApplication struct {
+	Application
+	Rank    int                 `json:"rank,omitempty"` // 1 起；落选 / 过期的没有名次
+	Ranking *matching.Breakdown `json:"ranking,omitempty"`
+	Reasons []RankReason        `json:"reasons,omitempty"`
+}
+
+func liveApplication(status string) bool {
+	return status == "SUBMITTED" || status == "SELECTED" || status == "CONFIRMED"
+}
+
+func (s *Service) rankApplications(ctx context.Context, opportunityID string, applications []Application) []RankedApplication {
+	out := make([]RankedApplication, 0, len(applications))
+	for _, a := range applications {
+		out = append(out, RankedApplication{Application: a})
+	}
+	// 没有排序器 / 排序失败时的顺序 = 报名先后（PG 仓本来就这么给；内存仓是 map，不排就是随机的，
+	// 代选会因此每次挑到不同的人）。
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	if s.applicantRanker == nil || len(applications) == 0 {
+		return out
+	}
+	var lat, lng *float64
+	if opp, err := s.repository.Get(ctx, opportunityID); err == nil {
+		lat, lng = opp.Lat, opp.Lng
+	}
+	ids := []string{}
+	for _, a := range applications {
+		if liveApplication(a.Status) {
+			ids = append(ids, a.ApplicantID)
+		}
+	}
+	ranked, err := s.applicantRanker(ctx, ids, lat, lng)
+	if err != nil {
+		// 排序是锦上添花：读信号失败就按原顺序给，列表本身不能因此打不开。
+		return out
+	}
+	position := map[string]int{}
+	breakdown := map[string]matching.Breakdown{}
+	for i, r := range ranked {
+		position[r.AgentID] = i + 1
+		breakdown[r.AgentID] = r.Breakdown
+	}
+	for i := range out {
+		if !liveApplication(out[i].Status) {
+			continue
+		}
+		if n, ok := position[out[i].ApplicantID]; ok {
+			b := breakdown[out[i].ApplicantID]
+			out[i].Rank, out[i].Ranking, out[i].Reasons = n, &b, rankReasons(b)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := out[i].Rank, out[j].Rank
+		if (ri > 0) != (rj > 0) {
+			return ri > 0
+		}
+		if ri > 0 {
+			return ri < rj
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out
+}
+
+// rankReasons 只说真有的事：没有履约记录就不说完成率，没有位置就不说距离。
+func rankReasons(b matching.Breakdown) []RankReason {
+	v := func(x float64) *float64 { return &x }
+	out := []RankReason{}
+	if b.HasTrackRecord {
+		out = append(out, RankReason{Code: "FULFILLMENT_RATE", Value: v(b.FulfillmentRate)})
+		if b.SatisfactionRate > 0 {
+			out = append(out, RankReason{Code: "SATISFACTION_RATE", Value: v(b.SatisfactionRate)})
+		}
+	}
+	if b.DistanceKm != nil {
+		out = append(out, RankReason{Code: "DISTANCE_KM", Value: v(*b.DistanceKm)})
+	}
+	if b.NewcomerBoost > 0 {
+		out = append(out, RankReason{Code: "NEWCOMER"})
+	}
+	if b.LoadPenalty > 0 {
+		out = append(out, RankReason{Code: "BUSY"})
+	}
+	return out
+}
+
+
+// ---------- MARKET-FAST-001：快速发单（平台代选） ----------
+
+// SetDispatchHooks 接上派单：快速发单发布时建派单；有人报名时把试完了的派单拉回来。
+func (s *Service) SetDispatchHooks(onFastPublished func(context.Context, Opportunity), onApplied func(context.Context, string, string)) {
+	s.onFastPublished, s.onApplied = onFastPublished, onApplied
+}
+
+// SelectionExpirer 由能撤回「选中」的仓储实现（PG 与内存仓都实现；可选接口，别的包的测试仓不用跟着改）。
+type SelectionExpirer interface {
+	// ExpireSelection：那一条必须是 SELECTED ⇒ SELECTION_EXPIRED，其余 NOT_SELECTED ⇒ 回到 SUBMITTED。
+	// 那一条已经 CONFIRMED（她抢在撤回前确认了）⇒ ErrApplicationStateConflict，什么都不改。
+	ExpireSelection(ctx context.Context, opportunityID, applicationID, ownerID string) error
+}
+
+// ErrSelectionExpiryUnsupported：仓储不会撤回选中。
+var ErrSelectionExpiryUnsupported = errors.New("selection expiry not supported by repository")
+
+// ExpireSelection 撤回平台替发单方做的那次选中（她 5 分钟没确认）。
+func (s *Service) ExpireSelection(ctx context.Context, opportunityID, applicationID, ownerID string) error {
+	expirer, ok := s.repository.(SelectionExpirer)
+	if !ok {
+		return ErrSelectionExpiryUnsupported
+	}
+	return expirer.ExpireSelection(ctx, opportunityID, applicationID, ownerID)
+}
+
+// Opportunity 读一条机会（派单 / 邀请要它的坐标与主人）。
+func (s *Service) Opportunity(ctx context.Context, id string) (Opportunity, error) {
+	return s.repository.Get(ctx, id)
+}
+
+// ApplicationsForDispatch 是派单读报名人的口子：与发单方看到的同一份排序。
+func (s *Service) ApplicationsForDispatch(ctx context.Context, opportunityID, ownerID string) ([]RankedApplication, error) {
+	applications, err := s.repository.ListApplications(ctx, opportunityID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	return s.rankApplications(ctx, opportunityID, applications), nil
+}
+
+func normalizeMatchingMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), "FAST") {
+		return "FAST"
+	}
+	return ""
+}
+
+func (r *MemoryRepository) ExpireSelection(_ context.Context, opportunityID, applicationID, ownerID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	owned := false
+	for _, item := range r.opportunities {
+		if item.ID == opportunityID && item.OwnerID == ownerID {
+			owned = true
+		}
+	}
+	if !owned {
+		return ErrOpportunityNotFound
+	}
+	// 内存仓的内层 map 以报名人为键（一人一份报名），按报名 id 找要走一遍。
+	apps := r.applications[opportunityID]
+	key, found := "", false
+	for k, app := range apps {
+		if app.ID == applicationID {
+			key, found = k, true
+		}
+	}
+	if !found {
+		return ErrApplicationNotFound
+	}
+	target := apps[key]
+	if target.Status != "SELECTED" {
+		return ErrApplicationStateConflict
+	}
+	target.Status = "SELECTION_EXPIRED"
+	apps[key] = target
+	for id, app := range apps {
+		if app.Status == "NOT_SELECTED" {
+			app.Status = "SUBMITTED"
+			apps[id] = app
+		}
+	}
+	return nil
+}
+
+// SetManualSelectHook 接上「发单方自己选了人」之后的通知。
+func (s *Service) SetManualSelectHook(hook func(ctx context.Context, ownerID string, application Application)) {
+	s.onManualSelect = hook
 }

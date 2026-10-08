@@ -330,6 +330,12 @@ export function AppShell({
     tab: MarketTab;
     viewMode: MarketViewMode;
   }>({ tab: "OPPORTUNITY", viewMode: "LIST" });
+  // MARKET-SELECT-NOTIFY-001: 通知深链 `/market/<id>` 指向的那一个订单。
+  // 和 meOpenSubPage 同一个形状的理由:「打开某一条」必须带 id,不带 id 就退化成
+  // 「进市场列表」——而用户点的正是刚才那条「你被选中了 / 附近有个单适合你」。
+  const [marketOpenOpportunityId, setMarketOpenOpportunityId] = useState<string>();
+  // MarketSurface 消费掉那个 id（找到 / 没找到都算）时回调清空。
+  const clearMarketOpenOpportunityId = useCallback((): void => setMarketOpenOpportunityId(undefined), []);
   // R15.22: 子页 override (swipe 跨 7 page). null = 跟随 tab + sub-tab 状态.
   const [pageOverride, setPageOverride] = useState<PageId | undefined>();
   // ADD-FRIEND-FROM-MESSAGES-001: 信息 → 添加好友是跨模块的（加好友表面住在
@@ -1029,6 +1035,10 @@ export function AppShell({
               moderation={moderation}
               marketLabel="河内"
               initialTab={marketEntry.tab}
+              // MARKET-SELECT-NOTIFY-001: 通知直接落在那一个订单的详情页
+              // （报名过 → 自己的申请 + 确认合作按钮；没报名 → 详情 + 报名报价）。
+              initialOpportunityId={marketOpenOpportunityId}
+              onDeepLinkConsumed={clearMarketOpenOpportunityId}
               onOpenRealityScene={(sceneId) => { setRealitySceneSelection(sceneId); setRealitySceneOpen(true); }}
               onChromeVisibilityChange={setFeedChromeVisible}
               onMapPickOpenChange={setActivityMapPickOpen}
@@ -1202,13 +1212,21 @@ export function AppShell({
         {/* NOTIF-DEEPLINK-ROUTE-001：通知里那条深链**有对应页面**时才跳。
             归属在服务端判过了（resolveDeepLink），这里只负责落页：
             进「我的」页，再开那一条子页 —— 和首页 KYC 那个入口同一条路径。 */}
+        {/* MARKET-SELECT-NOTIFY-001：`/market/<id>` 不走「我的」，走市场页并
+            把 id 交进去。走 goToPage 而不是 setTab：pageOverride 一旦有值就压过
+            tab，只 setTab 的话用户可能停在原来的子页（市场 tab 切了但没落到订单）。 */}
         <NotificationCenterSurface
           client={notification}
           onClose={() => setNotificationCenterOpen(false)}
           onNavigate={(route) => {
             setNotificationCenterOpen(false);
+            if (route.route === "market") {
+              setMarketOpenOpportunityId(route.id);
+              goToPage("MARKET_OPP");
+              return;
+            }
             setTab("ME");
-            setMeOpenSubPage(meSubPage(route) ?? undefined);
+            setMeOpenSubPage(meSubPage(route.route) ?? undefined);
           }}
           visible={notificationCenterOpen}
         />

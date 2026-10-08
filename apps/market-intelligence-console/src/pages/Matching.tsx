@@ -24,7 +24,11 @@ type EnginePayload = {
 };
 type TraceCandidate = {
   agentId: string; name: string; serviceType?: string; referencePrice: number; currency?: string;
-  rankingReason?: string; ranking?: { reliability: number; satisfaction: number; experience: number; response: number; fit: number; total: number };
+  rankingReason?: string; ranking?: {
+    reliability: number; satisfaction: number; experience: number; response: number; fit: number; total: number;
+    // DISPATCH-RANK-002：早于它的快照没有这几项（undefined，不是 0）
+    distance?: number; newcomerBoost?: number; loadPenalty?: number; distanceKm?: number;
+  };
 };
 type TraceBatch = {
   batchId: string; needId: string; marketId: string; createdAt: string;
@@ -175,7 +179,8 @@ export function Matching() {
                   <table>
                     <thead>
                       <tr><th>候选</th><th className="numc">报价</th><th className="numc">可靠</th><th className="numc">满意</th>
-                        <th className="numc">经验</th><th className="numc">响应</th><th className="numc">适配</th><th className="numc">总分</th></tr>
+                        <th className="numc">经验</th><th className="numc">响应</th><th className="numc">适配</th>
+                        <th className="numc">距离</th><th className="numc">新人</th><th className="numc">负载</th><th className="numc">总分</th></tr>
                     </thead>
                     <tbody>
                       {b.candidates.map((c) => (
@@ -192,10 +197,13 @@ export function Matching() {
                               <td className="numc">{c.ranking.experience}</td>
                               <td className="numc">{c.ranking.response}</td>
                               <td className="numc">{c.ranking.fit}</td>
+                              <td className="numc">{c.ranking.distance === undefined ? "—" : <>{c.ranking.distance}{c.ranking.distanceKm !== undefined ? <div style={{ color: "#8a8190", fontSize: 11 }}>{c.ranking.distanceKm} km</div> : null}</>}</td>
+                              <td className="numc">{c.ranking.newcomerBoost === undefined ? "—" : c.ranking.newcomerBoost}</td>
+                              <td className="numc">{c.ranking.loadPenalty === undefined ? "—" : c.ranking.loadPenalty ? `−${c.ranking.loadPenalty}` : 0}</td>
                               <td className="numc"><b>{c.ranking.total}</b></td>
                             </>
                           ) : (
-                            <td className="numc" colSpan={6}>这批存进来时还没有得分明细（MATCH-RANK-001 之前）</td>
+                            <td className="numc" colSpan={9}>这批存进来时还没有得分明细（MATCH-RANK-001 之前）</td>
                           )}
                         </tr>
                       ))}

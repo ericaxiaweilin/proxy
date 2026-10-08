@@ -32,6 +32,13 @@ type Tunables struct {
 	PriorRatings       float64 // 满意分的先验：当作已经有这么多条评价
 	PriorSatisfaction  float64 // 先验评价给多少分
 	NeutralResponse    float64 // 引力从没算过这个人时的中性响应分
+	// DISPATCH-RANK-002
+	DistanceWeight    float64 // 距离分满分（需求地点为圆心）
+	RadiusKm          float64 // 距离分的半径：出了这个圈距离分为 0
+	NewcomerBoost     float64 // 新人加权满分（0 单时拿满）
+	NewcomerOrders    float64 // 新人加权覆盖前多少单
+	LoadPenaltyPerJob float64 // 手上每一张未结束的邀约 / 订单扣多少分
+	LoadPenaltyCap    float64 // 负载扣分封顶
 }
 
 // DefaultTunables 就是接线之前 Score 里写死的那批数：40 / 30 / 0.7-0.3 / 15 / log1p(50) /
@@ -57,6 +64,14 @@ func DefaultTunables() Tunables {
 		PriorRatings:      2,
 		PriorSatisfaction: 0.6,
 		NeutralResponse:   0.3,
+		// DISPATCH-RANK-002：《检索匹配与治理规则 v0.4》§二 距离权重 40%；半径 30km
+		// （2026-10-04 用户：「30km 在越南有摩托车属于可接受的距离」）；前 10 单新手加权。
+		DistanceWeight:    40,
+		RadiusKm:          30,
+		NewcomerBoost:     8,
+		NewcomerOrders:    10,
+		LoadPenaltyPerJob: 6,
+		LoadPenaltyCap:    18,
 	}
 }
 
@@ -93,6 +108,12 @@ var tunableDefs = []TunableDef{
 	{"priorRatings", 0.1, 50, "满意分的先验：新人当作已经有这么多条中性评价", func(t Tunables) float64 { return t.PriorRatings }, func(t *Tunables, v float64) { t.PriorRatings = v }},
 	{"priorSatisfaction", 0, 1, "先验评价给多少分（0.6 = 中性偏正）", func(t Tunables) float64 { return t.PriorSatisfaction }, func(t *Tunables, v float64) { t.PriorSatisfaction = v }},
 	{"neutralResponse", 0, 1, "引力从没算过这个人时给的中性响应分（不惩罚没被建模的人）", func(t Tunables) float64 { return t.NeutralResponse }, func(t *Tunables, v float64) { t.NeutralResponse = v }},
+	{"distanceWeight", 0, 100, "距离分满分：离需求地点越近越高（需求没给坐标时这一项人人为 0，不改变先后）", func(t Tunables) float64 { return t.DistanceWeight }, func(t *Tunables, v float64) { t.DistanceWeight = v }},
+	{"radiusKm", 1, 200, "距离分的半径（公里）：出了这个圈距离分为 0", func(t Tunables) float64 { return t.RadiusKm }, func(t *Tunables, v float64) { t.RadiusKm = v }},
+	{"newcomerBoost", 0, 50, "新人加权满分：0 单时拿满，按完成单量线性递减", func(t Tunables) float64 { return t.NewcomerBoost }, func(t *Tunables, v float64) { t.NewcomerBoost = v }},
+	{"newcomerOrders", 0, 100, "新人加权覆盖前多少单（0 = 关掉新人加权）", func(t Tunables) float64 { return t.NewcomerOrders }, func(t *Tunables, v float64) { t.NewcomerOrders = v }},
+	{"loadPenaltyPerJob", 0, 50, "负载扣分：手上每一张未结束的邀约 / 订单扣多少分", func(t Tunables) float64 { return t.LoadPenaltyPerJob }, func(t *Tunables, v float64) { t.LoadPenaltyPerJob = v }},
+	{"loadPenaltyCap", 0, 100, "负载扣分封顶", func(t Tunables) float64 { return t.LoadPenaltyCap }, func(t *Tunables, v float64) { t.LoadPenaltyCap = v }},
 }
 
 // TunableDefs 是那张定义表（界面渲染与校验共用）。

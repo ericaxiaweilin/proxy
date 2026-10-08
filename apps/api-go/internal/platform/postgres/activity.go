@@ -167,16 +167,34 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		}
 		if found {
 			// 取消过的同一组 (活动, 我, 同行人) 重新下：沿用原编号。
+			// STORE-ATTRIBUTION-P1：重新确认也是此刻发生的一单 —— 已有门店就保留，没有（迁移前的老行）
+			// 就按此刻的同一条规则补上；场景无人认领仍是 NULL。
+			storeID, err := storeIDForScene(txCtx, tx, result.RealitySceneID)
+			if err != nil {
+				return err
+			}
 			if _, err := tx.Exec(txCtx, `
 				UPDATE activity.participants
-				SET state='CONFIRMED', order_no=COALESCE(order_no, $4), order_snapshot=$5, slot_key=$6, updated_at=NOW()
-				WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`, activityID, actorID, companionID, orderNo, snapshot, slotKey); err != nil {
+				SET state='CONFIRMED', order_no=COALESCE(order_no, $4), order_snapshot=$5, slot_key=$6, updated_at=NOW(),
+					store_id=COALESCE(store_id, NULLIF($7,''))
+				WHERE activity_id=$1 AND actor_id=$2 AND companion_id=$3`, activityID, actorID, companionID, orderNo, snapshot, slotKey, storeID); err != nil {
 				return mapCompanionSlotViolation(err)
 			}
 		} else {
+			// STORE-ATTRIBUTION-P1：这一单归属的门店在**同一事务**里定下来。
+			// 场景 id 就是上面那条 `SELECT payload ... FOR UPDATE` 读到的活动 payload
+			// 里的 realitySceneId：activities 表没有专列，这个键只在 JSONB 里
+			// （037 建表；156 回填与 FilterKnownParticipants 用的都是它），已解进
+			// result.RealitySceneID。不再查一次活动行，也就看不到事务外的场景。
+			storeID, err := storeIDForScene(txCtx, tx, result.RealitySceneID)
+			if err != nil {
+				return err
+			}
+			// NULLIF($7,'') 不是洁癖：'' 与 NULL 在这一列里是两件事（'' 会被
+			// idx_participants_store 的部分索引收进去，把没归因的单算成有归因）。
 			if _, err := tx.Exec(txCtx, `
-				INSERT INTO activity.participants (activity_id, actor_id, companion_id, slot_key, state, order_no, order_snapshot)
-				VALUES ($1,$2,$3,$4,'CONFIRMED',$5,$6)`, activityID, actorID, companionID, slotKey, orderNo, snapshot); err != nil {
+				INSERT INTO activity.participants (activity_id, actor_id, companion_id, slot_key, state, order_no, order_snapshot, store_id)
+				VALUES ($1,$2,$3,$4,'CONFIRMED',$5,$6,NULLIF($7,''))`, activityID, actorID, companionID, slotKey, orderNo, snapshot, storeID); err != nil {
 				return mapCompanionSlotViolation(err)
 			}
 		}
@@ -188,6 +206,31 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 		return decodeActivity(payload, interested, joined, capacity, &result)
 	})
 	return result, participation, err
+}
+
+// storeIDForScene（STORE-ATTRIBUTION-P1）按**唯一那条**确定性规则解析报名单的门店：
+// 活动挂的现实场景 → 认领该场景的门店 → 同场景多家认领取 id 最小的那个
+// （ORDER BY id LIMIT 1）。规则与 BusinessRepository.ProjectActivityOrder 及回填
+// 156_backfill_merchant_spend_daily.sql 逐字同源，两处口径不许各写一份。
+//
+// 两种「没有门店」都返回空串，由调用方写成 NULL：
+// ① 活动本身没有场景。stores.reality_scene_id 的默认值也是空串（135），不去 guard
+// 就是拿空场景去匹配一堆没挂场景的店 —— 那不是归因，是把所有没认领场景的店都算进来。
+// 156 回填里对同一个键加的「非空」guard 是同一件事。
+// ② 场景没有任何门店认领：这一单不属于任何门店，NULL 如实记录，不猜。
+func storeIDForScene(ctx context.Context, q sqlQueryer, sceneID string) (string, error) {
+	if sceneID == "" {
+		return "", nil
+	}
+	var storeID string
+	err := q.QueryRow(ctx, `SELECT id FROM business.stores WHERE reality_scene_id=$1 ORDER BY id LIMIT 1`, sceneID).Scan(&storeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return storeID, nil
 }
 
 // mapCompanionSlotViolation：并发下两人同时约同一个小美的同一时段，后到的那个撞

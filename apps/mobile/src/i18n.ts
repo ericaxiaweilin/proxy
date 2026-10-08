@@ -670,6 +670,31 @@ export interface Messages {
   handOffDialer: string;
   handOffDialerNumber: string;
   handOffSms: string;
+  // MARKET-RANK-001（2026-10-06）：发布者「选人工作台」报名名单按服务端匹配
+  // 分排序展示，每个报名人下面一行**为什么排在这里**（排序理由）。
+  //
+  // 为什么用带点的键名而不是像别处那样 camelCase：理由码（FULFILLMENT_RATE /
+  // DISTANCE_KM…）以后还会加，键名自成命名空间，改一个理由不会撞到别的屏。
+  // 带点的键在 interface 与六份字典里写法完全一样，少一种语言就仍然是
+  // typecheck 失败 + i18n.test.ts 那条「每键每语言非空」红。
+  //
+  // 不显示 ranking 里的原始分数：分数是给排查看的，界面上只说人话。
+  "market.rank.fulfillment": string;
+  "market.rank.satisfaction": string;
+  "market.rank.distance": string;
+  "market.rank.newcomer": string;
+  "market.rank.busy": string;
+  "market.application.selectionExpired": string;
+  // ---- MARKET-FAST-001：发布向导规格步的「谁来挑报名的人」----
+  //
+  // 二选一（自己挑 / 平台按排名代选）+ 随选择变化的那一行说明。这一屏其余文案
+  // 仍是硬编码中文，但 MARKET-FAST-001 带来的这四句走字典：它决定的是**谁能
+  // 成交**（平台代选＝成单对象由平台挑），写死中文时切到别的语言，选项与后果
+  // 说明都留在中文 —— 用户看的是会改变撮合结果的那一句。
+  "demand.matching.manual": string;
+  "demand.matching.fast": string;
+  "demand.matching.manualHint": string;
+  "demand.matching.fastHint": string;
 }
 
 const ZH: Messages = {
@@ -1247,6 +1272,16 @@ settingsCacheClearedWith: "缓存已清理，释放 {size}",
   handOffDialer: "已打开拨号盘",
   handOffDialerNumber: "已打开拨号盘（{number}）",
   handOffSms: "已转交短信 {n} 次",
+  "market.rank.fulfillment": "完成率 {pct}%",
+  "market.rank.satisfaction": "满意度 {pct}%",
+  "market.rank.distance": "距离 {km} km",
+  "market.rank.newcomer": "新人",
+  "market.rank.busy": "手上有单",
+  "market.application.selectionExpired": "已选中，超时未确认",
+  "demand.matching.manual": "自己挑报名的人",
+  "demand.matching.fast": "快速：平台帮我选",
+  "demand.matching.manualHint": "报名的人你自己看、自己选。",
+  "demand.matching.fastHint": "平台按综合排名替你选中报名的人，她 5 分钟内确认就成单，没确认自动换下一位。",
 };
 
 const VI: Messages = {
@@ -1822,6 +1857,16 @@ settingsCacheClearedWith: "Đã dọn bộ nhớ đệm, giải phóng {size}",
   handOffDialer: "Đã mở trình quay số",
   handOffDialerNumber: "Đã mở trình quay số ({number})",
   handOffSms: "Đã chuyển tin nhắn {n} lần",
+  "market.rank.fulfillment": "Tỉ lệ hoàn thành {pct}%",
+  "market.rank.satisfaction": "Mức độ hài lòng {pct}%",
+  "market.rank.distance": "Khoảng cách {km} km",
+  "market.rank.newcomer": "Người mới",
+  "market.rank.busy": "Đang có đơn",
+  "market.application.selectionExpired": "Đã chọn, hết giờ mà chưa xác nhận",
+  "demand.matching.manual": "Tự chọn người đăng ký",
+  "demand.matching.fast": "Nhanh: nền tảng chọn hộ",
+  "demand.matching.manualHint": "Người đăng ký thì bạn tự xem và tự chọn.",
+  "demand.matching.fastHint": "Nền tảng chọn người đăng ký theo thứ hạng tổng hợp; cô ấy xác nhận trong 5 phút thì thành đơn, không xác nhận thì tự động chuyển sang người kế tiếp.",
 };
 
 const EN: Messages = {
@@ -2397,6 +2442,16 @@ settingsCacheClearedWith: "Cache cleared, {size} freed",
   handOffDialer: "Dialler opened",
   handOffDialerNumber: "Dialler opened ({number})",
   handOffSms: "Text handed off {n} times",
+  "market.rank.fulfillment": "Completion {pct}%",
+  "market.rank.satisfaction": "Satisfaction {pct}%",
+  "market.rank.distance": "Distance {km} km",
+  "market.rank.newcomer": "Newcomer",
+  "market.rank.busy": "Already booked",
+  "market.application.selectionExpired": "Selected, not confirmed in time",
+  "demand.matching.manual": "Pick who applies myself",
+  "demand.matching.fast": "Fast: platform picks for me",
+  "demand.matching.manualHint": "You review who applies and pick them yourself.",
+  "demand.matching.fastHint": "The platform picks who applies by overall ranking. If she confirms within 5 minutes the order is placed; if she doesn't, it moves to the next one.",
 };
 
 const LO: Messages = {
@@ -2971,6 +3026,16 @@ settingsCacheClearedWith: "ລ້າງ cache ແລ້ວ, ຄືນ {size}",
   handOffDialer: "ເປີດໜ້າຕັ້ງໂທແລ້ວ",
   handOffDialerNumber: "ເປີດໜ້າຕັ້ງໂທແລ້ວ（{number}）",
   handOffSms: "ສົ່ງຂໍ້ຄວາມແລ້ວ {n} ຄັ້ງ",
+  "market.rank.fulfillment": "ອັດຕາສຳເລັດ {pct}%",
+  "market.rank.satisfaction": "ຄວາມພໍໃຈ {pct}%",
+  "market.rank.distance": "ໄລຍະ {km} ກມ",
+  "market.rank.newcomer": "ຄົນໃໝ່",
+  "market.rank.busy": "ມີວຽກຢູ່ແລ້ວ",
+  "market.application.selectionExpired": "ໄດ້ເລືອກແລ້ວ ແຕ່ບໍ່ໄດ້ຢືນຢັນໃນເວລາ",
+  "demand.matching.manual": "ເລືອກຄົນທີ່ລົງຊື່ເອງ",
+  "demand.matching.fast": "ໄວ: ແພລັດຟອມເລືອກໃຫ້",
+  "demand.matching.manualHint": "ຄົນທີ່ລົງຊື່ ທ່ານເບິ່ງແລະເລືອກເອງ.",
+  "demand.matching.fastHint": "ແພລັດຟອມເລືອກຜູ້ສະໝັກຕາມອັນດັບລວມ; ຖ້າລາວຢືນຢັນພາຍໃນ 5 ນາທີ ຄຳສັ່ງຈະສຳເລັດ, ຖ້າບໍ່ຢືນຢັນຈະປ່ຽນໄປຫາຄົນຕໍ່ໄປອັດຕະໂນມັດ.",
 };
 
 const KO: Messages = {
@@ -3545,6 +3610,16 @@ settingsCacheClearedWith: "캐시를 정리해 {size}를 확보했습니다",
   handOffDialer: "전화 다이얼을 열었습니다",
   handOffDialerNumber: "전화 다이얼을 열었습니다({number})",
   handOffSms: "문자 전달 {n}회",
+  "market.rank.fulfillment": "완료율 {pct}%",
+  "market.rank.satisfaction": "만족도 {pct}%",
+  "market.rank.distance": "거리 {km}km",
+  "market.rank.newcomer": "신규 참가자",
+  "market.rank.busy": "이미 예약된 일 있음",
+  "market.application.selectionExpired": "선택되었으나 시간 내 확인하지 않음",
+  "demand.matching.manual": "신청자 직접 고르기",
+  "demand.matching.fast": "빠른 매칭: 플랫폼이 대신 고름",
+  "demand.matching.manualHint": "신청한 사람은 직접 확인하고 직접 고릅니다.",
+  "demand.matching.fastHint": "플랫폼이 종합 순위 순으로 신청자를 대신 고릅니다. 5분 이내에 확정하면 주문이 성사되고, 확정하지 않으면 자동으로 다음 사람에게 넘어갑니다.",
 };
 
 const JA: Messages = {
@@ -4119,6 +4194,16 @@ settingsCacheClearedWith: "キャッシュを削除し、{size} 空きました"
   handOffDialer: "ダイヤルを開きました",
   handOffDialerNumber: "ダイヤルを開きました（{number}）",
   handOffSms: "SMS を{n}回引き継ぎました",
+  "market.rank.fulfillment": "達成率 {pct}%",
+  "market.rank.satisfaction": "満足度 {pct}%",
+  "market.rank.distance": "距離 {km} km",
+  "market.rank.newcomer": "新規参加者",
+  "market.rank.busy": "別の予約あり",
+  "market.application.selectionExpired": "選ばれましたが時間内に確認されませんでした",
+  "demand.matching.manual": "応募者は自分で選ぶ",
+  "demand.matching.fast": "おまかせ: プラットフォームが選ぶ",
+  "demand.matching.manualHint": "応募した人は自分で見て、自分で選びます。",
+  "demand.matching.fastHint": "プラットフォームが総合順位で応募者を選びます。5分以内に確定すれば成約、確定しなければ自動的に次の方へ回ります。",
 };
 
 export const I18N: Record<Language, Messages> = {

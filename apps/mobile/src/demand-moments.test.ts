@@ -225,3 +225,32 @@ describe("ORDER-SCENARIO-001 publish carries the consumption scenario", () => {
     expect(PublishMarketOpportunityInputSchema.safeParse(coffeeInput).success).toBe(true);
   });
 });
+
+describe("MARKET-FAST-001 fast matching is opt-in on the publish input", () => {
+  it("carries matchingMode FAST only when the poster asked for it", () => {
+    const template = MOMENT_TEMPLATES[0]!;
+    const specs = { ...defaultSpecsFor(template), fast: true };
+    const input = buildDemandPublishInput(template, specs);
+    expect(input.matchingMode).toBe("FAST");
+    expect(PublishMarketOpportunityInputSchema.safeParse(input).success).toBe(true);
+  });
+
+  it("leaves the default (manual) publish input without a matchingMode key", () => {
+    // 缺省必须**一个键都不多** —— 自己挑报名的人这条老路径的 wire 载荷
+    // 不能因为多了个 matchingMode 就变（服务端按缺省=自己挑处理）。
+    for (const template of MOMENT_TEMPLATES) {
+      const specs = defaultSpecsFor(template);
+      expect(specs.fast).toBe(false);
+      const input = buildDemandPublishInput(template, specs);
+      expect(Object.prototype.hasOwnProperty.call(input, "matchingMode")).toBe(false);
+      expect(input.matchingMode).toBeUndefined();
+    }
+    // 老草稿（没有 fast 这个键）同样按自己挑处理。
+    const template = MOMENT_TEMPLATES[0]!;
+    const { fast: _fast, ...legacy } = defaultSpecsFor(template);
+    expect(Object.prototype.hasOwnProperty.call(buildDemandPublishInput(template, legacy), "matchingMode")).toBe(false);
+    expect(
+      buildDemandPublishInput(template, { ...defaultSpecsFor(template), fast: false }).matchingMode
+    ).toBeUndefined();
+  });
+});
