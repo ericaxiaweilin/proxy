@@ -400,7 +400,7 @@ describe("SCENE-HOME-ENTRY-001: home entry cards are wired to the pure, tested d
     expect(source).toContain("<SceneShopDirectory");
     expect(source).toContain("actionId={directoryEntry.actionId}");
     expect(source).toContain("unit={directoryEntry.unit}");
-    expect(source).toContain("onClose={() => setDirectoryEntry(undefined)}");
+    expect(source).toContain("onClose={() => { setDirectoryEntry(undefined); if (returnToPicker)");
     expect(source).toContain("setPickerOpen(true)");
     // 旧行为（点卡片顺手把 picker 也打开）不该回来：两个全屏 Modal 叠着开，
     // 系统返回只会收掉上面那个，用户会以为返回坏了。
