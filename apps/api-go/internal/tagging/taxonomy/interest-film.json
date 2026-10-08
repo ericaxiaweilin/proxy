@@ -1,0 +1,293 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/film/watch",
+   "parent": "interest/film",
+   "name": {"zh": "观影", "vi": "Xem phim", "en": "Watching"},
+   "keywords": ["观影", "xem phim", "chọn phim", "tối nay xem gì"]
+  },
+  {
+   "id": "interest/film/watch/cinema",
+   "parent": "interest/film/watch",
+   "name": {"zh": "电影院", "vi": "Rạp phim", "en": "Cinemas"},
+   "keywords": ["电影院", "rạp phim", "rap giai phong", "đặt vé"]
+  },
+  {
+   "id": "interest/film/watch/cinema_chain",
+   "parent": "interest/film/watch",
+   "name": {"zh": "连锁影院", "vi": "Chuỗi rạp", "en": "Cinema Chains"},
+   "keywords": ["cgv", "lotte cinema", "galaxy cine", "cinestar", "beta cinemas"]
+  },
+  {
+   "id": "interest/film/watch/streaming",
+   "parent": "interest/film/watch",
+   "name": {"zh": "线上追剧", "vi": "Xem trực tuyến", "en": "Streaming"},
+   "keywords": ["netflix", "追剧", "xem trực tuyến", "wetv", "iqiyi"]
+  },
+  {
+   "id": "interest/film/watch/series",
+   "parent": "interest/film/watch",
+   "name": {"zh": "剧集", "vi": "Phim bộ", "en": "TV Series"},
+   "keywords": ["phim bộ", "剧集", "dài tập", "series"]
+  },
+  {
+   "id": "interest/film/watch/film_club",
+   "parent": "interest/film/watch",
+   "name": {"zh": "观影会", "vi": "CLB phim", "en": "Film Club"},
+   "keywords": ["观影会", "câu lạc bộ phim", "chiếu phim", "xem cùng nhau"]
+  },
+  {
+   "id": "interest/film/watch/review",
+   "parent": "interest/film/watch",
+   "name": {"zh": "影评", "vi": "Review phim", "en": "Film Reviews"},
+   "keywords": ["影评", "review phim", "đánh giá phim", "spoiler"]
+  },
+  {
+   "id": "interest/film/genre",
+   "parent": "interest/film",
+   "name": {"zh": "影视类型", "vi": "Thể loại phim", "en": "Film Genres"},
+   "keywords": ["片单", "bom tấn", "phim lẻ", "thể loại phim"]
+  },
+  {
+   "id": "interest/film/genre/action",
+   "parent": "interest/film/genre",
+   "name": {"zh": "动作片", "vi": "Hành động", "en": "Action"},
+   "keywords": ["动作片", "phim hành động", "hanh dong", "action"]
+  },
+  {
+   "id": "interest/film/genre/comedy",
+   "parent": "interest/film/genre",
+   "name": {"zh": "喜剧", "vi": "Hài hước", "en": "Comedy"},
+   "keywords": ["喜剧", "phim hài", "hài hước", "sitcom"]
+  },
+  {
+   "id": "interest/film/genre/horror",
+   "parent": "interest/film/genre",
+   "name": {"zh": "恐怖片", "vi": "Kinh dị", "en": "Horror"},
+   "keywords": ["恐怖片", "phim kinh dị", "kinh dị", "horror"]
+  },
+  {
+   "id": "interest/film/genre/romance",
+   "parent": "interest/film/genre",
+   "name": {"zh": "爱情片", "vi": "Phim tình cảm", "en": "Romance"},
+   "keywords": ["爱情片", "phim tình cảm", "tinh cam", "romance"]
+  },
+  {
+   "id": "interest/film/genre/drama",
+   "parent": "interest/film/genre",
+   "name": {"zh": "剧情片", "vi": "Chính kịch", "en": "Drama"},
+   "keywords": ["剧情片", "chính kịch", "tâm lý xã hội", "drama"]
+  },
+  {
+   "id": "interest/film/genre/sci_fi",
+   "parent": "interest/film/genre",
+   "name": {"zh": "科幻片", "vi": "Khoa học viễn tưởng", "en": "Sci-Fi"},
+   "keywords": ["科幻片", "khoa học viễn tưởng", "viễn tưởng", "sci fi"]
+  },
+  {
+   "id": "interest/film/genre/mystery",
+   "parent": "interest/film/genre",
+   "name": {"zh": "悬疑推理", "vi": "Trinh thám", "en": "Mystery"},
+   "keywords": ["悬疑", "trinh thám", "phim phá án", "detective"]
+  },
+  {
+   "id": "interest/film/genre/historical",
+   "parent": "interest/film/genre",
+   "name": {"zh": "古装剧", "vi": "Phim cổ trang", "en": "Historical"},
+   "keywords": ["古装", "phim cổ trang", "co trang", "historical"]
+  },
+  {
+   "id": "interest/film/genre/war",
+   "parent": "interest/film/genre",
+   "name": {"zh": "战争片", "vi": "Phim chiến tranh", "en": "War Films"},
+   "keywords": ["战争片", "phim chiến tranh", "chien tranh", "đời lính"]
+  },
+  {
+   "id": "interest/film/genre/documentary",
+   "parent": "interest/film/genre",
+   "name": {"zh": "纪录片", "vi": "Phim tài liệu", "en": "Documentary"},
+   "keywords": ["纪录片", "phim tài liệu", "tai lieu", "documentary"]
+  },
+  {
+   "id": "interest/film/genre/variety",
+   "parent": "interest/film/genre",
+   "name": {"zh": "综艺节目", "vi": "Show truyền hình", "en": "Variety Shows"},
+   "keywords": ["综艺", "show truyền hình", "gameshow", "variety"]
+  },
+  {
+   "id": "interest/film/genre/vietnam_film",
+   "parent": "interest/film/genre",
+   "name": {"zh": "越南电影", "vi": "Phim Việt", "en": "Vietnamese Films"},
+   "keywords": ["phim việt", "越南电影", "điện ảnh việt", "phim viet nam"]
+  },
+  {
+   "id": "interest/film/genre/cdrama",
+   "parent": "interest/film/genre",
+   "name": {"zh": "国产剧", "vi": "Phim Trung Quốc", "en": "Chinese Drama"},
+   "keywords": ["国产剧", "phim trung quốc", "c-drama", "hoa ngữ"]
+  },
+  {
+   "id": "interest/film/genre/kdrama",
+   "parent": "interest/film/genre",
+   "name": {"zh": "韩剧", "vi": "Phim Hàn", "en": "K-Drama"},
+   "keywords": ["韩剧", "phim hàn", "k-drama", "han quoc"]
+  },
+  {
+   "id": "interest/film/genre/tdrama",
+   "parent": "interest/film/genre",
+   "name": {"zh": "泰剧", "vi": "Phim Thái", "en": "Thai Drama"},
+   "keywords": ["泰剧", "phim thái", "lakorn", "thai drama"]
+  },
+  {
+   "id": "interest/film/genre/us_series",
+   "parent": "interest/film/genre",
+   "name": {"zh": "美剧", "vi": "Phim Mỹ", "en": "US Series"},
+   "keywords": ["美剧", "phim mỹ", "us series", "hollywood"]
+  },
+  {
+   "id": "interest/film/genre/bollywood",
+   "parent": "interest/film/genre",
+   "name": {"zh": "印度电影", "vi": "Phim Ấn Độ", "en": "Bollywood"},
+   "keywords": ["bollywood", "印度电影", "phim ấn độ", "an do"]
+  },
+  {
+   "id": "interest/film/anime",
+   "parent": "interest/film",
+   "name": {"zh": "动漫影视", "vi": "Hoạt hình", "en": "Animation"},
+   "keywords": ["动漫", "hoạt hình", "hoat hinh", "animation"]
+  },
+  {
+   "id": "interest/film/anime/anime_jp",
+   "parent": "interest/film/anime",
+   "name": {"zh": "日本动画", "vi": "Anime", "en": "Anime"},
+   "keywords": ["anime", "日本动画", "phụ đề anime", "otaku"]
+  },
+  {
+   "id": "interest/film/anime/dubbing",
+   "parent": "interest/film/anime",
+   "name": {"zh": "配音", "vi": "Lồng tiếng", "en": "Dubbing"},
+   "keywords": ["配音", "lồng tiếng", "long tieng", "voice actor"]
+  },
+  {
+   "id": "interest/film/anime/cosplay",
+   "parent": "interest/film/anime",
+   "name": {"zh": "角色扮演", "vi": "Cosplay", "en": "Cosplay"},
+   "keywords": ["cosplay", "角色扮演", "cos", "diễn cosplay"]
+  },
+  {
+   "id": "interest/film/anime/ghibli",
+   "parent": "interest/film/anime",
+   "name": {"zh": "吉卜力", "vi": "Ghibli", "en": "Ghibli"},
+   "keywords": ["ghibli", "吉卜力", "miyazaki", "宫崎骏"]
+  },
+  {
+   "id": "interest/film/make",
+   "parent": "interest/film",
+   "name": {"zh": "拍摄制作", "vi": "Sản xuất phim", "en": "Filmmaking"},
+   "keywords": ["拍片", "làm phim", "san xuat phim", "filmmaking"]
+  },
+  {
+   "id": "interest/film/make/short_film",
+   "parent": "interest/film/make",
+   "name": {"zh": "短片", "vi": "Phim ngắn", "en": "Short Film"},
+   "keywords": ["短片", "phim ngắn", "short film", "phim 5 phút"]
+  },
+  {
+   "id": "interest/film/make/editing",
+   "parent": "interest/film/make",
+   "name": {"zh": "剪辑", "vi": "Dựng phim", "en": "Editing"},
+   "keywords": ["剪辑", "dựng phim", "dung phim", "edit video"]
+  },
+  {
+   "id": "interest/film/make/camera_work",
+   "parent": "interest/film/make",
+   "name": {"zh": "镜头语言", "vi": "Quay phim", "en": "Camera Work"},
+   "keywords": ["镜头语言", "quay phim", "cinematography", "dolly"]
+  },
+  {
+   "id": "interest/film/make/screenwriting",
+   "parent": "interest/film/make",
+   "name": {"zh": "编剧", "vi": "Viết kịch bản", "en": "Screenwriting"},
+   "keywords": ["编剧", "kịch bản", "viết kịch bản", "screenplay"]
+  },
+  {
+   "id": "interest/film/make/acting",
+   "parent": "interest/film/make",
+   "name": {"zh": "表演", "vi": "Diễn xuất", "en": "Acting"},
+   "keywords": ["表演", "diễn xuất", "dien xuat", "method acting"]
+  },
+  {
+   "id": "interest/film/make/subtitle",
+   "parent": "interest/film/make",
+   "name": {"zh": "字幕组", "vi": "Làm phụ đề", "en": "Subtitles"},
+   "keywords": ["字幕", "phụ đề", "phu de", "subteam"]
+  },
+  {
+   "id": "interest/film/stage",
+   "parent": "interest/film",
+   "name": {"zh": "舞台表演", "vi": "Sân khấu", "en": "Stage"},
+   "keywords": ["舞台", "sân khấu", "san khau", "kịch"]
+  },
+  {
+   "id": "interest/film/stage/cai_luong",
+   "parent": "interest/film/stage",
+   "name": {"zh": "改良戏", "vi": "Cải lương", "en": "Cải Lương"},
+   "keywords": ["cải lương", "cai luong", "改良戏", "vọng cổ"]
+  },
+  {
+   "id": "interest/film/stage/cheo",
+   "parent": "interest/film/stage",
+   "name": {"zh": "嘲剧", "vi": "Chèo", "en": "Chèo"},
+   "keywords": ["chèo", "嘲剧", "nhà chèo", "chiếu chèo"]
+  },
+  {
+   "id": "interest/film/stage/water_puppet",
+   "parent": "interest/film/stage",
+   "name": {"zh": "水上木偶戏", "vi": "Múa rối nước", "en": "Water Puppetry"},
+   "keywords": ["水上木偶", "múa rối nước", "mua roi nuoc", "thăng long"]
+  },
+  {
+   "id": "interest/film/stage/theatre",
+   "parent": "interest/film/stage",
+   "name": {"zh": "话剧", "vi": "Kịch nói", "en": "Theatre"},
+   "keywords": ["话剧", "kịch nói", "kich noi", "kịch bản sân khấu"]
+  },
+  {
+   "id": "interest/film/stage/standup",
+   "parent": "interest/film/stage",
+   "name": {"zh": "单口喜剧", "vi": "Hài độc thoại", "en": "Stand-up"},
+   "keywords": ["stand-up", "stand up", "单口喜剧", "hài độc thoại"]
+  },
+  {
+   "id": "interest/film/collect",
+   "parent": "interest/film",
+   "name": {"zh": "影迷收藏", "vi": "Đồ sưu tập phim", "en": "Film Fandom"},
+   "keywords": ["周边", "sưu tập", "đồ lưu niệm", "merch"]
+  },
+  {
+   "id": "interest/film/collect/poster",
+   "parent": "interest/film/collect",
+   "name": {"zh": "电影海报", "vi": "Poster phim", "en": "Movie Posters"},
+   "keywords": ["电影海报", "poster phim", "movie poster", "in poster phim"]
+  },
+  {
+   "id": "interest/film/collect/festival",
+   "parent": "interest/film/collect",
+   "name": {"zh": "电影节", "vi": "Liên hoan phim", "en": "Film Festivals"},
+   "keywords": ["电影节", "liên hoan phim", "hanoi grapevine", "bông sen vàng"]
+  },
+  {
+   "id": "interest/film/collect/fan_event",
+   "parent": "interest/film/collect",
+   "name": {"zh": "明星见面会", "vi": "Giao lưu diễn viên", "en": "Fan Meet"},
+   "keywords": ["fan meeting", "见面会", "giao lưu thần tượng", "quẩy fan"]
+  },
+  {
+   "id": "interest/film/watch/hanoi_cine",
+   "parent": "interest/film/watch",
+   "name": {"zh": "河内观影地", "vi": "Điểm chiếu Hà Nội", "en": "Hanoi Screenings"},
+   "keywords": ["đồng mô", "ciné club", "goerthe club", "chiếu phim hà nội"]
+  }
+ ]
+}

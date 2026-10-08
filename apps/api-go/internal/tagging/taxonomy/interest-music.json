@@ -1,0 +1,323 @@
+{
+ "domain": "interest",
+ "nodes": [
+  {
+   "id": "interest/music/instr",
+   "parent": "interest/music",
+   "name": {"zh": "乐器演奏", "vi": "Nhạc cụ", "en": "Instruments"},
+   "keywords": ["乐器", "chơi đàn", "choi dan", "instruments"]
+  },
+  {
+   "id": "interest/music/instr/piano",
+   "parent": "interest/music/instr",
+   "name": {"zh": "钢琴", "vi": "Đàn piano", "en": "Piano"},
+   "keywords": ["钢琴", "đàn piano", "dan piano", "piano"]
+  },
+  {
+   "id": "interest/music/instr/acoustic_guitar",
+   "parent": "interest/music/instr",
+   "name": {"zh": "木吉他", "vi": "Guitar acoustic", "en": "Acoustic Guitar"},
+   "keywords": ["木吉他", "guitar", "ghita", "acoustic guitar", "đàn guitar"]
+  },
+  {
+   "id": "interest/music/instr/electric_guitar",
+   "parent": "interest/music/instr",
+   "name": {"zh": "电吉他", "vi": "Guitar điện", "en": "Electric Guitar"},
+   "keywords": ["电吉他", "guitar điện", "guitar dien", "electric guitar"]
+  },
+  {
+   "id": "interest/music/instr/ukulele",
+   "parent": "interest/music/instr",
+   "name": {"zh": "尤克里里", "vi": "Ukulele", "en": "Ukulele"},
+   "keywords": ["尤克里里", "ukulele", "đàn ukulele", "uke"]
+  },
+  {
+   "id": "interest/music/instr/drums",
+   "parent": "interest/music/instr",
+   "name": {"zh": "架子鼓", "vi": "Trống", "en": "Drum Kit"},
+   "keywords": ["架子鼓", "drums", "trống", "đánh trống"]
+  },
+  {
+   "id": "interest/music/instr/percussion",
+   "parent": "interest/music/instr",
+   "name": {"zh": "打击乐", "vi": "Bộ gõ", "en": "Percussion"},
+   "keywords": ["打击乐", "cajon", "trống cajon", "percussion"]
+  },
+  {
+   "id": "interest/music/instr/violin",
+   "parent": "interest/music/instr",
+   "name": {"zh": "小提琴", "vi": "Violon", "en": "Violin"},
+   "keywords": ["小提琴", "violon", "violin", "đàn violin"]
+  },
+  {
+   "id": "interest/music/instr/keyboard",
+   "parent": "interest/music/instr",
+   "name": {"zh": "电子琴", "vi": "Đàn organ", "en": "Keyboard"},
+   "keywords": ["电子琴", "keyboard", "organ", "đàn organ"]
+  },
+  {
+   "id": "interest/music/instr/saxophone",
+   "parent": "interest/music/instr",
+   "name": {"zh": "萨克斯", "vi": "Kèn sax", "en": "Saxophone"},
+   "keywords": ["萨克斯", "saxophone", "sax", "kèn sax"]
+  },
+  {
+   "id": "interest/music/instr/flute",
+   "parent": "interest/music/instr",
+   "name": {"zh": "竹笛", "vi": "Sáo trúc", "en": "Bamboo Flute"},
+   "keywords": ["竹笛", "sáo trúc", "sao truc", "flute"]
+  },
+  {
+   "id": "interest/music/instr/guzheng",
+   "parent": "interest/music/instr",
+   "name": {"zh": "古筝", "vi": "Đàn cổ tranh", "en": "Guzheng"},
+   "keywords": ["古筝", "guzheng", "đàn cổ tranh", "dan co tranh"]
+  },
+  {
+   "id": "interest/music/instr/dan_tranh",
+   "parent": "interest/music/instr",
+   "name": {"zh": "越南筝", "vi": "Đàn tranh", "en": "Vietnamese Zither"},
+   "keywords": ["đàn tranh", "dan tranh", "越南筝", "zither"]
+  },
+  {
+   "id": "interest/music/instr/dan_bau",
+   "parent": "interest/music/instr",
+   "name": {"zh": "独弦琴", "vi": "Đàn bầu", "en": "Monochord"},
+   "keywords": ["đàn bầu", "dan bau", "独弦琴", "monochord"]
+  },
+  {
+   "id": "interest/music/instr/erhu",
+   "parent": "interest/music/instr",
+   "name": {"zh": "二胡", "vi": "Đàn nhị", "en": "Erhu"},
+   "keywords": ["二胡", "erhu", "đàn nhị", "dan nhi"]
+  },
+  {
+   "id": "interest/music/instr/bass",
+   "parent": "interest/music/instr",
+   "name": {"zh": "贝斯", "vi": "Guitar bass", "en": "Bass Guitar"},
+   "keywords": ["贝斯", "bass", "đàn bass", "guitar bass"]
+  },
+  {
+   "id": "interest/music/instr/harmonica",
+   "parent": "interest/music/instr",
+   "name": {"zh": "口琴", "vi": "Đàn môi", "en": "Harmonica"},
+   "keywords": ["口琴", "harmonica", "đàn môi", "dan moi"]
+  },
+  {
+   "id": "interest/music/vocal",
+   "parent": "interest/music",
+   "name": {"zh": "声乐演唱", "vi": "Ca hát", "en": "Vocal"},
+   "keywords": ["声乐", "ca hát", "thanh nhạc", "vocal"]
+  },
+  {
+   "id": "interest/music/vocal/choir",
+   "parent": "interest/music/vocal",
+   "name": {"zh": "合唱团", "vi": "Hợp xướng", "en": "Choir"},
+   "keywords": ["合唱团", "hợp xướng", "hop xuong", "choir"]
+  },
+  {
+   "id": "interest/music/vocal/training",
+   "parent": "interest/music/vocal",
+   "name": {"zh": "声乐练习", "vi": "Luyện thanh", "en": "Vocal Training"},
+   "keywords": ["练声", "声乐课", "luyện thanh", "vocal coach"]
+  },
+  {
+   "id": "interest/music/vocal/cover",
+   "parent": "interest/music/vocal",
+   "name": {"zh": "翻唱", "vi": "Hát cover", "en": "Vocal Cover"},
+   "keywords": ["翻唱", "hát cover", "hat cover", "cover song"]
+  },
+  {
+   "id": "interest/music/vocal/rap",
+   "parent": "interest/music/vocal",
+   "name": {"zh": "说唱", "vi": "Rap", "en": "Rap"},
+   "keywords": ["说唱", "rap", "freestyle", "đọc rap"]
+  },
+  {
+   "id": "interest/music/vocal/acappella",
+   "parent": "interest/music/vocal",
+   "name": {"zh": "无伴奏合唱", "vi": "Hát acapella", "en": "Acapella"},
+   "keywords": ["acapella", "无伴奏合唱", "hát acapella", "beatbox"]
+  },
+  {
+   "id": "interest/music/genre",
+   "parent": "interest/music",
+   "name": {"zh": "音乐风格", "vi": "Thể loại nhạc", "en": "Music Genres"},
+   "keywords": ["曲风", "音乐风格", "thể loại nhạc", "genre"]
+  },
+  {
+   "id": "interest/music/genre/vpop",
+   "parent": "interest/music/genre",
+   "name": {"zh": "越南流行", "vi": "Nhạc trẻ", "en": "Vpop"},
+   "keywords": ["vpop", "nhạc trẻ", "nhac tre", "sơn tùng"]
+  },
+  {
+   "id": "interest/music/genre/bolero",
+   "parent": "interest/music/genre",
+   "name": {"zh": "波莱罗", "vi": "Bolero", "en": "Bolero"},
+   "keywords": ["bolero", "nhạc vàng", "nhạc xưa", "trữ tình"]
+  },
+  {
+   "id": "interest/music/genre/hiphop",
+   "parent": "interest/music/genre",
+   "name": {"zh": "嘻哈", "vi": "Hip hop", "en": "Hip Hop"},
+   "keywords": ["嘻哈", "hiphop", "hip hop", "vietrap"]
+  },
+  {
+   "id": "interest/music/genre/indie",
+   "parent": "interest/music/genre",
+   "name": {"zh": "独立音乐", "vi": "Indie", "en": "Indie"},
+   "keywords": ["独立音乐", "indie", "indie việt", "alt music"]
+  },
+  {
+   "id": "interest/music/genre/rock",
+   "parent": "interest/music/genre",
+   "name": {"zh": "摇滚", "vi": "Rock", "en": "Rock"},
+   "keywords": ["摇滚", "rock", "nhạc rock", "metal"]
+  },
+  {
+   "id": "interest/music/genre/edm",
+   "parent": "interest/music/genre",
+   "name": {"zh": "电子舞曲", "vi": "Nhạc điện tử", "en": "EDM"},
+   "keywords": ["edm", "电子音乐", "nhạc điện tử", "vinahouse"]
+  },
+  {
+   "id": "interest/music/genre/classical",
+   "parent": "interest/music/genre",
+   "name": {"zh": "古典乐", "vi": "Nhạc cổ điển", "en": "Classical"},
+   "keywords": ["古典乐", "nhạc cổ điển", "hòa tấu", "classic"]
+  },
+  {
+   "id": "interest/music/genre/folk",
+   "parent": "interest/music/genre",
+   "name": {"zh": "民族音乐", "vi": "Nhạc dân tộc", "en": "Folk Music"},
+   "keywords": ["民乐", "nhạc dân tộc", "quan họ", "hát xẩm"]
+  },
+  {
+   "id": "interest/music/genre/cpop",
+   "parent": "interest/music/genre",
+   "name": {"zh": "国风音乐", "vi": "Nhạc Hoa ngữ", "en": "C-pop"},
+   "keywords": ["国风", "cpop", "c-pop", "nhạc hoa ngữ"]
+  },
+  {
+   "id": "interest/music/listen",
+   "parent": "interest/music",
+   "name": {"zh": "听歌收藏", "vi": "Nghe nhạc", "en": "Listening"},
+   "keywords": ["听歌", "nghe nhạc", "nghe nhac", "bài hay"]
+  },
+  {
+   "id": "interest/music/listen/playlist",
+   "parent": "interest/music/listen",
+   "name": {"zh": "歌单", "vi": "Playlist", "en": "Playlists"},
+   "keywords": ["歌单", "playlist", "tuyển tập nhạc", "list bài"]
+  },
+  {
+   "id": "interest/music/listen/vinyl",
+   "parent": "interest/music/listen",
+   "name": {"zh": "黑胶唱片", "vi": "Đĩa than", "en": "Vinyl"},
+   "keywords": ["黑胶", "đĩa than", "dia than", "vinyl"]
+  },
+  {
+   "id": "interest/music/listen/lofi",
+   "parent": "interest/music/listen",
+   "name": {"zh": "低保真音乐", "vi": "Lofi", "en": "Lofi"},
+   "keywords": ["lofi", "lo-fi", "低保真", "nhạc lofi"]
+  },
+  {
+   "id": "interest/music/listen/lullaby",
+   "parent": "interest/music/listen",
+   "name": {"zh": "摇篮曲", "vi": "Nhạc ru", "en": "Lullaby"},
+   "keywords": ["摇篮曲", "nhạc ru", "nhac ru", "lullaby"]
+  },
+  {
+   "id": "interest/music/live",
+   "parent": "interest/music",
+   "name": {"zh": "现场演出", "vi": "Biểu diễn", "en": "Live Music"},
+   "keywords": ["演出现场", "biểu diễn", "hoạt động ca nhạc", "live show"]
+  },
+  {
+   "id": "interest/music/live/concert",
+   "parent": "interest/music/live",
+   "name": {"zh": "演唱会", "vi": "Đêm nhạc", "en": "Concert"},
+   "keywords": ["演唱会", "concert", "đêm nhạc", "dem nhac"]
+  },
+  {
+   "id": "interest/music/live/band",
+   "parent": "interest/music/live",
+   "name": {"zh": "乐队", "vi": "Ban nhạc", "en": "Band"},
+   "keywords": ["乐队", "ban nhạc", "cover band", "nghệ sĩ đường phố"]
+  },
+  {
+   "id": "interest/music/live/street",
+   "parent": "interest/music/live",
+   "name": {"zh": "街头演唱", "vi": "Hát rong", "en": "Street Music"},
+   "keywords": ["街头卖唱", "hát rong", "hat rong", "busking"]
+  },
+  {
+   "id": "interest/music/live/open_mic",
+   "parent": "interest/music/live",
+   "name": {"zh": "开放麦", "vi": "Hát tự do", "en": "Open Mic"},
+   "keywords": ["open mic", "开放麦", "hát tự do", "sân khấu mở"]
+  },
+  {
+   "id": "interest/music/live/gig",
+   "parent": "interest/music/live",
+   "name": {"zh": "看现场", "vi": "Nhạc sống", "en": "Gig"},
+   "keywords": ["live music", "gig", "xem live", "đi nghe nhạc"]
+  },
+  {
+   "id": "interest/music/produce",
+   "parent": "interest/music",
+   "name": {"zh": "创作制作", "vi": "Sản xuất nhạc", "en": "Production"},
+   "keywords": ["编制作", "sản xuất nhạc", "san xuat nhac", "music production"]
+  },
+  {
+   "id": "interest/music/produce/songwriting",
+   "parent": "interest/music/produce",
+   "name": {"zh": "作曲", "vi": "Sáng tác", "en": "Songwriting"},
+   "keywords": ["作曲", "sáng tác", "ca khúc mới", "songwriting"]
+  },
+  {
+   "id": "interest/music/produce/arrange",
+   "parent": "interest/music/produce",
+   "name": {"zh": "编曲", "vi": "Hòa âm phối khí", "en": "Arrangement"},
+   "keywords": ["编曲", "hòa âm", "phối khí", "arrange"]
+  },
+  {
+   "id": "interest/music/produce/recording",
+   "parent": "interest/music/produce",
+   "name": {"zh": "录音", "vi": "Thu âm", "en": "Recording"},
+   "keywords": ["录音", "thu âm", "studio thu âm", "recording"]
+  },
+  {
+   "id": "interest/music/produce/mixing",
+   "parent": "interest/music/produce",
+   "name": {"zh": "混音", "vi": "Trộn âm", "en": "Mixing"},
+   "keywords": ["混音", "mixing", "master", "phối âm"]
+  },
+  {
+   "id": "interest/music/produce/dj",
+   "parent": "interest/music/produce",
+   "name": {"zh": "打碟", "vi": "DJ", "en": "DJ"},
+   "keywords": ["打碟", "dj", "disc jockey", "mix nhạc"]
+  },
+  {
+   "id": "interest/music/produce/beatmaking",
+   "parent": "interest/music/produce",
+   "name": {"zh": "编beat", "vi": "Làm beat", "en": "Beatmaking"},
+   "keywords": ["做beat", "làm beat", "beat", "beatmaking"]
+  },
+  {
+   "id": "interest/music/produce/sheet",
+   "parent": "interest/music/produce",
+   "name": {"zh": "乐谱", "vi": "Nhạc phổ", "en": "Sheet Music"},
+   "keywords": ["乐谱", "简谱", "nhạc phổ", "sheet music"]
+  },
+  {
+   "id": "interest/music/produce/theory",
+   "parent": "interest/music/produce",
+   "name": {"zh": "乐理", "vi": "Nhạc lý", "en": "Music Theory"},
+   "keywords": ["乐理", "nhạc lý", "xướng âm", "music theory"]
+  }
+ ]
+}
