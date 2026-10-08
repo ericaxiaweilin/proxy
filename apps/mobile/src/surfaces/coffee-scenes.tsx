@@ -1,412 +1,213 @@
-// CAFE-SCENE-001: 替换动态里原来的「状态」(24h 阅后即焚) + 「社区」(兴趣圈子)
-// 两个 tab —— 低摩擦、定位清晰的「咖啡场景」发现页：谁现在在哪家店、店铺榜、
-// 活动预告，比泛化的临时广播/兴趣圈子更贴近约人见面这个场景。
+// EXPLORE-REAL-001（2026-10-08）：动态 › 探索这一页（CAFE-SCENE-001 换掉原
+// 「状态」「社区」两个 tab 的那一屏）全部改成真数据。
 //
-// 场景/店铺/活动全是占位数据（组件顶部常驻"示例数据"提示）——后端目前没有
-// 「谁在店里」「店铺库」「活动报名」这些数据模型，先把交互骨架搭起来，
-// 真数据接上之后把提示行摘掉、把下面几个 PLACEHOLDER_* 换成 client 拉取。
-// 颜色/字号沿用 theme.tsx 的 R3 token，不搬参考稿自己那套深色咖啡配色。
-import { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { ProxyIcon } from "../components/proxy-icon";
+// 这一屏以前整屏是 PLACEHOLDER_SCENES / PLACEHOLDER_SHOPS：假的人（Mia / Luna /
+// Sara + 头像 + 「已待 35 分钟」「可陪 2 小时」）、假的店铺与假评分（4.8 / 128 条
+// 评价）、网速/吸烟/空调/插座/噪音那排 LEGEND 与七个筛不动的假 chip、假的活动
+// （周六咖啡拉花体验课 · 已报名 5/8），外加一行常驻的「示例数据」。**全部删掉**：
+// 那个人员榜的依据从来不存在（hereCount 只是「此刻声明在这里的人数」这个聚合，
+// 公开目录里没有「是谁」），设施与噪音是没有任何生产者的属性，那七个 chip 没有
+// 一个真的筛得到东西。
+//
+// 现在三段各自一份真数据（端点、client 全部复用现成的，没有新加接口）：
+//   1. 此刻 —— 公开目录 /v1/reality-scenes 里 hereCount > 0 的咖啡场景，按在场
+//      人数降序。每行只有店名 / 区域 / 「N 人此刻在这里」：没有人名、没有头像。
+//   2. 咖啡店 —— 同一份目录里咖啡分类的全部场景（店名 / 区域 / 评分+条数 /
+//      此刻人数 / 真的拿到定位时的距离）。评分只在 ratingCount > 0 时成段。
+//   3. 活动 —— ActivityClient.listActivities（匿名可读），只留未取消、且能解析出
+//      时刻时还没开场的那几条；时间地点照服务端存的原样显示。
+//
+// 每段都有自己的诚实空态（「还没有……」），加载与失败各是一行纯文字（不引
+// spinner）。距离只在真的拿到设备定位时才有；没有定位就是没有，不编。
+//
+// ⚠️ 行不可点是**有意的**：点进单店详情要走场景目录那一整屏（SceneShopDirectory，
+// 自带全屏 Modal、收藏/打卡/导航/报名），而这一 tab 从 feed.tsx 拿不到任何导航
+// 回调（`<CoffeeScenesHub />` 没有 props）。挂一整屏目录进来是第二份实现，放一个
+// 点了没反应的按钮则是死按钮 —— 两样都不做，行就只是行。
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { color, shadows } from "../theme";
-import { ProxyBackGlyph } from "../components/proxy-foundation";
+import { ActivityClient } from "../activity-client";
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
+import { localApiBaseUrl, nativeSecureSessionStore, sessionAuthClient } from "../native-clients";
+import type { SceneOrigin } from "../scene-shop-directory";
+import {
+  EXPLORE_EMPTY_TEXT,
+  EXPLORE_ERROR_TEXT,
+  EXPLORE_LOADING_TEXT,
+  EXPLORE_SECTION_TITLES,
+  activityMetaLine,
+  activityPeopleLine,
+  coffeeVenues,
+  hereNowLine,
+  hereNowScenes,
+  loadExploreScenes,
+  metaLine,
+  photoUri,
+  ratingLine,
+  upcomingActivities,
+  venueDistanceText,
+  type ExploreActivity,
+  type ExploreScene,
+} from "../coffee-scenes-model";
 
-type Scene = {
-  id: string;
-  name: string;
-  initial: string;
-  shop: string;
-  distanceKm: number;
-  activity: string;
-  waitedMin: number;
-  availableHours: number;
-  pref: string;
-  lang: string;
-  tags: string;
-};
-
-const PLACEHOLDER_SCENES: readonly Scene[] = [
-  { id: "1", name: "Mia", initial: "M", shop: "Proxy Coffee", distanceKm: 1.2, activity: "办公中 · 靠窗安静区", waitedMin: 35, availableHours: 2, pref: "不限", lang: "中文 OK", tags: "咖啡 · 办公" },
-  { id: "2", name: "Luna", initial: "L", shop: "Bắc Ninh Cafe", distanceKm: 2.1, activity: "聊天中 · 沙发区", waitedMin: 60, availableHours: 3, pref: "男生", lang: "English", tags: "City Walk · 聊天" },
-  { id: "3", name: "Sara", initial: "S", shop: "L'amour Café", distanceKm: 0.8, activity: "打牌中 · 靠窗大桌", waitedMin: 20, availableHours: 1.5, pref: "不限", lang: "中文 OK", tags: "UNO · 打牌" }
-];
-
-type Shop = {
-  id: string;
-  emoji: string;
-  name: string;
-  distanceKm: number;
-  desc: string;
-  rating: number;
-  reviews: number;
-  hot?: boolean;
-  isNew?: boolean;
-  wifi: string;
-  smoke: string;
-  ac: string;
-  plug: string;
-  quiet: "安静" | "适中" | "热闹";
-};
-
-const PLACEHOLDER_SHOPS: readonly Shop[] = [
-  { id: "s1", emoji: "☕", name: "Bắc Ninh Cafe", distanceKm: 1.2, desc: "深夜咖啡 · 适合办公", rating: 4.8, reviews: 128, hot: true, wifi: "A", smoke: "无烟", ac: "24°", plug: "充足", quiet: "安静" },
-  { id: "s2", emoji: "🌿", name: "The Coffee House", distanceKm: 2.1, desc: "适合约会 · 拍照好看", rating: 4.7, reviews: 96, hot: true, wifi: "B+", smoke: "室外", ac: "22°", plug: "部分", quiet: "适中" },
-  { id: "s3", emoji: "🥐", name: "L'amour Café", distanceKm: 0.8, desc: "安静 · 可颂必点", rating: 4.6, reviews: 74, wifi: "A", smoke: "无烟", ac: "26°", plug: "充足", quiet: "安静" },
-  { id: "s4", emoji: "💻", name: "Workflow Coffee", distanceKm: 1.8, desc: "办公首选", rating: 4.7, reviews: 112, hot: true, wifi: "A+", smoke: "无烟", ac: "23°", plug: "充足", quiet: "安静" },
-  { id: "s5", emoji: "🌸", name: "Bloom Coffee", distanceKm: 3.2, desc: "新店开业", rating: 4.5, reviews: 18, isNew: true, wifi: "A", smoke: "无烟", ac: "24°", plug: "充足", quiet: "适中" },
-  { id: "s6", emoji: "🍃", name: "Green Garden", distanceKm: 0.5, desc: "庭院安静", rating: 4.6, reviews: 62, wifi: "B", smoke: "无烟", ac: "25°", plug: "部分", quiet: "安静" },
-  { id: "s7", emoji: "⚡", name: "Express Coffee", distanceKm: 1.5, desc: "快捷外带", rating: 4.4, reviews: 88, hot: true, wifi: "A", smoke: "无烟", ac: "22°", plug: "部分", quiet: "热闹" },
-  { id: "s8", emoji: "📖", name: "Quiet Page", distanceKm: 2.4, desc: "阅读空间", rating: 4.9, reviews: 142, wifi: "A", smoke: "无烟", ac: "24°", plug: "充足", quiet: "安静" }
-];
-
-const LEGEND: readonly { icon: string; label: string; detail: string }[] = [
-  { icon: "🌐", label: "网速", detail: "A+ / A / B / C" },
-  { icon: "🚭", label: "吸烟", detail: "无烟 / 室外 / 室内" },
-  { icon: "❄️", label: "空调", detail: "22° / 24° / 26°" },
-  { icon: "🔌", label: "插座", detail: "充足 / 部分 / 无" },
-  { icon: "🔇", label: "噪音", detail: "安静 / 适中 / 热闹" },
-  { icon: "🪑", label: "座位", detail: "沙发 / 硬椅 / 混合" }
-];
-
-const SHOP_FILTERS: readonly { id: ShopFilter; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "hot", label: "🔥 热门" },
-  { id: "near", label: "📍 附近" },
-  { id: "new", label: "✨ 新店" },
-  { id: "top", label: "⭐ 高评分" },
-  { id: "work", label: "💻 适合办公" },
-  { id: "quiet", label: "🔇 安静" }
-];
-
-type ShopFilter = "all" | "hot" | "near" | "new" | "top" | "work" | "quiet";
-
-function matchesFilter(shop: Shop, filter: ShopFilter): boolean {
-  switch (filter) {
-    case "all": return true;
-    case "hot": return Boolean(shop.hot);
-    case "new": return Boolean(shop.isNew);
-    case "near": return shop.distanceKm <= 1.2;
-    case "top": return shop.rating >= 4.6;
-    case "work": return shop.desc.includes("办公");
-    case "quiet": return shop.quiet === "安静";
-  }
-}
+type LoadState = "LOADING" | "READY" | "ERROR";
 
 export function CoffeeScenesHub(): React.JSX.Element {
-  const [view, setView] = useState<"HOME" | "ALL_SHOPS">("HOME");
-  const [legendOpen, setLegendOpen] = useState(false);
-  const [activeScene, setActiveScene] = useState<Scene>();
-  const [joinedScenes, setJoinedScenes] = useState<ReadonlySet<string>>(new Set());
-  const [eventJoined, setEventJoined] = useState(false);
-  const [eventSpots, setEventSpots] = useState(5);
-  const [shopFilter, setShopFilter] = useState<ShopFilter>("all");
+  const [scenes, setScenes] = useState<readonly ExploreScene[]>([]);
+  const [catalogState, setCatalogState] = useState<LoadState>("LOADING");
+  const [activities, setActivities] = useState<readonly ExploreActivity[]>([]);
+  const [activityState, setActivityState] = useState<LoadState>("LOADING");
+  const [origin, setOrigin] = useState<SceneOrigin>();
 
-  function joinScene(id: string): void {
-    setJoinedScenes((prev) => new Set(prev).add(id));
-  }
+  // 公开场景目录：免登录；失败就明说失败 —— 留一片空列表会让人以为是「附近没有店」。
+  useEffect(() => {
+    let cancelled = false;
+    void loadExploreScenes(fetch, localApiBaseUrl)
+      .then((rows) => { if (!cancelled) { setScenes(rows); setCatalogState("READY"); } })
+      .catch(() => { if (!cancelled) setCatalogState("ERROR"); });
+    return () => { cancelled = true; };
+  }, []);
 
-  function joinEvent(): void {
-    if (eventJoined) return;
-    setEventJoined(true);
-    setEventSpots((n) => Math.min(8, n + 1));
-  }
+  // 活动：ListActivities 匿名可读（读列表不需要报名权限）。
+  useEffect(() => {
+    let cancelled = false;
+    void new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore })
+      .listActivities()
+      .then((list) => {
+        if (cancelled) return;
+        setActivities(upcomingActivities(list, new Date()));
+        setActivityState("READY");
+      })
+      .catch(() => { if (!cancelled) setActivityState("ERROR"); });
+    return () => { cancelled = true; };
+  }, []);
 
-  if (view === "ALL_SHOPS") {
-    const filtered = PLACEHOLDER_SHOPS.filter((s) => matchesFilter(s, shopFilter));
-    return (
-      <View>
-        <Pressable onPress={() => setView("HOME")} style={styles.back}><ProxyBackGlyph label="返回探索" /></Pressable>
-        <Text selectable style={styles.placeholderBanner}>示例数据 · 店铺库还没接后端，界面先搭起来。</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-          {SHOP_FILTERS.map((f) => (
-            <Pressable key={f.id} onPress={() => setShopFilter(f.id)} style={[styles.filterTab, shopFilter === f.id && styles.filterTabOn]}>
-              <Text selectable style={[styles.filterTabText, shopFilter === f.id && styles.filterTabTextOn]}>{f.label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <Text selectable style={styles.resultCount}>共 {filtered.length} 家</Text>
-        {filtered.map((s) => <ShopCard key={s.id} shop={s} />)}
-      </View>
-    );
-  }
+  // 定位只为距离这一段服务：取不到就没有距离（不拿河内市中心当「你的位置」）。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const fix = await getCurrentFix(expoLocationApi, { requestPermission: true });
+      if (!cancelled && fix) setOrigin({ latitude: fix.latitude, longitude: fix.longitude });
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 「此刻」与「咖啡店」必须是同一批场景（同一个 coffee 匹配器），否则两段对不上。
+  const venues = useMemo(() => coffeeVenues(scenes), [scenes]);
+  const hereNow = useMemo(() => hereNowScenes(venues), [venues]);
 
   return (
     <View>
-      <Text selectable style={styles.placeholderBanner}>示例数据 · 场景 / 店铺 / 活动后端还没接，界面先搭起来。</Text>
-
-      <View style={styles.sectionHead}>
-        <Text selectable style={styles.sectionTitle}>☕ 实时咖啡场景</Text>
-        <Text selectable style={styles.sectionSub}>Live Now</Text>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sceneScroll}>
-        {PLACEHOLDER_SCENES.map((s) => (
-          <Pressable key={s.id} onPress={() => setActiveScene(s)} style={styles.sceneCard}>
-            <View style={styles.liveTag}><View style={styles.liveDot} /><Text selectable style={styles.liveText}>现在在店里</Text></View>
-            <View style={styles.scenePerson}>
-              <View style={styles.sceneAvatar}><Text selectable style={styles.sceneAvatarText}>{s.initial}</Text></View>
-              <View>
-                <Text selectable style={styles.scenePersonName}>{s.name}</Text>
-                <Text selectable style={styles.scenePersonWaited}>已待 {s.waitedMin} 分钟</Text>
-              </View>
-            </View>
-            <Text selectable style={styles.scenePlace}>📍 {s.shop} · {s.distanceKm}km</Text>
-            <Text selectable style={styles.sceneActivity}>{s.activity}</Text>
-            <View style={styles.sceneMetaGrid}>
-              <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.availableHours}h</Text><Text selectable style={styles.sceneMetaKey}>可陪</Text></View>
-              <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>有空</Text><Text selectable style={styles.sceneMetaKey}>状态</Text></View>
-              <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.pref}</Text><Text selectable style={styles.sceneMetaKey}>偏好</Text></View>
-            </View>
-            <View style={styles.sceneJoinRow}>
-              <Text selectable style={styles.sceneTag}>{s.lang}</Text>
-              <Pressable
-                disabled={joinedScenes.has(s.id)}
-                onPress={(event) => { event.stopPropagation(); joinScene(s.id); }}
-                style={[styles.sceneJoinBtn, joinedScenes.has(s.id) && styles.sceneJoinBtnOn]}
-              >
-                <Text selectable style={styles.sceneJoinBtnText}>{joinedScenes.has(s.id) ? "已加入" : "加入"}</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      <View style={styles.eventCard}>
-        <Text selectable style={styles.eventBadge}>✦ 活动预告</Text>
-        <Text selectable style={styles.eventTitle}>周六咖啡拉花体验课</Text>
-        <View style={styles.eventHost}>
-          <View style={styles.eventHostAvatar}><Text selectable style={styles.eventHostAvatarText}>P</Text></View>
-          <Text selectable style={styles.eventHostText}>Proxy Coffee Roastery 主办</Text>
-        </View>
-        <View style={styles.eventDetailGrid}>
-          <View style={styles.eventDetail}><Text selectable style={styles.eventDetailValue}>21</Text><Text selectable style={styles.eventDetailKey}>周六</Text></View>
-          <View style={styles.eventDetail}><Text selectable style={styles.eventDetailValue}>15:00</Text><Text selectable style={styles.eventDetailKey}>开始</Text></View>
-          <View style={styles.eventDetail}><Text selectable style={styles.eventDetailValue}>8 人</Text><Text selectable style={styles.eventDetailKey}>名额</Text></View>
-        </View>
-        <Text selectable style={styles.eventDesc}>专业咖啡师带您体验拉花基础，从打奶泡到心形、叶形图案，亲手做一杯拿铁。含一杯饮品和甜点。</Text>
-        <View style={styles.eventBottomRow}>
-          <Text selectable style={styles.eventSpots}>已报名 <Text selectable style={styles.eventSpotsStrong}>{eventSpots}</Text> / 8 人</Text>
-          <Pressable onPress={joinEvent} style={[styles.eventJoinBtn, eventJoined && styles.eventJoinBtnOn]}>
-            <Text selectable style={styles.eventJoinBtnText}>{eventJoined ? "已加入 ✓" : "加入"}</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.sectionHead}>
-        <Text selectable style={styles.sectionTitle}>🔥 本周热门</Text>
-        <Pressable onPress={() => setView("ALL_SHOPS")} style={styles.moreBtn}>
-          <Text selectable style={styles.moreBtnText}>更多</Text>
-          <ProxyIcon color={color.muted} name="arrowUpRight" size={11} />
-        </Pressable>
-      </View>
-      {PLACEHOLDER_SHOPS.slice(0, 3).map((s) => <ShopCard key={s.id} shop={s} />)}
-
-      <Pressable onPress={() => setLegendOpen((v) => !v)} style={styles.legendToggle}>
-        <View style={styles.legendToggleLeft}>
-          <Text selectable style={styles.legendToggleIcon}>🏷️</Text>
-          <Text selectable style={styles.legendToggleText}>标记说明</Text>
-        </View>
-        <Text selectable style={[styles.legendArrow, legendOpen && styles.legendArrowOpen]}>▾</Text>
-      </Pressable>
-      {legendOpen ? (
-        <View style={styles.legendGrid}>
-          {LEGEND.map((l) => (
-            <View key={l.label} style={styles.legendItem}>
-              <Text selectable style={styles.legendItemIcon}>{l.icon}</Text>
-              <View style={styles.legendItemTextWrap}>
-                <Text selectable style={styles.legendItemLabel}>{l.label}</Text>
-                <Text selectable style={styles.legendItemDetail}>{l.detail}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      <Modal animationType="slide" transparent visible={Boolean(activeScene)} onRequestClose={() => setActiveScene(undefined)}>
-        <Pressable onPress={() => setActiveScene(undefined)} style={styles.modalOverlay}>
-          <Pressable onPress={(event) => event.stopPropagation()} style={styles.modalSheet}>
-            {activeScene ? (
-              <>
-                <View style={styles.modalDrag} />
-                <View style={styles.modalTop}>
-                  <View style={styles.modalAvatar}><Text selectable style={styles.modalAvatarText}>{activeScene.initial}</Text></View>
-                  <View>
-                    <Text selectable style={styles.modalName}>{activeScene.name}</Text>
-                    <Text selectable style={styles.modalStatus}>已待 {activeScene.waitedMin} 分钟 · {activeScene.shop}</Text>
+      {/* 场景目录一份请求喂两段（此刻 / 咖啡店），所以它的加载/失败行只出现一次；
+          取不到时**不**画那两段的空态 —— 「没拉到」和「真的没有」是两种状态，
+          拿一句「还没有咖啡店场景」去冒充取不到，就是在撒谎。 */}
+      <ExploreState state={catalogState} />
+      {catalogState === "READY" ? (
+        <>
+          <ExploreSection emptyText={EXPLORE_EMPTY_TEXT.here} isEmpty={hereNow.length === 0} title={EXPLORE_SECTION_TITLES.here}>
+            {hereNow.map((scene) => {
+              const meta = metaLine([scene.area, hereNowLine(scene.hereCount)]);
+              return (
+                <View key={scene.id} style={styles.rowCard}>
+                  {/* 唯一的「此刻」信号：这颗点 + 「N 人此刻在这里」。没有人名、没有头像
+                      —— 公开目录里没有「是谁」，也不该有。 */}
+                  <View style={styles.liveDot} />
+                  <View style={styles.rowBody}>
+                    <Text selectable style={styles.rowTitle}>{scene.name}</Text>
+                    {meta === "" ? null : <Text selectable style={styles.rowMeta}>{meta}</Text>}
                   </View>
                 </View>
-                <View style={styles.modalBlock}>
-                  <Text selectable style={styles.modalBlockTitle}>场景信息</Text>
-                  <ModalRow label="📍 位置" value={activeScene.shop} />
-                  <ModalRow label="☕ 活动" value={activeScene.activity} />
-                  <ModalRow label="⏱ 可陪时间" value={`${activeScene.availableHours} 小时`} />
-                  <ModalRow label="👥 偏好" value={activeScene.pref} />
+              );
+            })}
+          </ExploreSection>
+
+          <ExploreSection emptyText={EXPLORE_EMPTY_TEXT.coffee} isEmpty={venues.length === 0} title={EXPLORE_SECTION_TITLES.coffee}>
+            {venues.map((scene) => {
+              const photo = photoUri(scene.imageUrl, localApiBaseUrl);
+              const meta = metaLine([scene.area, ratingLine(scene), hereNowLine(scene.hereCount), venueDistanceText(scene, origin)]);
+              return (
+                <View key={scene.id} style={styles.rowCard}>
+                  {photo ? (
+                    <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`explore:${scene.id}`} source={{ uri: photo }} style={styles.rowThumb} transition={0} />
+                  ) : null}
+                  <View style={styles.rowBody}>
+                    <Text selectable style={styles.rowTitle}>{scene.name}</Text>
+                    {meta === "" ? null : <Text selectable style={styles.rowMeta}>{meta}</Text>}
+                  </View>
                 </View>
-                <View style={styles.modalBlock}>
-                  <Text selectable style={styles.modalBlockTitle}>关于她</Text>
-                  <ModalRow label="语言" value={activeScene.lang} />
-                  <ModalRow label="兴趣" value={activeScene.tags} />
+              );
+            })}
+          </ExploreSection>
+        </>
+      ) : null}
+
+      <ExploreState state={activityState} />
+      {activityState === "READY" ? (
+        <ExploreSection emptyText={EXPLORE_EMPTY_TEXT.activities} isEmpty={activities.length === 0} title={EXPLORE_SECTION_TITLES.activities}>
+          {activities.map((activity) => {
+            const meta = activityMetaLine(activity);
+            return (
+              <View key={activity.activityId} style={styles.rowCard}>
+                <View style={styles.rowBody}>
+                  <Text selectable style={styles.rowTitle}>{activity.title}</Text>
+                  {meta === "" ? null : <Text selectable style={styles.rowMeta}>{meta}</Text>}
+                  <Text selectable style={styles.rowMeta}>{activityPeopleLine(activity)}</Text>
                 </View>
-                <View style={styles.modalActionRow}>
-                  <Pressable onPress={() => setActiveScene(undefined)} style={styles.modalCancel}>
-                    <Text selectable style={styles.modalCancelText}>取消</Text>
-                  </Pressable>
-                  <Pressable onPress={() => { joinScene(activeScene.id); setActiveScene(undefined); }} style={styles.modalConfirm}>
-                    <Text selectable style={styles.modalConfirmText}>{joinedScenes.has(activeScene.id) ? "已加入" : "确认加入"}</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
+              </View>
+            );
+          })}
+        </ExploreSection>
+      ) : null}
     </View>
   );
 }
 
-function ModalRow({ label, value }: { label: string; value: string }): React.JSX.Element {
-  return (
-    <View style={styles.modalRow}>
-      <Text selectable style={styles.modalRowLabel}>{label}</Text>
-      <Text selectable style={styles.modalRowValue}>{value}</Text>
-    </View>
-  );
+/**
+ * 一段的状态行：加载与失败各是一行纯文字（不引 spinner —— 这一屏没有「转圈才算在
+ * 加载」的需求，而一个装饰性的转圈是死 UI）。READY 没有状态行，空态归那一段自己。
+ */
+function ExploreState({ state }: { state: LoadState }): React.JSX.Element | null {
+  if (state === "LOADING") return <Text selectable style={styles.stateText}>{EXPLORE_LOADING_TEXT}</Text>;
+  if (state === "ERROR") return <Text selectable style={styles.stateText}>{EXPLORE_ERROR_TEXT}</Text>;
+  return null;
 }
 
-function ShopCard({ shop }: { shop: Shop }): React.JSX.Element {
+/** 一段 = 标题 + 数据行，或者一行空态（「真的没有」才走这一行）。 */
+function ExploreSection({
+  title,
+  isEmpty,
+  emptyText,
+  children,
+}: {
+  title: string;
+  /** 这一段真的没有内容（调用方保证：取不到的那一段根本不进来）。 */
+  isEmpty: boolean;
+  emptyText: string;
+  children: ReactNode;
+}): React.JSX.Element {
   return (
-    <View style={styles.shopCard}>
-      <View style={styles.shopRow1}>
-        <View style={styles.shopThumb}>
-          <Text selectable style={styles.shopThumbEmoji}>{shop.emoji}</Text>
-          {shop.hot ? <View style={styles.shopBadgeHot}><Text selectable style={styles.shopBadgeText}>HOT</Text></View> : null}
-          {shop.isNew ? <View style={styles.shopBadgeNew}><Text selectable style={styles.shopBadgeText}>NEW</Text></View> : null}
-        </View>
-        <View style={styles.shopInfo}>
-          <Text selectable style={styles.shopName}>{shop.name}</Text>
-          <Text selectable style={styles.shopSub}>{shop.distanceKm}km · {shop.desc}</Text>
-        </View>
-        <View style={styles.shopScore}>
-          <Text selectable style={styles.shopScoreValue}>{shop.rating}</Text>
-          <Text selectable style={styles.shopScoreSub}>{shop.reviews} 评价</Text>
-        </View>
-      </View>
-      <View style={styles.shopMarks}>
-        <Text selectable style={styles.shopMark}>🌐 {shop.wifi}</Text>
-        <Text selectable style={styles.shopMark}>{shop.smoke === "无烟" ? "🚭" : "🚬"} {shop.smoke}</Text>
-        <Text selectable style={styles.shopMark}>❄️ {shop.ac}</Text>
-        <Text selectable style={styles.shopMark}>🔌 {shop.plug}</Text>
-        <Text selectable style={styles.shopMark}>🔇 {shop.quiet}</Text>
-      </View>
+    <View style={styles.section}>
+      <Text selectable style={styles.sectionTitle}>{title}</Text>
+      {isEmpty ? <Text selectable style={styles.stateText}>{emptyText}</Text> : null}
+      {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  placeholderBanner: { color: color.muted, fontSize: 11, fontWeight: "700", marginBottom: 10, marginTop: 2 },
-  // 原来是给 `‹ 返回咖啡场景` 那份 Text 用的文字样式；现在字形和标签都走公共组件
-  // ProxyBackGlyph（BACK-GLYPH-001），这里只留它承担的那点外边距。
-  back: { marginBottom: 8, marginTop: 4 },
+  section: { marginBottom: 22 },
+  sectionTitle: { color: color.ink, fontSize: 15, fontWeight: "800", marginBottom: 10 },
+  stateText: { color: color.muted, fontSize: 12, marginBottom: 4 },
 
-  sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 10, marginTop: 4 },
-  sectionTitle: { color: color.ink, fontSize: 15, fontWeight: "800" },
-  sectionSub: { color: color.muted, fontSize: 11, fontWeight: "600", letterSpacing: 0.5, textTransform: "uppercase" },
-  moreBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 3, paddingHorizontal: 10, paddingVertical: 5 },
-  moreBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
+  // 场景缩略图跟场景目录那一屏同尺寸（104 方），不新造第三档头像尺寸。
+  rowThumb: { backgroundColor: color.surface, borderRadius: 14, height: 104, width: 104 },
+  liveDot: { backgroundColor: color.mint, borderRadius: 4, height: 8, width: 8 },
 
-  sceneScroll: { marginBottom: 20 },
-  sceneCard: { backgroundColor: color.ink, borderRadius: 20, marginRight: 10, overflow: "hidden", padding: 14, width: 208 },
-  liveTag: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(31,200,169,0.18)", borderRadius: 10, flexDirection: "row", gap: 5, marginBottom: 11, paddingHorizontal: 8, paddingVertical: 4 },
-  liveDot: { backgroundColor: color.mint, borderRadius: 3, height: 6, width: 6 },
-  liveText: { color: "#8FE8D4", fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
-  scenePerson: { alignItems: "center", flexDirection: "row", gap: 9, marginBottom: 11 },
-  sceneAvatar: { alignItems: "center", backgroundColor: color.violet, borderRadius: 999, height: 44, justifyContent: "center", width: 44 },
-  sceneAvatarText: { color: color.white, fontSize: 17, fontWeight: "800" },
-  scenePersonName: { color: color.white, fontSize: 14, fontWeight: "800" },
-  scenePersonWaited: { color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 1 },
-  scenePlace: { color: "rgba(255,255,255,0.75)", fontSize: 11, marginBottom: 3 },
-  sceneActivity: { color: "rgba(255,255,255,0.5)", fontSize: 11, marginBottom: 11 },
-  sceneMetaGrid: { flexDirection: "row", gap: 6, marginBottom: 13 },
-  sceneMeta: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 11, flex: 1, paddingVertical: 6 },
-  sceneMetaValue: { color: color.lime, fontSize: 12, fontWeight: "800" },
-  sceneMetaKey: { color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 2 },
-  sceneJoinRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  sceneTag: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 8, color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 3 },
-  sceneJoinBtn: { backgroundColor: color.magenta, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 7 },
-  sceneJoinBtnOn: { backgroundColor: "rgba(255,255,255,0.15)" },
-  sceneJoinBtnText: { color: color.white, fontSize: 12, fontWeight: "700" },
-
-  eventCard: { backgroundColor: color.violet, borderRadius: 20, marginBottom: 20, padding: 18 },
-  eventBadge: { alignSelf: "flex-start", backgroundColor: color.magenta, borderRadius: 10, color: color.white, fontSize: 11, fontWeight: "700", letterSpacing: 0.6, marginBottom: 12, paddingHorizontal: 9, paddingVertical: 4, textTransform: "uppercase" },
-  eventTitle: { color: color.white, fontSize: 18, fontWeight: "800", marginBottom: 5 },
-  eventHost: { alignItems: "center", flexDirection: "row", gap: 6, marginBottom: 13 },
-  eventHostAvatar: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 999, height: 18, justifyContent: "center", width: 18 },
-  eventHostAvatarText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  eventHostText: { color: "rgba(255,255,255,0.65)", fontSize: 11.5 },
-  eventDetailGrid: { flexDirection: "row", gap: 9, marginBottom: 13 },
-  eventDetail: { alignItems: "center", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 13, flex: 1, paddingVertical: 9 },
-  eventDetailValue: { color: color.white, fontSize: 13, fontWeight: "800" },
-  eventDetailKey: { color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 3 },
-  eventDesc: { color: "rgba(255,255,255,0.75)", fontSize: 11.5, lineHeight: 16, marginBottom: 16 },
-  eventBottomRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  eventSpots: { color: "rgba(255,255,255,0.6)", fontSize: 11 },
-  eventSpotsStrong: { color: color.white, fontWeight: "800" },
-  eventJoinBtn: { backgroundColor: color.magenta, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 9 },
-  eventJoinBtnOn: { backgroundColor: "rgba(255,255,255,0.25)" },
-  eventJoinBtnText: { color: color.white, fontSize: 13, fontWeight: "700" },
-
-  filterRow: { marginBottom: 12 },
-  filterTab: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, marginRight: 7, paddingHorizontal: 13, paddingVertical: 7 },
-  filterTabOn: { backgroundColor: color.ink, borderColor: color.ink },
-  filterTabText: { color: color.ink, fontSize: 12, fontWeight: "600" },
-  filterTabTextOn: { color: color.white },
-  resultCount: { color: color.muted, fontSize: 11, marginBottom: 9 },
-
-  shopCard: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, marginBottom: 9, padding: 12, ...shadows.card },
-  shopRow1: { alignItems: "center", flexDirection: "row", gap: 12, marginBottom: 10 },
-  shopThumb: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 104, justifyContent: "center", position: "relative", width: 104 },
-  shopThumbEmoji: { fontSize: 44 },
-  shopBadgeHot: { backgroundColor: color.magenta, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1, position: "absolute", right: -6, top: -6 },
-  shopBadgeNew: { backgroundColor: color.mint, borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1, position: "absolute", right: -6, top: -6 },
-  shopBadgeText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  shopInfo: { flex: 1, minWidth: 0 },
-  shopName: { color: color.ink, fontSize: 14, fontWeight: "700" },
-  shopSub: { color: color.muted, fontSize: 11, marginTop: 3 },
-  shopScore: { alignItems: "flex-end" },
-  shopScoreValue: { color: color.magenta, fontSize: 15, fontWeight: "800" },
-  shopScoreSub: { color: color.muted, fontSize: 11, marginTop: 2 },
-  shopMarks: { borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 9 },
-  shopMark: { backgroundColor: color.surface, borderRadius: 8, color: color.ink, fontSize: 11, fontWeight: "600", paddingHorizontal: 8, paddingVertical: 3 },
-
-  legendToggle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", marginTop: 14, marginBottom: 6, paddingHorizontal: 14, paddingVertical: 11 },
-  legendToggleLeft: { alignItems: "center", flexDirection: "row", gap: 8 },
-  legendToggleIcon: { fontSize: 14 },
-  legendToggleText: { color: color.ink, fontSize: 12.5, fontWeight: "600" },
-  legendArrow: { color: color.muted, fontSize: 11 },
-  legendArrowOpen: { transform: [{ rotate: "180deg" }] },
-  legendGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
-  legendItem: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 8, padding: 9, width: "48%" },
-  legendItemIcon: { fontSize: 14 },
-  legendItemTextWrap: { flex: 1, minWidth: 0 },
-  legendItemLabel: { color: color.ink, fontSize: 11.5, fontWeight: "700" },
-  legendItemDetail: { color: color.muted, fontSize: 11, lineHeight: 13, marginTop: 1 },
-
-  modalOverlay: { backgroundColor: "rgba(23,19,31,0.55)", flex: 1, justifyContent: "flex-end" },
-  modalSheet: { backgroundColor: color.white, borderTopLeftRadius: 26, borderTopRightRadius: 26, maxHeight: "76%", padding: 20, paddingBottom: 28 },
-  modalDrag: { alignSelf: "center", backgroundColor: color.line, borderRadius: 2, height: 4, marginBottom: 16, width: 40 },
-  modalTop: { alignItems: "center", flexDirection: "row", gap: 12, marginBottom: 15 },
-  modalAvatar: { alignItems: "center", backgroundColor: color.violet, borderRadius: 999, height: 50, justifyContent: "center", width: 50 },
-  modalAvatarText: { color: color.white, fontSize: 18, fontWeight: "800" },
-  modalName: { color: color.ink, fontSize: 17, fontWeight: "800" },
-  modalStatus: { color: color.muted, fontSize: 11.5, marginTop: 3 },
-  modalBlock: { backgroundColor: color.surface, borderRadius: 15, marginBottom: 11, padding: 13 },
-  modalBlockTitle: { color: color.magenta, fontSize: 11, fontWeight: "700", letterSpacing: 0.6, marginBottom: 9, textTransform: "uppercase" },
-  modalRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 7 },
-  modalRowLabel: { color: color.ink, fontSize: 12.5 },
-  modalRowValue: { color: color.ink, fontSize: 12.5, fontWeight: "700" },
-  modalActionRow: { flexDirection: "row", gap: 9, marginTop: 6 },
-  modalCancel: { alignItems: "center", backgroundColor: color.surface, borderRadius: 16, flex: 0.4, paddingVertical: 14 },
-  modalCancelText: { color: color.ink, fontSize: 14, fontWeight: "700" },
-  modalConfirm: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, flex: 1, paddingVertical: 14 },
-  modalConfirmText: { color: color.white, fontSize: 14, fontWeight: "700" }
+  rowCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 9, padding: 12, ...shadows.card },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowTitle: { color: color.ink, fontSize: 14, fontWeight: "700" },
+  rowMeta: { color: color.muted, fontSize: 11, marginTop: 3 }
 });
