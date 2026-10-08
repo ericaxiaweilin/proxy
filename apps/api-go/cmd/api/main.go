@@ -725,7 +725,7 @@ func main() {
 		server.Gravity = gravity.NewPostgres(pool)
 		// TAG-SYSTEM-001：标签层（粗粒度位置写入 + 运营读取）。
 		tagPG := tagging.NewPostgres(pool)
-		server.Tagging = &tagging.Commands{Sink: tagPG}
+		server.Tagging = &tagging.Commands{Sink: tagPG, Store: tagPG}
 		server.TagStore = tagPG
 		// OPS-RESEARCH-001：实验注册 + 影子评估（控制台 /v1/operator/research）。
 		// 判定内核包 runtime.Decide —— 组合根做 map↔struct 适配，research 包不依赖 experience/runtime。
@@ -765,7 +765,7 @@ func main() {
 				if len(mine) > 0 {
 					for _, id := range ids {
 						if theirs := tagSvc.TagsFor(ctx, id, tagging.UseMatching); len(theirs) > 0 {
-							fit := tagging.Overlap(mine, theirs)
+							fit := tagging.Affinity(mine, theirs, time.Now().UTC())
 							sig := signals[id]
 							sig.TagFit = &fit
 							signals[id] = sig

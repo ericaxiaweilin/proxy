@@ -300,6 +300,112 @@ func (p *Postgres) loadSignals(ctx context.Context, since time.Time, valid strin
 		return err
 	}
 
+	// 2b) 内容话题：看过的帖子（被动，过同意）+ 自己发的帖子（主动）。正文在 Go 里抽话题。
+	rows, err = p.pool.Query(ctx, `
+		SELECT e.actor_id, p.body, COUNT(*), COALESCE(SUM(e.watch_ms), 0)::float8 / 30000.0, MIN(e.created_at), MAX(e.created_at)
+		FROM localnet.interaction_events e
+		JOIN localnet.posts p ON p.id = e.target_id
+		WHERE e.event_type = 'POST_IMPRESSION' AND e.target_type = 'POST'
+		  AND e.created_at >= $1 AND e.watch_ms > 0 AND p.body <> ''
+		  AND `+valid+`
+		GROUP BY e.actor_id, p.id, p.body`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, body string
+		var n int
+		var w float64
+		var first, last time.Time
+		if err := rows.Scan(&user, &body, &n, &w, &first, &last); err != nil {
+			rows.Close()
+			return err
+		}
+		for _, topic := range ExtractTopics(body) {
+			push(user, Signal{Axis: AxisInterestTopic, Value: topic, Weight: w, N: 1, First: first, Last: last})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows, err = p.pool.Query(ctx, `
+		SELECT author_id, body, created_at FROM localnet.posts
+		WHERE author_type = 'USER' AND status = 'PUBLISHED' AND created_at >= $1 AND body <> ''`, since)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, body string
+		var at time.Time
+		if err := rows.Scan(&user, &body, &at); err != nil {
+			rows.Close()
+			return err
+		}
+		for _, topic := range ExtractTopics(body) {
+			push(user, Signal{Axis: AxisInterestTopic, Value: topic, Weight: 1.5, N: 1, First: at, Last: at, Explicit: true})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 2c) 交易侧：自己下过的单（需求方）与完成过的单（服务方）。交易事实，不需要浏览同意；窗口放宽到 90 天。
+	orderSince := since.Add(-62 * 24 * time.Hour)
+	rows, err = p.pool.Query(ctx, `
+		SELECT o.requester_id, COALESCE(o.snapshot->>'serviceSku',''), COALESCE((NULLIF(o.snapshot->>'agreedCompensation',''))::bigint, 0),
+		       COALESCE(o.snapshot->>'scenario',''), COALESCE(o.snapshot->>'startTime',''), o.created_at
+		FROM fulfillment.orders o WHERE o.lifecycle <> 'CANCELLED' AND o.created_at >= $1`, orderSince)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, sku, scenario, start string
+		var amount int64
+		var at time.Time
+		if err := rows.Scan(&user, &sku, &amount, &scenario, &start, &at); err != nil {
+			rows.Close()
+			return err
+		}
+		for _, sg := range []Signal{
+			{Axis: AxisOrderService, Value: sku},
+			{Axis: AxisPriceBand, Value: PriceBandOf(amount)},
+			{Axis: AxisOrderScenario, Value: scenario},
+			{Axis: AxisTimeSlot, Value: TimeSlotOf(start)},
+		} {
+			if sg.Value == "" {
+				continue
+			}
+			sg.Weight, sg.N, sg.First, sg.Last, sg.Explicit = 1, 1, at, at, true
+			push(user, sg)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows, err = p.pool.Query(ctx, `
+		SELECT COALESCE(ap.user_account_id, o.agent_id), COALESCE(o.snapshot->>'serviceSku',''), o.updated_at
+		FROM fulfillment.orders o LEFT JOIN supply.agent_profiles ap ON ap.agent_id = o.agent_id
+		WHERE o.lifecycle = 'COMPLETED' AND o.updated_at >= $1 AND COALESCE(o.snapshot->>'serviceSku','') <> ''`, orderSince)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user, sku string
+		var at time.Time
+		if err := rows.Scan(&user, &sku, &at); err != nil {
+			rows.Close()
+			return err
+		}
+		push(user, Signal{Axis: AxisExpertiseService, Value: sku, Weight: 1, N: 1, First: at, Last: at, Explicit: true})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
 	// 3) 声明：她自己写在接单资料里的服务能力 / 垂类 / 语种。当前状态，不是行为，不需要浏览同意。
 	for _, q := range []struct{ axis, sql string }{
 		{AxisSkill, `SELECT ap.user_account_id, s.service_type FROM supply.agent_profiles ap

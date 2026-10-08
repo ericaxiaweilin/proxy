@@ -15,18 +15,24 @@ type CoarseSink interface {
 	HasLocationConsent(ctx context.Context, userID string) (bool, error)
 }
 
-// Commands 处理标签层的写命令。目前只有一条：RecordCoarseLocation。
+// Commands 处理标签层的命令：写 RecordCoarseLocation；读 ListMyTags（用户看自己的画像）。
 type Commands struct {
 	Sink CoarseSink
-	Now  func() time.Time
+	// Store 是读自己标签用的；nil 时 ListMyTags 报不可用。
+	Store Store
+	Now   func() time.Time
 }
 
-func (c *Commands) Supports(commandType string) bool { return commandType == "RecordCoarseLocation" }
+func (c *Commands) Supports(commandType string) bool {
+	return commandType == "RecordCoarseLocation" || commandType == "ListMyTags"
+}
 
 func (c *Commands) HandleContext(ctx context.Context, e command.Envelope) command.Result {
 	switch e.CommandType {
 	case "RecordCoarseLocation":
 		return c.recordCoarseLocation(ctx, e)
+	case "ListMyTags":
+		return c.listMyTags(ctx, e)
 	default:
 		return command.Rejected(e, "UNSUPPORTED_COMMAND", "VALIDATION", "NEVER", "tagging.unsupported_command", nil)
 	}
@@ -96,4 +102,33 @@ func number(payload map[string]any, key string) (float64, bool) {
 		return float64(v), true
 	}
 	return 0, false
+}
+
+// listMyTags：用户看**自己**的标签与画像（知情权）。只读自己——actor 就是被读的人，没有 userId 参数，
+// 所以不可能读到别人。读的用途记为 analytics 以外的 "self"：这里直接给全部未过期标签。
+func (c *Commands) listMyTags(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.ID == "" {
+		return command.Rejected(e, "MY_TAGS_REQUIRES_ACTOR", "AUTHENTICATION", "AFTER_USER_ACTION", "tagging.my_tags_requires_actor", nil)
+	}
+	if c.Store == nil {
+		return command.Rejected(e, "MY_TAGS_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "tagging.my_tags_unavailable", nil)
+	}
+	tags, err := c.Store.TagsOf(ctx, e.Actor.ID)
+	if err != nil {
+		return command.Rejected(e, "MY_TAGS_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "tagging.my_tags_unavailable", nil)
+	}
+	now := time.Now().UTC()
+	if c.Now != nil {
+		now = c.Now().UTC()
+	}
+	live := make([]Tag, 0, len(tags))
+	for _, t := range tags {
+		if t.ExpiresAt.After(now) {
+			t.UserID = ""
+			live = append(live, t)
+		}
+	}
+	res := command.Accepted(e, "UserTags", e.Actor.ID, 1, "LISTED", nil)
+	res.Body = map[string]any{"profile": BuildProfile("", live, 8), "tags": live}
+	return res
 }

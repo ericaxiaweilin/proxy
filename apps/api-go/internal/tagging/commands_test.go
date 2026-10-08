@@ -76,3 +76,25 @@ func TestCoarseLocationNeedsBothConsentsAndStoresOnlyTheCell(t *testing.T) {
 		t.Fatalf("out-of-range coordinates: %+v", res.Error)
 	}
 }
+
+func TestListMyTagsReadsOnlyTheCallersOwnLiveTags(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemory()
+	_ = m.ReplaceUserTags(ctx, "me", []Tag{
+		{Axis: AxisInterestTopic, Value: "摄影", Strength: .7, Confidence: .8, ExpiresAt: now.Add(time.Hour), UserID: "me"},
+		{Axis: AxisInterestTopic, Value: "过期", Strength: .7, Confidence: .8, ExpiresAt: now.Add(-time.Hour), UserID: "me"},
+	})
+	_ = m.ReplaceUserTags(ctx, "someone_else", []Tag{{Axis: AxisInterestTopic, Value: "桌游", Strength: 1, Confidence: 1, ExpiresAt: now.Add(time.Hour)}})
+	c := &Commands{Store: m, Now: func() time.Time { return now }}
+	res := c.HandleContext(ctx, command.Envelope{CommandType: "ListMyTags", Actor: command.Actor{ID: "me"}, Payload: map[string]any{"userId": "someone_else"}})
+	if res.Error != nil {
+		t.Fatalf("list: %+v", res.Error)
+	}
+	tags, _ := res.Body["tags"].([]Tag)
+	if len(tags) != 1 || tags[0].Value != "摄影" || tags[0].UserID != "" {
+		t.Fatalf("only my live tag, with no user id echoed, even if a payload asks for another user: %+v", tags)
+	}
+	if anon := c.HandleContext(ctx, command.Envelope{CommandType: "ListMyTags"}); anon.Error == nil || anon.Error.ErrorCode != "MY_TAGS_REQUIRES_ACTOR" {
+		t.Fatalf("anonymous must be refused: %+v", anon.Error)
+	}
+}

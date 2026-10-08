@@ -240,3 +240,93 @@ func TestFineGrainedTagsFromVenuesCreatorsAndDeclaredProfile(t *testing.T) {
 		}
 	}
 }
+
+// TAG-SYSTEM-003：内容话题（看过 + 自己发过）与交易侧标签对真库；画像按轴汇总、余弦相似度能区分近远。
+func TestTopicAndOrderTagsBuildAFinePictureAndCosineSeparatesPeople(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	poster, viewer, buyer, stranger := "u_tp_a_"+stamp, "u_tp_v_"+stamp, "u_tp_b_"+stamp, "u_tp_x_"+stamp
+	agent := "u_tp_agent_" + stamp
+	users := []string{poster, viewer, buyer, stranger, agent}
+	posts := []string{"p_tp1_" + stamp, "p_tp2_" + stamp}
+	orders := []string{"o_tp1_" + stamp, "o_tp2_" + stamp}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM tag.user_tags WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.interaction_events WHERE actor_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM privacy.purpose_consents WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.posts WHERE id = ANY($1)`, posts)
+		_, _ = pool.Exec(bg, `DELETE FROM fulfillment.orders WHERE id = ANY($1)`, orders)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+
+	// poster 发了两篇带话题的帖子（主动）：摄影 + 徒步 / 咖啡 + 摄影。
+	exec(`INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status) VALUES ($1,'USER',$2,'周末徒步，路上拍了好多照片 #摄影',$3,'PUBLISHED'),($4,'USER',$2,'新发现一家咖啡店，出片很好看',$3,'PUBLISHED')`, posts[0], poster, now.Add(-2*time.Hour), posts[1])
+	// viewer 同意后各看了两篇 40 秒。
+	exec(`INSERT INTO privacy.purpose_consents (id, user_id, purpose, policy_version, action, acted_at, source) VALUES ($1,$2,'RECOMMENDATION','2026-10-08','GRANT',$3,'TEST')`, "pc_tp_"+stamp, viewer, now.Add(-72*time.Hour))
+	for i, pid := range []string{posts[0], posts[1], posts[0], posts[1]} {
+		exec(`INSERT INTO localnet.interaction_events (event_id, event_type, actor_id, target_type, target_id, created_at, watch_ms) VALUES ($1,'POST_IMPRESSION',$2,'POST',$3,$4,40000)`,
+			fmt.Sprintf("evt_tp_%s_%d", stamp, i), viewer, pid, now.Add(-time.Duration(i+1)*time.Hour))
+	}
+	// buyer 下了两单（150K / 周六晚），agent 完成了其中一单。
+	snap := func(sku string, amount int64) string {
+		return fmt.Sprintf(`{"serviceSku":%q,"agreedCompensation":%d,"scenario":"ordinary","startTime":"2026-10-10T13:00:00Z"}`, sku, amount)
+	}
+	exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at) VALUES ($1,$2,$3,'n1','COMPLETED',$4::jsonb,$5,$5),($6,$2,$3,'n2','CONFIRMED',$7::jsonb,$5,$5)`,
+		orders[0], buyer, agent, snap("CITY_COMPANION", 150000), now.Add(-time.Hour), orders[1], snap("CITY_COMPANION", 200000))
+
+	store := tagging.NewPostgres(pool)
+	if _, err := tagging.Recompute(ctx, store, now); err != nil {
+		t.Fatalf("Recompute: %v", err)
+	}
+	tagsOf := func(u string) []tagging.Tag {
+		tags, err := store.TagsOf(ctx, u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tags
+	}
+	has := func(u, axis, value string) bool {
+		for _, tg := range tagsOf(u) {
+			if tg.Axis == axis && tg.Value == value {
+				return true
+			}
+		}
+		return false
+	}
+	for _, topic := range []string{"摄影", "徒步", "咖啡"} {
+		if !has(viewer, tagging.AxisInterestTopic, topic) {
+			t.Errorf("viewer dwelt on posts about %s: should have the topic tag", topic)
+		}
+	}
+	if !has(poster, tagging.AxisInterestTopic, "摄影") {
+		t.Error("poster wrote two posts touching 摄影 (explicit)")
+	}
+	if has(stranger, tagging.AxisInterestTopic, "摄影") {
+		t.Error("someone who never saw or wrote anything has no topic tags")
+	}
+	for _, want := range [][2]string{{tagging.AxisOrderService, "CITY_COMPANION"}, {tagging.AxisPriceBand, "100K_300K"}, {tagging.AxisOrderScenario, "ordinary"}, {tagging.AxisTimeSlot, "WEEKEND_EVENING"}} {
+		if !has(buyer, want[0], want[1]) {
+			t.Errorf("buyer should have %s:%s", want[0], want[1])
+		}
+	}
+	if !has(agent, tagging.AxisExpertiseService, "CITY_COMPANION") {
+		t.Error("the agent completed an order: expertise tag")
+	}
+
+	now = time.Now().UTC()
+	close, far := tagging.Affinity(tagsOf(poster), tagsOf(viewer), now), tagging.Affinity(tagsOf(poster), tagsOf(buyer), now)
+	if close <= far {
+		t.Errorf("poster and viewer share topics; poster and buyer share nothing: close=%v far=%v", close, far)
+	}
+	if p := tagging.BuildProfile(viewer, tagsOf(viewer), 5); p.AxisCount == 0 || p.Summary == "" {
+		t.Errorf("viewer should have a non-empty profile: %+v", p)
+	}
+}

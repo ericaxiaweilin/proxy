@@ -45,6 +45,13 @@ const (
 	AxisCreatorAffinity = "CREATOR_AFFINITY"
 	AxisSkill           = "SKILL"
 	AxisLanguage        = "LANGUAGE"
+	// TAG-SYSTEM-003：内容话题与交易侧。
+	AxisInterestTopic    = "INTEREST_TOPIC"
+	AxisOrderService     = "ORDER_SERVICE"
+	AxisPriceBand        = "PRICE_BAND"
+	AxisOrderScenario    = "ORDER_SCENARIO"
+	AxisTimeSlot         = "TIME_SLOT"
+	AxisExpertiseService = "EXPERTISE_SERVICE"
 )
 
 // Use 是读标签的人报上的用途（规格 §3.2 allowed_use）。
@@ -96,6 +103,41 @@ var axes = []Axis{
 	// 声明：她自己写在接单资料里的能力 / 语种，是当前状态。
 	{AxisSkill, "声明的服务能力", "POSITIVE", 365 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0.5, 1, true},
 	{AxisLanguage, "声明的语种", "POSITIVE", 365 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 0.5, 1, true},
+	// 内容话题：看（被动，要同意）+ 自己发（主动）带这个话题的帖子。两条独立信号才出。
+	{AxisInterestTopic, "内容话题", "POSITIVE", 28 * 24 * time.Hour, "RECOMMENDATION", []Use{UseRecommendation, UseMatching, UseAnalytics}, 4, 2, false},
+	// 交易侧：用户自己下过的单（交易事实，不需要浏览同意）。
+	{AxisOrderService, "买过的服务", "POSITIVE", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
+	{AxisPriceBand, "消费价位", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
+	{AxisOrderScenario, "消费场景", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
+	{AxisTimeSlot, "下单时段偏好", "NEUTRAL", 90 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 2, 1, false},
+	// 供给侧：她实际完成过什么（比声明更可信）。
+	{AxisExpertiseService, "完成过的服务", "POSITIVE", 180 * 24 * time.Hour, "", []Use{UseRecommendation, UseMatching, UseAnalytics}, 3, 1, false},
+}
+
+// PriceBandOf 把约定报酬（VND）分档。档位是产品口径，改了要同步迁移说明；<=0 返回空（不编）。
+func PriceBandOf(vnd int64) string {
+	switch {
+	case vnd <= 0:
+		return ""
+	case vnd < 100_000:
+		return "LT_100K"
+	case vnd < 300_000:
+		return "100K_300K"
+	case vnd < 800_000:
+		return "300K_800K"
+	default:
+		return "GE_800K"
+	}
+}
+
+// TimeSlotOf 把订单开始时间归到时段桶（越南时间）；解析不了返回空。
+func TimeSlotOf(start string) string {
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(start))
+	if err != nil {
+		return ""
+	}
+	v := VietnamTime(t)
+	return bucketOf(v.Weekday(), v.Hour())
 }
 
 // Axes 返回词表（拷贝）。
