@@ -106,3 +106,27 @@ func (p *Postgres) Distribution(ctx context.Context) ([]Bucket, error) {
 }
 
 func itoa(n int) string { return string(rune('0' + n)) }
+
+type Entry struct {
+	Reason    string    `json:"reason"`
+	Delta     int       `json:"delta"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// Recent：最近的几笔积分（给用户自己看「分是怎么来的」）。
+func (p *Postgres) Recent(ctx context.Context, k Kind, id string, limit int) ([]Entry, error) {
+	rows, err := p.pool.Query(ctx, `SELECT reason, delta, created_at FROM growth.point_ledger WHERE subject_kind = $1 AND subject_id = $2 ORDER BY created_at DESC, id LIMIT $3`, string(k), id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Entry{}
+	for rows.Next() {
+		var e Entry
+		if err := rows.Scan(&e.Reason, &e.Delta, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}

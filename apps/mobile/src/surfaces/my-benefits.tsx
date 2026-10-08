@@ -8,6 +8,8 @@ import { ProxyLoading } from "../components/proxy-foundation";
 import { BenefitClient, BenefitError } from "../benefit-client";
 import { GrowthClient, GrowthError, type BenefitRow, type Egg, type GrowthSummary, type Task, type TierBenefit, type TierCompareRow } from "../growth-client";
 import { BenefitHubSurface } from "./benefit-hub";
+import { fetchIdentityTier, reasonLabel, tierLabel, tierProgress, type IdentityTier } from "../identity-tier-client";
+import { sessionAuthClient } from "../native-clients";
 
 // GROWTH-REAL-DATA-001: this surface replaces a mockup that showed a
 // complete tier/growth-value/task/egg system with entirely invented
@@ -97,6 +99,7 @@ export function MyGrowthSurface({
 
   return (
     <View>
+      <UserTierCard />
       {/* Hero */}
       <View style={styles.hero}>
         <View style={styles.heroHead}>
@@ -369,4 +372,38 @@ const styles = StyleSheet.create({
   infoNoteText: { color: color.ink, fontSize: 12, fontWeight: "700" },
   retryButton: { alignSelf: "flex-start", marginTop: 8 },
   retryButtonText: { color: color.violet, fontSize: 12, fontWeight: "900" },
+});
+
+// 我的身份等级（用户通用：铜 / 银 / 金 × 1–3 星）。读不到就不画；积分不是钱，不能提现。
+function UserTierCard(): React.JSX.Element | null {
+  const [tier, setTier] = useState<IdentityTier>();
+  useEffect(() => {
+    let cancelled = false;
+    void fetchIdentityTier(sessionAuthClient).then((t) => { if (!cancelled) setTier(t); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!tier) return null;
+  const l = tier.level;
+  return (
+    <View style={tierStyles.card} testID="user-tier-card">
+      <Text selectable style={tierStyles.title}>{tierLabel(l)} <Text style={tierStyles.points}>{l.points} 积分</Text></Text>
+      <View style={tierStyles.bar}><View style={[tierStyles.fill, { width: `${tierProgress(l)}%` }]} /></View>
+      <Text selectable style={tierStyles.sub}>{l.next && l.toNext !== undefined ? `距离 ${tierLabel(l.next)} 还差 ${l.toNext} 积分` : "已是最高等级"}</Text>
+      {tier.earnRules.length > 0 ? (
+        <Text selectable style={tierStyles.sub}>{tier.earnRules.map((r) => `${r.label} +${r.points}`).join(" · ")}</Text>
+      ) : null}
+      {tier.recent.length > 0 ? (
+        <Text selectable style={tierStyles.sub}>最近：{tier.recent.slice(0, 3).map((e) => `${reasonLabel(e.reason)} +${e.delta}`).join("　")}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+const tierStyles = StyleSheet.create({
+  card: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, marginBottom: 12, padding: 14 },
+  title: { color: color.ink, fontSize: 18, fontWeight: "800" },
+  points: { color: color.muted, fontSize: 13, fontWeight: "600" },
+  bar: { backgroundColor: color.line, borderRadius: 3, height: 6, overflow: "hidden" },
+  fill: { backgroundColor: color.violet, height: 6 },
+  sub: { color: color.muted, fontSize: 12, lineHeight: 17 },
 });
