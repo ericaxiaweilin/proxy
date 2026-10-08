@@ -33,6 +33,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/matching"
 	"github.com/proxy-app/proxy-api/internal/media"
 	"github.com/proxy-app/proxy-api/internal/moderation"
+	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/notification"
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
@@ -131,6 +132,8 @@ type Server struct {
 	NumberLookup *numberlookup.Service
 	// Tagging：标签层的写命令（RecordCoarseLocation）与运营读取（TAG-SYSTEM-001）。
 	Tagging      *tagging.Commands
+	// Insight：需求缺口与标签分群读模型（OPS-INSIGHT-001）。
+	Insight      insight.Source
 	TagStore     tagging.Store
 	// PolicyDecisions is the LC-28 audit-log writer. The
 	// fulfillment service uses it to gate the OFFERED →
@@ -250,6 +253,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/experience/surface", s.experienceSurface)
 	mux.HandleFunc("/v1/experience/delta", s.experienceDelta)
 	mux.HandleFunc("/v1/experience/metrics", s.experienceMetrics)
+	mux.HandleFunc("/v1/operator/demand-gap", s.operatorConsole(s.operatorDemandGap))
+	mux.HandleFunc("/v1/operator/insights", s.operatorConsole(s.operatorInsights))
 	mux.HandleFunc("/v1/operator/context-field", s.operatorConsole(s.operatorContextField))
 	mux.HandleFunc("/v1/operator/surface-plans", s.operatorConsole(s.operatorSurfacePlans))
 	mux.HandleFunc("/v1/operator/execution-runtime", s.operatorConsole(s.operatorExecutionRuntime))

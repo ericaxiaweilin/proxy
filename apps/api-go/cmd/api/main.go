@@ -41,6 +41,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/numberlookup"
 	"github.com/proxy-app/proxy-api/internal/operatoraudit"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
+	"github.com/proxy-app/proxy-api/internal/insight"
 	"github.com/proxy-app/proxy-api/internal/tagging"
 	"github.com/proxy-app/proxy-api/internal/ordernumber"
 	"github.com/proxy-app/proxy-api/internal/outcome"
@@ -724,6 +725,7 @@ func main() {
 		server.OpsMetrics = opsmetrics.NewPostgres(pool)
 		server.Gravity = gravity.NewPostgres(pool)
 		// TAG-SYSTEM-001：标签层（粗粒度位置写入 + 运营读取）。
+		server.Insight = insight.NewPostgres(pool)
 		tagPG := tagging.NewPostgres(pool)
 		server.Tagging = &tagging.Commands{Sink: tagPG, Store: tagPG}
 		server.TagStore = tagPG
