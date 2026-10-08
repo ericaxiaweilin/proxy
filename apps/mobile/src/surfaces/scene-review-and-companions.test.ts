@@ -51,19 +51,34 @@ describe("SCENE-COMPANION-001 companion suggestions never leak to anonymous or n
   });
 
   it("does not wire real suggestions into the DIRECT_INVITE selection chain (no shape to fake it with)", () => {
-    // 真实同行推荐这轮只展示，不接 selectedHumanId——那条链认的是
-    // detail.humans 的 FIXTURE 形状。真实人渲染必须是普通 View，不是
-    // Pressable 调用 setSelectedHumanId。
+    // 真实同行推荐这轮只展示，不接 selectedHumanId —— 那条链认的是 detail.humans
+    // 的形状。真实人渲染必须是普通 View，不是调用 setSelectedHumanId 的 Pressable。
+    // 区域边界原来用的是 `detail.humans.length > 0`（下面那块占位 rail 的起点），
+    // DEMO-CUT-001 把它摘了之后边界改钉匹配卡的下一节标题行 —— 钉的东西没变，
+    // 只是不再依赖一段已经不存在的 markup。
     const companionBlock = mapCode.slice(
       mapCode.indexOf("companionSuggestions && companionSuggestions.length > 0"),
-      mapCode.indexOf("detail.humans.length > 0"),
+      mapCode.indexOf("styles.sectionTitleRow"),
     );
+    expect(companionBlock.length).toBeGreaterThan(0);
     expect(companionBlock).not.toContain("setSelectedHumanId");
+    expect(companionBlock).not.toContain("<Pressable");
   });
 
-  it("keeps the honestly-labeled FIXTURE as the fallback when there is no real match", () => {
-    expect(mapCode).toContain("· 占位候选");
-    expect(mapCode).toContain("detail.humans.length > 0");
+  it("renders nothing instead of a placeholder fallback when there is no real match", () => {
+    // 原来这条钉的是「没有真实命中时退回诚实标注的 FIXTURE」，字面量是
+    // `expect(mapCode).toContain("· 占位候选")` + `toContain("detail.humans.length > 0")`。
+    // DEMO-CUT-001（2026-10-08）删的就是这个 fallback：这一块是选人的付费决策点，
+    // 「诚实标注过的占位人」也还是一个不存在的人。现在没有命中就整块不画 ——
+    // 而"不画"必须钉住，否则占位 rail 悄悄挂回来照样绿。
+    expect(mapCode).not.toContain("detail.humans.length > 0");
+    expect(mapCode).not.toContain("detail.humans.map");
+    expect(mapCode).not.toContain('{human.source === "FIXTURE" ? " · 占位候选" : ""}');
+    expect(mapCode).toMatch(
+      /companionSuggestions && companionSuggestions\.length > 0 \?\s*\(\s*<>[\s\S]*?<\/>\s*\) : null\}/,
+    );
+    // 确认单里那一处还照旧明说这是占位供给（本轮没动，也不许悄悄长得像真人）。
+    expect(mapCode).toContain('" · 占位候选，尚未接入真实供给"');
   });
 });
 

@@ -2,18 +2,24 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-// SPORT-BADMINTON-001：home 场景「运动 · 羽毛球」卡片 + 它点进去那张表的**接线**。
+// SPORT-BADMINTON-001：陪打整页（列表 → 选择城市 → 详情）的**接线**。
 //
 // 为什么是源码级 tripwire 而不是渲染测试：这个仓库的 surface 测试都是读源码的
 // （placeholder-honest-actions / subpage-generic-fabricated 都是），
 // vitest 这边没有 RN 渲染器。能做成真行为测试的部分（筛选、排序、取词、高亮）
 // 全在 ../badminton-companion.test.ts 里 —— 这个文件只钉「界面有没有真的接上」。
 //
-// 这个文件同时钉四件事：
-//   · 卡片在首页、点了开整页、而且**没有**编出来的「N 家」角标；
+// DEMO-CUT-001（2026-10-08）：首页那张「运动 · 羽毛球 陪打」入口卡已经从
+// scene-activity-discovery.tsx 摘掉 —— 那不是入口，是一整屏写死的陪打供给的入口。
+// 数据模型（本文件的 surface = surfaces/badminton-companion.tsx 与
+// ../badminton-companion.ts）按规格原地保留，所以下面所有 surface 的断言照旧有效；
+// 变的只有 scene 那半边：原来钉「卡长什么样」，现在钉「卡不许在」。
+//
+// 本文件对 surface 钉四件事：
 //   · 整页只有**一个** Modal（iOS 一次只呈现一个，套第二层会被无声吞掉）；
 //   · 演示数据的提示行在，且详情页不写「已通过 KYC 认证」这种没人做过的核验结论；
-//   · 原型里那些没接线的控件（四个筛选 chip、预约陪打）在这里都真的接上了。
+//   · 原型里那些没接线的控件（四个筛选 chip、预约陪打）在这里都真的接上了；
+//   · 表头走公共组件、让开状态栏。
 const here = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 const surfaceRaw = readFileSync(here("./badminton-companion.tsx"), "utf8");
 const sceneRaw = readFileSync(here("../components/scene-activity-discovery.tsx"), "utf8");
@@ -26,78 +32,51 @@ const stripComments = (source: string): string =>
 const surface = stripComments(surfaceRaw);
 const scene = stripComments(sceneRaw);
 
-// 首页那张卡的 JSX 片段：从它的 accessibilityLabel 到第一个 </Pressable>。
-// 剥注释后再取，所以卡上方那段解释性注释不会混进来。
-function cardBlock(): string {
-  const start = scene.indexOf('accessibilityLabel="运动 羽毛球 陪打"');
-  expect(start, "首页找不到运动 · 羽毛球那张卡").toBeGreaterThan(-1);
-  const end = scene.indexOf("</Pressable>", start);
-  expect(end, "那张卡没有闭合的 </Pressable>").toBeGreaterThan(start);
-  return scene.slice(start, end);
-}
-
-describe("SPORT-BADMINTON-001 首页入口卡", () => {
-  it("卡上不许挂「N 家」角标，也不许把持证说成事实", () => {
-    // 反向臂写在前面：正向臂是「卡上有标题」，如果先跑正向臂，
-    // 把整张卡换成一个带角标的版本时正向臂仍然绿、这条反向臂根本不会被求值。
-    const card = cardBlock();
-    // 卡现在和旁边那几张入口卡**共用** entryCountPill 版式（用户要求它别再是一行 list），
-    // 但胶囊里只能有一个「›」—— 不许出现计数文字，也不许出现任何计数插值。
-    expect(card).toContain("entryCountChevron");
-    expect(card).not.toContain("entryCountText");
-    expect(card).not.toContain("entry.count");
-    expect(card).not.toContain("entry.unit");
-    expect(card).not.toContain("家");
-    // 「场馆持证」是合规性断言，演示数据没资格在首页就把它写成事实。
-    // 它在表面内部出现，和顶部那条演示数据提示行在一起。
-    expect(card).not.toContain("场馆持证");
+// DEMO-CUT-001：原来这里是一个 cardBlock() 助手 —— 从卡的 accessibilityLabel
+// 切到第一个 </Pressable>，供下面几条断言取卡内 markup。卡没了，助手跟着没；
+// 取而代之的是「卡的每一段 markup 都不许出现在首页组件里」。
+describe("SPORT-BADMINTON-001 / DEMO-CUT-001 首页不再有「运动 · 羽毛球 陪打」那张卡", () => {
+  it("入口卡的每一段 markup 都不在首页组件里", () => {
+    expect(scene).not.toContain("sportCard");
+    expect(scene).not.toContain('accessibilityLabel="运动 羽毛球 陪打"');
+    expect(scene).not.toContain("运动 · 羽毛球");
+    expect(scene).not.toContain("陪打 · 场馆 · 按小时计费");
+    // 反向臂跟着翻：资质断言本来就禁在首页，卡没了更不许有人把它写回来。
+    expect(scene).not.toContain("场馆持证");
   });
 
-  it("它是大图卡，不是一行 list（用户：「大卡片怎么成了 list 了」）", () => {
-    const card = cardBlock();
-    // 版式必须和旁边那几张入口卡**同源**：同一段渐变、同一个内容块、同一个角标胶囊。
-    expect(card).toContain("styles.entryShade");
-    expect(card).toContain("styles.entryContent");
-    expect(card).toContain("styles.entryTitle");
-    expect(card).toContain("styles.entrySub");
-    expect(card).toContain("styles.entryCountPill");
-    // 反向臂：不许退回那种「图标 + 标题 + 副标题 + ›」的横排窄卡。
-    expect(card).not.toContain("sportBody");
-    expect(card).not.toContain("sportChevron");
-    // 尺寸和 entryCard 对齐（圆角 22 / minHeight 224 / 内容压左下）。
-    // 只钉这三个不变量，不钉整行样式串 —— 免得改个间距顺序就假红。
-    const styleBlock = scene.slice(scene.indexOf("sportCard: {"));
-    const styleLine = styleBlock.slice(0, styleBlock.indexOf("},"));
-    expect(styleLine).toContain("borderRadius: 22");
-    expect(styleLine).toContain("minHeight: 224");
-    expect(styleLine).toContain('justifyContent: "flex-end"');
+  it("陪打整页不再被首页 import / 挂载，state 与开关一起走", () => {
+    expect(scene).not.toContain("BadmintonCompanion");
+    expect(scene).not.toContain("badmintonOpen");
+    expect(scene).not.toContain("setBadmintonOpen");
+    // 原来钉「只挂一次」，因为挂两次会同时 present 两个全屏 Modal，iOS 上第二个
+    // 被无声吞掉。现在正确挂载数是 0 —— 多一个都不行。
+    expect((scene.match(/<BadmintonCompanion/g) ?? []).length).toBe(0);
   });
 
-  it("卡上写的是运动 · 羽毛球，副标题描述服务形态", () => {
-    const card = cardBlock();
-    expect(card).toContain("运动 · 羽毛球");
-    expect(card).toContain("陪打 · 场馆 · 按小时计费");
+  it("不再从动作表里专门挖一个图标喂那张卡", () => {
+    expect(scene).not.toContain("SPORT_ACTION_ICON");
   });
 
-  it("卡点下去开的是陪打整页，不是场景目录那条路", () => {
-    const card = cardBlock();
-    expect(card).toContain("setBadmintonOpen(true)");
-    // 反向臂：它不该走「场景分类」入口那条路（那是场馆目录，不是陪打人列表）。
-    expect(card).not.toContain("setDirectoryEntry");
+  it("真实入口卡还在：列表照旧渲染，共用版式没被连着删", () => {
+    // 摘的是那张演示卡，不是这一屏。入口来自分类数据，走的还是同一个
+    // renderEntryCard —— 大图的渐变、内容块、角标胶囊都还得在。
+    expect(scene).toContain("visibleEntries.map(renderEntryCard)");
+    expect(scene).toContain("styles.entryShade");
+    expect(scene).toContain("styles.entryContent");
+    expect(scene).toContain("styles.entryTitle");
+    expect(scene).toContain("styles.entrySub");
+    expect(scene).toContain("styles.entryCountPill");
+    expect(scene).toContain("styles.entryCountChevron");
+    // 真实入口卡的计数照常存在（来自分类数据 entry.count / entry.unit）——
+    // 「不许挂计数」从来只针对那张演示卡：旁边那几张本来就有真数据可数。
+    expect(scene).toContain("{entry.count} {entry.unit}");
   });
 
-  it("整页接在首页组件上，且开关成对", () => {
-    expect(scene).toContain('import { BadmintonCompanion } from "../surfaces/badminton-companion";');
-    expect(scene).toContain("<BadmintonCompanion onClose={() => setBadmintonOpen(false)} visible={badmintonOpen} />");
-    expect(scene).toContain("const [badmintonOpen, setBadmintonOpen] = useState(false);");
-    // 只挂一次 —— 挂两次会同时 present 两个全屏 Modal，iOS 上第二个被吞掉。
-    expect((scene.match(/<BadmintonCompanion/g) ?? []).length).toBe(1);
-  });
-
-  it("运动图标复用动作表那一份，不另 require 一遍", () => {
-    expect(scene).toContain('const SPORT_ACTION_ICON: ImageSource = ACTIONS.find((action) => action.id === "sport")!.icon;');
-    // 反向臂：卡里不许再 require 同一个 svg（两处各一份，换图标只换一处）。
-    expect(cardBlock()).not.toContain("require(");
+  it("动作枚举里那一行「羽毛球」留着 —— 那是数据，不是入口卡", () => {
+    // scene-activity-discovery.test.ts 钉的就是这一行：摘掉首页入口卡不等于
+    // 删动作表（选了细分动作时仍然要说得清「羽毛球」属于 sport 家族）。
+    expect(scene).toContain('{ id: "badminton", label: "羽毛球", familyId: "sport", matchActionId: "sport"');
   });
 });
 

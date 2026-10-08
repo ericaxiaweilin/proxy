@@ -186,7 +186,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   const [reviewError, setReviewError] = useState<string | undefined>(undefined);
   const [myReviewStars, setMyReviewStars] = useState<number | undefined>(undefined);
   // SCENE-COMPANION-001: 认证态真实同行推荐。undefined = 还没拉到/未登录，
-  // 这时渲染回落到 detail.humans 那个诚实标了"占位候选"的 FIXTURE。
+  // 这时这一块不画（DEMO-CUT-001：不再回落到 detail.humans 的 FIXTURE 候选人）。
   const [companionSuggestions, setCompanionSuggestions] = useState<ReadonlyArray<CompanionSuggestion> | undefined>(undefined);
   // SCENE-PHOTO-WALL-001: 照片墙——只有一组"全部"，不做官方/用户精选分类
   // （全仓没有那条策展管线，编分类不如不分类诚实）。
@@ -357,7 +357,7 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
   }, [authClient, secureSessionStore, selectedId]);
 
   // SCENE-COMPANION-001: 换场景就重拉真实同行推荐——未登录时 session 为
-  // undefined，直接留空（渲染回落到 detail.humans 的诚实 FIXTURE）。
+  // undefined，直接留空（这一块不画，不拿 detail.humans 的 FIXTURE 顶上）。
   useEffect(() => {
     let cancelled = false;
     setCompanionSuggestions(undefined);
@@ -893,10 +893,15 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
             <View style={styles.matchCard}>
               <View style={styles.matchLabelPill}><ProxyIcon color="#E8C25A" name="star" size={11} /><Text selectable style={styles.matchLabelText}>匹配推荐</Text></View>
               <Text selectable style={styles.matchTitle}>适合一起的人</Text>
-              {/* SCENE-COMPANION-001: 已登录且真的命中好友信号时，优先画这个真实
+              {/* SCENE-COMPANION-001: 已登录且真的命中好友信号时，画这条真实
                   横滑——只展示，不接 selectedHumanId/DIRECT_INVITE（那条链认的是
-                  detail.humans 的 FIXTURE 形状，真实同行推荐这轮先不接邀约，避免
-                  用假形状套真数据）。没有真实命中时整段不画，退回下面 FIXTURE。 */}
+                  detail.humans 的形状，真实同行推荐这轮先不接邀约，避免
+                  用假形状套真数据）。
+                  DEMO-CUT-001（2026-10-08）：没有真实命中时这一整块不画。以前这里
+                  会退回 detail.humans 的 FIXTURE 候选人（标着"占位候选"）——那是
+                  付费决策点上最不该出现的东西：用户挑的是一对不存在的人。
+                  邀约链没有断：selectedHumanId 仍由 detail 加载时自动落到
+                  detail.humans[0]（见 useEffect），确认单也照旧显示选中的人。 */}
               {companionSuggestions && companionSuggestions.length > 0 ? (
                 <>
                   <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
@@ -908,25 +913,6 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
                   </HorizontalSwipeRail>
                 </>
               ) : null}
-              {/* SCENE-HUMANS-EMPTY-001: 选人是付费决策点 —— 没有人时必须说出"没有人"，
-                  不能只留标题和一个空横滑（那会被读成"还在加载"）。文案说明它不是一个
-                  失败状态，也不是"再等等就会有人"的承诺。 */}
-              {detail.humans.length > 0 ? (
-              // SWIPE-RAIL-001：可约人头像横滑不能触发外层切页。
-              <HorizontalSwipeRail contentContainerStyle={styles.humanRail} preserveChildPresses threshold={3}>
-                {/* SCENE-HUMANS-002: 纯圆头 rail，不要白卡片 —— 和向导/全 app 行头像统一尺寸
-                    （44，AVATAR-UNIFY-001），名字 + 可约状态居中跟在下面。选中态改用头像外圈紫环
-                    （卡片删了，边框无处可画）；点按仍是“选中邀约对象”，链不断。 */}
-                {detail.humans.map((human) => <Pressable key={human.id} accessibilityLabel={`选择${human.name}`} onPress={() => setSelectedHumanId((prev) => (prev === human.id ? undefined : human.id))} style={styles.humanPlain}><View style={[styles.humanRing, selectedHumanId === human.id && styles.humanRingSelected]}>{humanAvatarUri(human.avatarUrl) !== undefined ? <CircularAvatarImage accessibilityLabel={`${human.name}头像`} size={44} uri={humanAvatarUri(human.avatarUrl)!} /> : <View style={styles.humanAvatarFallback}><Text selectable style={styles.humanAvatarText}>{human.name.slice(0, 1).toUpperCase()}</Text></View>}</View><Text selectable style={styles.humanPlainNameOnDark}>{human.name}</Text><Text selectable style={styles.humanPlainSubOnDark}>{selectedHumanId === human.id ? "✓ 已选择" : human.availability}{human.source === "FIXTURE" ? " · 占位候选" : ""}</Text></Pressable>)}
-                {/* SCENE-HUMANS-001: 只露圆头像 + 名字 + 可约状态。点按仍是“选中邀约对象”
-                    （DIRECT_INVITE 靠 selectedHumanId 找人，链不断）；role 与 fit% 删掉，
-                    可约原文（本周可约/上午可约…）是服务端真值，原样展示不改写。
-                    SCENE-HUMANS-004: rail 只渲染一遍 —— 上面那一行 map 就是全部，
-                    这里不许再挂第二遍（曾经两遍 identical 并排，每个人出现两次）。 */}
-              </HorizontalSwipeRail>
-              ) : (
-                <Text selectable style={styles.humanEmptyOnDark}>还没有挂出可约时间的人。</Text>
-              )}
             </View>
             <View style={styles.sectionTitleRow}><Text selectable style={styles.sectionTitle}>{fullMenuOpen ? `${detail.venueName} · 完整菜单` : "这个 Scene 喝什么"}</Text><Pressable onPress={() => setFullMenuOpen((open) => !open)}><Text selectable style={styles.sectionLink}>{fullMenuOpen ? "只看当前 Scene" : "完整菜单"}</Text></Pressable></View>
             {/* SWIPE-RAIL-001：菜单照片横滑不能触发外层切页。 */}

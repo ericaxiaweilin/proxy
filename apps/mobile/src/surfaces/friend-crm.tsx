@@ -963,17 +963,14 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
         </Pressable>
       ) : null}
 
+      {/* DEMO-CUT-001（2026-10-08）：暖关系 / 待跟进 / 已见面三格与它们的脚注
+          已经不再渲染 —— 那三个数字是从下方"本地好友"演示数据里 filter 出来的，
+          摆在真·好友总数旁边，用户会以为这是自己真实好友的关系画像。
+          服务端好友没有 crmStatus 概念，关系分级要等服务端真的有这个字段再接。
+          好友列表本身、拉黑/解封、下面的关系数据洞察照旧。 */}
       <View style={styles.metricGrid}>
         <View style={styles.metricCard}><Text selectable style={styles.metricValue}>{serverMode ? visible.length + advFriends.length : advFriends.length}</Text><Text selectable style={styles.metricLabel}>好友关系</Text></View>
-        <View style={[styles.metricCard, styles.metricCardActive]}><Text selectable style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "WARM").length}</Text><Text selectable style={styles.metricLabel}>暖关系</Text></View>
-        <View style={styles.metricCard}><Text selectable style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "FOLLOW").length}</Text><Text selectable style={styles.metricLabel}>待跟进</Text></View>
-        <View style={styles.metricCard}><Text selectable style={styles.metricValue}>{advFriends.filter((f) => f.crmStatus === "MET").length}</Text><Text selectable style={styles.metricLabel}>已见面</Text></View>
       </View>
-      {/* CRM-HONEST-001: 暖关系/待跟进/已见面只统计"本地好友"（本机演示，见
-          下面的分区标签），服务端好友没有 crmStatus 概念。三个数字紧挨着上面
-          的"好友关系"总数（真的包含服务端好友），不说清楚这三个只数演示数据，
-          用户会以为这是自己真实好友的关系画像。 */}
-      <Text selectable style={styles.metricFootnote}>暖关系 / 待跟进 / 已见面：基于下方"本地好友"演示数据，服务端好友暂无关系分级</Text>
 
       <View style={styles.insightCard}>
         <View style={styles.insightHead}><Text selectable style={styles.insightTitle}>关系数据洞察</Text>{profileViewStats === undefined || profileViewStats === null ? <View style={styles.insightBadge}><Text selectable style={styles.insightBadgeText}>部分即将上线</Text></View> : null}</View>

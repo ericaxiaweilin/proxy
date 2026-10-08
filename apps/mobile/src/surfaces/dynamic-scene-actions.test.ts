@@ -38,7 +38,16 @@ describe("SCENE-ACTION-MATERIALIZATION-001", () => {
 
   it("renders R27 scene media from the read model instead of placeholders", () => {
     expect(source).toContain("detail.heroImageUrl");
-    expect(source).toContain("human.avatarUrl");
+    // 人头像仍然必须来自读模型 —— 这条钉要守的是这件事，不是某个变量名。
+    // 原来钉的是 `human.avatarUrl`：那是场景详情里那条 detail.humans 占位 rail
+    // 的循环变量，DEMO-CUT-001（2026-10-08）把整条 rail 摘掉了。真实同行 rail
+    // 用 person.avatarUrl，确认单里的邀约对象用 selectedHuman.avatarUrl。
+    expect(source).toContain("person.avatarUrl");
+    expect(source).toContain("selectedHuman.avatarUrl");
+    // 数据模型没跟着渲染一起删：类型守卫仍然逐个校验 human 的 avatarUrl。
+    expect(source).toContain("human.avatarUrl.length > 0");
+    // 反向臂换成 rail 本身：占位候选人不许悄悄挂回来。
+    expect(source).not.toContain("<Pressable key={human.id}");
     expect(source).toContain("item.imageUrl");
     expect(source).toContain('cachePolicy="memory-disk"');
     expect(source).toContain('"这个 Scene 喝什么"');

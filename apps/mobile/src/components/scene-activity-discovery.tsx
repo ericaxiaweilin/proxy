@@ -11,10 +11,6 @@ import { actionsOfMoreCategory, ENTRY_ACTION_IDS, MORE_CATEGORIES, moreCategoryO
 // SCENE-SHOP-DIRECTORY-001：入口卡点进去是原型第 2/3 屏（分类列表 → 单店
 // 详情）。两屏在同一个全屏 Modal 里，返回逐层收。
 import { SceneShopDirectory } from "./scene-shop-directory";
-// SPORT-BADMINTON-001：运动 · 羽毛球入口。原型
-// Downloads/deepseek_html_20260925_e64f86.html（陪打羽毛球：列表 → 选择城市 → 详情）。
-// 数据是演示数据，依据与免责边界写在 ../badminton-companion.ts 文件头。
-import { BadmintonCompanion } from "../surfaces/badminton-companion";
 import { ProxyBackGlyph } from "../components/proxy-foundation";
 
 export type SceneDiscoveryBrief = {
@@ -66,10 +62,6 @@ export const SCENE_ACTIONS: readonly Taxon[] = [
 ] as const;
 
 const ACTIONS = SCENE_ACTIONS;
-
-// SPORT-BADMINTON-001：运动图标从动作表里取，不再 require 一遍同一个 svg
-// —— 两处各自 require，将来换图标只会换一处，剩下一处就是旧的。
-const SPORT_ACTION_ICON: ImageSource = ACTIONS.find((action) => action.id === "sport")!.icon;
 
 /**
  * SCENE-HOME-ENTRY-001（2026-09-24，原型 deepseek_html_20260924_412dba
@@ -349,8 +341,6 @@ export function SceneActivityDiscovery({
     setPickerOpen(false);
     setTimeout(() => setDirectoryEntry(entry), 450);
   };
-  // SPORT-BADMINTON-001：运动 · 羽毛球那张卡。整页是全屏 Modal，自己管三屏切换。
-  const [badmintonOpen, setBadmintonOpen] = useState(false);
   const [assets, setAssets] = useState<SceneAssetCatalog>();
   const safeArea = useSafeAreaInsets();
 
@@ -551,54 +541,6 @@ export function SceneActivityDiscovery({
           Moment 大图卡整体挪进「动作分类」页右侧列表，之前那版的设计没有丢。 */}
       {visibleEntries.length > 0 ? <View style={styles.entryList}>{visibleEntries.map(renderEntryCard)}</View> : <View style={styles.empty}><Text selectable style={styles.emptyTitle}>附近还没有接入真实场景</Text><Text selectable style={styles.emptyText}>场景目录接上后这里会显示分类入口。</Text></View>}
 
-      {/* SPORT-BADMINTON-001（2026-09-25，用户：「home 场景加一个运动·羽毛球卡片，
-          点击进入这个 原型给你了」；紧接着「大卡片怎么成了 list 了」）：运动 · 羽毛球入口。
-          原型 Downloads/deepseek_html_20260925_e64f86.html（陪打羽毛球）。
-
-          四个刻意的决定，改之前先读：
-
-          1) 它**不走 sceneCategoryEntries**。那条路是「真实场景目录的分类入口」，
-             要有真场景才出卡、角标写「N 家」。这里进去的是**陪打人**列表，
-             不是场馆目录 —— 混进那条路就等于把陪打人说成场馆。
-          2) 但**外观必须和旁边那几张入口卡是同一张卡**（用户提过：它不该是一行 list）。
-             所以它复用同一套 entryCard 版式 / entryShade 渐变 / entryContent / 
-             entryCountPill，minHeight 224、圆角 22、标题压左下角。
-          3) 角标胶囊里**没有数字**，只留一个「›」。真实场景目录里没有羽毛球馆
-             （ACTION_SCENE_KEYWORDS 里也没有 sport），挂「N 家」就是编的。
-             这是它和旁边几张卡**唯一**的差别 —— 差在数据，不差在版式。
-          4) 封面**没有真图**（后端没有羽毛球馆的图），所以底色用 ink、把动作表那份
-             sport 图标放在 warn 圆角块上居中 —— 不编一张假照片。
-             副标题只描述**服务形态**（陪打 · 场馆 · 按小时计费），**不带资质断言**。
-             资质是合规性断言，演示数据没资格在首页就把它说成事实；它出现在表面内部、
-             并且和顶部那条演示数据提示行在一起。门禁里有一条 `grep -qF` 反向钉扫这个
-             文件，所以这段注释刻意不写出那句断言的原话 —— 注释里写着它，会把那颗钉
-             自己喂红（REPLY-EMPTY-VIEWER-001 踩过同一个坑）。 */}
-      <Pressable accessibilityLabel="运动 羽毛球 陪打" onPress={() => setBadmintonOpen(true)} style={styles.sportCard}>
-        <View style={styles.sportCover}>
-          <View style={styles.sportGlyph}>
-            <Image contentFit="contain" source={SPORT_ACTION_ICON} style={styles.sportIcon} />
-          </View>
-        </View>
-        {/* 和旁边几张入口卡同一段渐变，只是 id 要唯一（同一份 SVG defs 不能撞名）。 */}
-        <Svg height="100%" pointerEvents="none" style={styles.entryShade} width="100%">
-          <Defs>
-            <SvgLinearGradient id="sceneEntryShade-badminton" x1="0" x2="0" y1="0" y2="1">
-              <Stop offset="0" stopColor="#000000" stopOpacity={0} />
-              <Stop offset="0.62" stopColor="#000000" stopOpacity={0} />
-              <Stop offset="1" stopColor="#000000" stopOpacity={0.48} />
-            </SvgLinearGradient>
-          </Defs>
-          <Rect fill="url(#sceneEntryShade-badminton)" height="100%" width="100%" x="0" y="0" />
-        </Svg>
-        <View style={styles.entryCountPill}>
-          <Text selectable style={styles.entryCountChevron}>›</Text>
-        </View>
-        <View style={styles.entryContent}>
-          <Text selectable style={styles.entryTitle}>运动 · 羽毛球</Text>
-          <Text selectable style={styles.entrySub}>陪打 · 场馆 · 按小时计费</Text>
-        </View>
-      </Pressable>
-
       {/* SCENE-PICKER-WAIMAI-001（2026-09-20）：以前是 动作/场景/主题 三张平铺
           网格竖向堆叠，30+ 个可点目标一次性摆给用户，AND 组合筛选却只过滤
           10 条本地 fixture——大概率筛完是空的，纯负担没收益。改成外卖 App
@@ -762,11 +704,6 @@ export function SceneActivityDiscovery({
         onClose={() => { setDirectoryEntry(undefined); if (returnToPicker) { setReturnToPicker(false); setPickerOpen(true); } }}
         {...(onOpenScene ? { onOpenScene } : {})}
       /> : null}
-
-      {/* SPORT-BADMINTON-001：整页一个全屏 Modal，三屏（列表 / 选择城市 / 详情）
-          在它内部切 state —— 内部再套 Modal 在 iOS 上会被无声吞掉
-          （HOME-MORE-SHEET-004）。 */}
-      <BadmintonCompanion onClose={() => setBadmintonOpen(false)} visible={badmintonOpen} />
     </View>
   );
 }
@@ -801,14 +738,6 @@ const styles = StyleSheet.create({
   entryContent: { padding: 15 },
   entryTitle: { color: color.white, fontSize: 24, fontWeight: "900", textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { height: 1, width: 0 }, textShadowRadius: 4 },
   entrySub: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "700", marginTop: 6 },
-  // SPORT-BADMINTON-001：运动 · 羽毛球那张卡。**和 entryCard 同一张卡**（圆角 22 /
-  // minHeight 224 / 内容压左下 / 同一段渐变），用户提过「大卡片怎么成了 list 了」。
-  // 它没有真实场景照片，所以底色用 ink、把动作表那份 sport 图标放在 warn 圆角块上居中
-  // —— 不编一张假封面。角标胶囊只放「›」，不编数字（理由见 JSX 上方那段注释）。
-  sportCard: { backgroundColor: color.ink, borderRadius: 22, justifyContent: "flex-end", marginTop: 14, minHeight: 224, overflow: "hidden" },
-  sportCover: { alignItems: "center", bottom: 0, justifyContent: "center", left: 0, position: "absolute", right: 0, top: 0 },
-  sportGlyph: { alignItems: "center", backgroundColor: color.warn, borderRadius: 26, height: 92, justifyContent: "center", width: 92 },
-  sportIcon: { height: 58, width: 58 },
   // SCENE-CARD-STACK-005：单列大图卡，参考 deepseek_html_20260921_c417e3
   // ——整卡背景图 + 底部渐变遮罩承托标题和可展开的标签行。渐变实现见上面
   // SCENE-CARD-SHADE-008 的注释（Svg + LinearGradient，用已经链接进原生
