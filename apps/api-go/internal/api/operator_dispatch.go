@@ -50,7 +50,7 @@ func (s *Server) operatorDispatch(w http.ResponseWriter, r *http.Request) {
 	if s.Dispatch == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"dataSource": OperatorNotConnectedSource,
-			"notes":      []string{"没配库：自动派单没有启用（dispatch.runs 在 migration 181）。"},
+			"notes":      []string{"没配库：自动派单没有启用（dispatch.runs 在 migration 190）。"},
 		})
 		return
 	}

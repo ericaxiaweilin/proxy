@@ -1,6 +1,6 @@
 package postgres
 
-// DISPATCH-LOOP-001：派单的 run / step 存储对**真库**跑（migration 181）。
+// DISPATCH-LOOP-001：派单的 run / step 存储对**真库**跑（migration 190）。
 // 内存实现证明的是规则；这里证明的是列名、JSONB 快照读得回来、FOR UPDATE SKIP LOCKED
 // 那条推进路径真的落库、乐观版本号真的拦得住并发的运营动作，以及 (task, slot) 不会建出两条。
 

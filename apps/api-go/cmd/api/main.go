@@ -395,7 +395,7 @@ func main() {
 		voucherService.SetSettlementCreator(voucher.LogSettlementCreator{})
 		benefitService = benefit.NewService(postgres.NewBenefitRepository(pool))
 		ratingService = rating.New(postgres.NewRatingRepository(pool), fulfillmentService.Repository())
-		// DISPATCH-LOOP-001：FAST 需求的自动派单（存储 migration 181，推进在下面的 runDispatchLoop）。
+		// DISPATCH-LOOP-001：FAST 需求的自动派单（存储 migration 190，推进在下面的 runDispatchLoop）。
 		dispatchStore = dispatch.NewPostgres(pool)
 		dispatchEngine = newDispatchEngine(dispatchStore, fulfillmentService)
 		// MARKET-FAST-001：同一个引擎也代选快速市场发单的报名人。

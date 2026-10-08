@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Postgres 是 dispatch.runs / dispatch.steps（migration 181）的存储。
+// Postgres 是 dispatch.runs / dispatch.steps（migration 190）的存储。
 type Postgres struct{ pool *pgxpool.Pool }
 
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
