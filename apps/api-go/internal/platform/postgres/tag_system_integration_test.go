@@ -282,6 +282,7 @@ func TestTopicAndOrderTagsBuildAFinePictureAndCosineSeparatesPeople(t *testing.T
 	exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at) VALUES ($1,$2,$3,'n1','CONFIRMED',$4::jsonb,$5,$5),($6,$2,$3,'n2','CONFIRMED',$7::jsonb,$5,$5)`,
 		orders[0], buyer, agent, snap("CITY_COMPANION", 150000), now.Add(-time.Hour), orders[1], snap("CITY_COMPANION", 200000))
 	// 订单只能以 OFFERED / CONFIRMED 开头（库里有 guard）；完成要走状态转移。
+	exec(`UPDATE fulfillment.orders SET lifecycle = 'EXECUTING', version = version + 1, updated_at = $2 WHERE id = $1`, orders[0], now.Add(-45*time.Minute))
 	exec(`UPDATE fulfillment.orders SET lifecycle = 'COMPLETED', version = version + 1, updated_at = $2 WHERE id = $1`, orders[0], now.Add(-30*time.Minute))
 
 	store := tagging.NewPostgres(pool)
