@@ -251,3 +251,12 @@ describe("TAB-KEEP-ALIVE-001 root tabs stay mounted", () => {
     expect(conversation).toContain("const timer = tabActive ? setInterval");
   });
 });
+
+// HOME-WEATHER-001：首页地址旁的天气。
+describe("home shows the weather next to the address", () => {
+  const shell = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+  it("the location row renders the weather badge for the device / chosen position", () => {
+    expect(shell).toContain("<WeatherBadge lat={weatherAt?.latitude} lng={weatherAt?.longitude} />");
+    expect(shell).toContain("weatherAt={sceneMapOrigin}");
+  });
+});

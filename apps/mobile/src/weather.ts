@@ -4,9 +4,9 @@
 // 读不到就**什么都不画**：没有「默认晴天」，也不拿上次的数当现在的。
 // 纯逻辑，没有 React / 网络依赖（fetch 由调用方传入），vitest 直接测。
 
-export type WeatherCondition = "clear" | "cloudy" | "fog" | "drizzle" | "rain" | "heavy_rain" | "storm";
+export type WeatherCondition = "clear" | "cloudy" | "fog" | "drizzle" | "rain" | "heavy_rain" | "storm" | "typhoon";
 
-export type WeatherNow = { tempC: number; condition: WeatherCondition };
+export type WeatherNow = { tempC: number; condition: WeatherCondition; windKmh?: number };
 
 export type WeatherAdvice = {
   level: "OK" | "CAUTION" | "WARN" | "UNKNOWN";
@@ -18,17 +18,41 @@ export type WeatherAdvice = {
 export type WeatherReport = { now: WeatherNow; advice?: WeatherAdvice };
 
 const LABEL: Record<WeatherCondition, string> = {
-  clear: "晴", cloudy: "多云", fog: "雾", drizzle: "小雨", rain: "雨", heavy_rain: "暴雨", storm: "雷暴"
+  clear: "晴", cloudy: "多云", fog: "雾", drizzle: "小雨", rain: "雨", heavy_rain: "暴雨", storm: "雷暴", typhoon: "台风"
 };
 
 export function conditionLabel(c: WeatherCondition): string {
   return LABEL[c] ?? "";
 }
 
-/** 「北宁 · 晴 28°」。 */
+/**
+ * 首页 / 市场里展示的天气只有四种（越南基本就是这几样）：晴、小雨、暴雨、台风。
+ * 多云算晴；雾、其它不展示（返回 undefined，界面什么都不画，不硬凑一个）。
+ */
+export type DisplayWeather = { key: "sunny" | "light_rain" | "heavy_rain" | "typhoon"; icon: string; label: string };
+
+export function displayWeather(c: WeatherCondition): DisplayWeather | undefined {
+  switch (c) {
+    case "clear":
+    case "cloudy":
+      return { key: "sunny", icon: "☀️", label: "晴" };
+    case "drizzle":
+    case "rain":
+      return { key: "light_rain", icon: "🌧️", label: "小雨" };
+    case "heavy_rain":
+    case "storm":
+      return { key: "heavy_rain", icon: "⛈️", label: "暴雨" };
+    case "typhoon":
+      return { key: "typhoon", icon: "🌀", label: "台风" };
+    default:
+      return undefined;
+  }
+}
+
+/** 「北宁 · 晴 28°」。不在展示集合里的天气只写温度：「北宁 · 28°」。 */
 export function weatherLine(city: string, now: WeatherNow): string {
-  const label = conditionLabel(now.condition);
-  return `${city} · ${label} ${Math.round(now.tempC)}°`;
+  const shown = displayWeather(now.condition);
+  return shown ? `${city} · ${shown.label} ${Math.round(now.tempC)}°` : `${city} · ${Math.round(now.tempC)}°`;
 }
 
 export async function fetchWeather(

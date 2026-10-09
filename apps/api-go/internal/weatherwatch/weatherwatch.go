@@ -52,8 +52,11 @@ func Message(title string, startsAt time.Time, a weather.Advice) string {
 	switch a.Level {
 	case weather.LevelWarn:
 		cond := "暴雨"
-		if a.Condition == weather.Storm {
+		switch a.Condition {
+		case weather.Storm:
 			cond = "雷暴"
+		case weather.Typhoon:
+			cond = "台风"
 		}
 		msg := fmt.Sprintf("「%s」%s 前后预报有%s", title, when, cond)
 		if len(a.Suggestions) > 0 {

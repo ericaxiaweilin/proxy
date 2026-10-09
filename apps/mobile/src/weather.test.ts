@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adviceMessage, fetchWeather, nextOccurrence, weatherLine } from "./weather";
+import { adviceMessage, displayWeather, fetchWeather, nextOccurrence, weatherLine } from "./weather";
 
 describe("weather", () => {
   it("shows city, condition and rounded temperature", () => {
@@ -36,5 +36,18 @@ describe("weather", () => {
     expect(adviceMessage({ level: "OK", maxPrecipProb: 5, suggestions: [] }, at, now)).toBeUndefined();
     expect(adviceMessage({ level: "UNKNOWN", maxPrecipProb: 0, suggestions: [] }, at, now)).toBeUndefined();
     expect(adviceMessage(undefined, at, now)).toBeUndefined();
+  });
+
+  it("home shows only four kinds of weather: sunny / light rain / heavy rain / typhoon", () => {
+    expect(displayWeather("clear")).toMatchObject({ icon: "☀️", label: "晴" });
+    expect(displayWeather("cloudy")?.label).toBe("晴"); // 多云算晴
+    expect(displayWeather("drizzle")).toMatchObject({ icon: "🌧️", label: "小雨" });
+    expect(displayWeather("rain")?.label).toBe("小雨");
+    expect(displayWeather("heavy_rain")).toMatchObject({ icon: "⛈️", label: "暴雨" });
+    expect(displayWeather("storm")?.label).toBe("暴雨");
+    expect(displayWeather("typhoon")).toMatchObject({ icon: "🌀", label: "台风" });
+    expect(displayWeather("fog")).toBeUndefined(); // 其它不展示，不硬凑一个
+    expect(weatherLine("北宁", { tempC: 24, condition: "fog" })).toBe("北宁 · 24°");
+    expect(weatherLine("北宁", { tempC: 24, condition: "typhoon" })).toBe("北宁 · 台风 24°");
   });
 });

@@ -99,3 +99,18 @@ func TestWMOCodesAndGridAndStaleCache(t *testing.T) {
 type provFunc func(lat, lng float64) (Report, error)
 
 func (f provFunc) Fetch(_ context.Context, lat, lng float64) (Report, error) { return f(lat, lng) }
+
+// 台风：越南的「bão」按风速判（≥ 62 km/h），压过雨量级别；并且一定是警告。
+func TestTyphoonIsJudgedByWindAndAlwaysWarns(t *testing.T) {
+	if WithWind(Clear, 61) != Clear || WithWind(Rain, 61.9) != Rain {
+		t.Fatal("below the threshold the weather code decides")
+	}
+	if WithWind(Drizzle, 62) != Typhoon || WithWind(Clear, 120) != Typhoon {
+		t.Fatal("62 km/h and up is a typhoon, whatever the rain says")
+	}
+	now := time.Date(2026, 10, 9, 0, 0, 0, 0, hanoi)
+	rep := Report{Hours: hoursFrom(now, map[int]string{15: Typhoon, 16: Typhoon}, map[int]int{15: 90, 16: 90}, 48)}
+	if a := Advise(rep, now.Add(15*time.Hour), 2*time.Hour, now, hanoi); a.Level != LevelWarn || a.Condition != Typhoon {
+		t.Fatalf("a typhoon at the meeting time is a warning: %+v", a)
+	}
+}

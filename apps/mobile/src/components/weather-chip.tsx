@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { localApiBaseUrl } from "../native-clients";
 import { color } from "../theme";
-import { adviceMessage, fetchWeather, weatherLine, type WeatherReport } from "../weather";
+import { adviceMessage, displayWeather, fetchWeather, weatherLine, type WeatherReport } from "../weather";
 
 // WEATHER-001：读不到就返回 undefined，调用方什么都不画。
 function useWeather(lat: number | undefined, lng: number | undefined, at?: Date, hours?: number): WeatherReport | undefined {
@@ -30,6 +30,22 @@ export function WeatherChip({ city, lat, lng }: { city: string; lat: number | un
   const report = useWeather(lat, lng);
   if (!report) return null;
   return <Text selectable style={styles.chip} testID="weather-chip">{weatherLine(city, report.now)}</Text>;
+}
+
+/**
+ * 首页地址旁的天气：图标 + 字（☀️ 晴 / 🌧️ 小雨 / ⛈️ 暴雨 / 🌀 台风），依据用户位置 + 公共气象数据。
+ * 没有位置 / 读不到 / 不在这四种里就什么都不画。
+ */
+export function WeatherBadge({ lat, lng }: { lat: number | undefined; lng: number | undefined }): React.JSX.Element | null {
+  const report = useWeather(lat, lng);
+  const shown = report ? displayWeather(report.now.condition) : undefined;
+  if (!report || !shown) return null;
+  return (
+    <View accessibilityLabel={`天气 ${shown.label}`} style={styles.badge} testID="weather-badge">
+      <Text style={styles.badgeIcon}>{shown.icon}</Text>
+      <Text style={styles.badgeText}>{shown.label} {Math.round(report.now.tempC)}°</Text>
+    </View>
+  );
 }
 
 /** 发布时的天气提醒：雨提醒、暴雨建议改期（能直接设的时间可点）。 */
@@ -60,6 +76,9 @@ export function WeatherAdviceBanner({ lat, lng, at, hours, onPickSlot, onPickAt 
 }
 
 const styles = StyleSheet.create({
+  badge: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 4, paddingHorizontal: 9, paddingVertical: 5 },
+  badgeIcon: { fontSize: 15 },
+  badgeText: { color: color.ink, fontSize: 12, fontVariant: ["tabular-nums"], fontWeight: "700" },
   chip: { color: color.muted, fontSize: 12, lineHeight: 17 },
   banner: { backgroundColor: color.warnBannerBg, borderColor: color.warnBannerBorder, borderRadius: 10, borderWidth: 1, gap: 8, marginHorizontal: 16, marginVertical: 8, padding: 10 },
   bannerWarn: { borderColor: "#BD3434" },

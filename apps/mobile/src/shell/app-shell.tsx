@@ -6,6 +6,7 @@
 import { useUsageTracker } from "../usage-tracker";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TabActiveContext } from "./tab-active";
+import { WeatherBadge } from "../components/weather-chip";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -789,6 +790,7 @@ export function AppShell({
           <LocationContext
             location={currentLocation}
             deviceState={deviceLocationState}
+            weatherAt={sceneMapOrigin}
             onOpenSceneMap={() => setRealitySceneOpen(true)}
             onSwitchLocation={() => setLocationSheetOpen(true)}
           />
@@ -1380,11 +1382,14 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
 function LocationContext({
   location,
   deviceState,
+  weatherAt,
   onOpenSceneMap,
   onSwitchLocation
 }: {
   location: AnyLocation;
   deviceState: DeviceLocationState;
+  /** 天气取哪个位置（设备定位 / 手动选的点）；没有坐标就不画天气。 */
+  weatherAt?: { latitude: number; longitude: number } | undefined;
   onOpenSceneMap: () => void;
   onSwitchLocation: () => void;
 }): React.JSX.Element {
@@ -1430,6 +1435,8 @@ function LocationContext({
         ) : null}
       </View>
     </Pressable>
+      {/* HOME-WEATHER-001：地址旁的天气（晴 / 小雨 / 暴雨 / 台风），依据用户位置 + 公共气象数据。 */}
+      <WeatherBadge lat={weatherAt?.latitude} lng={weatherAt?.longitude} />
       <Pressable accessibilityLabel={t("locSwitchScopeA11y")} accessibilityRole="button" onPress={onSwitchLocation} style={styles.locationSwitchButton}><Text selectable style={styles.locationSwitch}>{t("locSwitch")}</Text></Pressable>
     </View>
   );

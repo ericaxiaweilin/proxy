@@ -24,9 +24,14 @@ const (
 	Rain      = "rain"
 	HeavyRain = "heavy_rain"
 	Storm     = "storm"
+	// Typhoon：越南说的「bão」——10 米平均风速达到热带风暴量级（≥ 62 km/h，约 8 级）。由风速判，不由天气码判。
+	Typhoon = "typhoon"
 )
 
-var severity = map[string]int{Clear: 0, Cloudy: 0, Fog: 1, Drizzle: 1, Rain: 2, HeavyRain: 3, Storm: 3}
+// TyphoonWindKmh 是判「台风」的风速门槛（km/h）。
+const TyphoonWindKmh = 62.0
+
+var severity = map[string]int{Clear: 0, Cloudy: 0, Fog: 1, Drizzle: 1, Rain: 2, HeavyRain: 3, Storm: 3, Typhoon: 4}
 
 // ConditionFromWMO 把 WMO 天气码归到上面几类。未知码按 cloudy（不夸大也不当成雨）。
 func ConditionFromWMO(code int) string {
@@ -53,6 +58,15 @@ func ConditionFromWMO(code int) string {
 type Now struct {
 	TempC     float64 `json:"tempC"`
 	Condition string  `json:"condition"`
+	WindKmh   float64 `json:"windKmh"`
+}
+
+// WithWind 把风速并进天气状态：风速达到台风门槛就是台风（压过雨量级别），否则维持天气码的结论。
+func WithWind(condition string, windKmh float64) string {
+	if windKmh >= TyphoonWindKmh {
+		return Typhoon
+	}
+	return condition
 }
 
 type Hour struct {
@@ -139,7 +153,7 @@ func (o OpenMeteo) Fetch(ctx context.Context, lat, lng float64) (Report, error) 
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
-	url := fmt.Sprintf("%s/v1/forecast?latitude=%.1f&longitude=%.1f&current=temperature_2m,weather_code&hourly=precipitation_probability,weather_code&forecast_days=3&timeformat=unixtime&timezone=auto", base, lat, lng)
+	url := fmt.Sprintf("%s/v1/forecast?latitude=%.1f&longitude=%.1f&current=temperature_2m,weather_code,wind_speed_10m&hourly=precipitation_probability,weather_code,wind_speed_10m&forecast_days=3&timeformat=unixtime&timezone=auto", base, lat, lng)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Report{}, err
@@ -156,22 +170,28 @@ func (o OpenMeteo) Fetch(ctx context.Context, lat, lng float64) (Report, error) 
 		Current struct {
 			Temp float64 `json:"temperature_2m"`
 			Code int     `json:"weather_code"`
+			Wind float64 `json:"wind_speed_10m"`
 		} `json:"current"`
 		Hourly struct {
 			Time []int64    `json:"time"`
 			Prob []*float64 `json:"precipitation_probability"`
 			Code []*int     `json:"weather_code"`
+			Wind []*float64 `json:"wind_speed_10m"`
 		} `json:"hourly"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return Report{}, err
 	}
-	rep := Report{Now: Now{TempC: math.Round(body.Current.Temp), Condition: ConditionFromWMO(body.Current.Code)}}
+	rep := Report{Now: Now{TempC: math.Round(body.Current.Temp), Condition: WithWind(ConditionFromWMO(body.Current.Code), body.Current.Wind), WindKmh: math.Round(body.Current.Wind)}}
 	for i, ts := range body.Hourly.Time {
 		if i >= len(body.Hourly.Prob) || i >= len(body.Hourly.Code) || body.Hourly.Prob[i] == nil || body.Hourly.Code[i] == nil {
 			continue // 缺的小时不补
 		}
-		rep.Hours = append(rep.Hours, Hour{At: time.Unix(ts, 0).UTC(), PrecipProb: int(*body.Hourly.Prob[i]), Condition: ConditionFromWMO(*body.Hourly.Code[i])})
+		wind := 0.0
+		if i < len(body.Hourly.Wind) && body.Hourly.Wind[i] != nil {
+			wind = *body.Hourly.Wind[i]
+		}
+		rep.Hours = append(rep.Hours, Hour{At: time.Unix(ts, 0).UTC(), PrecipProb: int(*body.Hourly.Prob[i]), Condition: WithWind(ConditionFromWMO(*body.Hourly.Code[i]), wind)})
 	}
 	return rep, nil
 }
