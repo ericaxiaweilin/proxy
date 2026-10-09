@@ -13,6 +13,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identitytier"
 	"github.com/proxy-app/proxy-api/internal/incentive"
+	"github.com/proxy-app/proxy-api/internal/treasure"
 	"github.com/proxy-app/proxy-api/internal/weatherwatch"
 )
 
@@ -421,5 +422,86 @@ func TestCollectUserForOnlyCreditsThatUserAndNeverDoubleCounts(t *testing.T) {
 	}
 	if _, err := st.CollectProviderFor(ctx, mine, now); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TREASURE-001：寻宝落库流程 —— 投放一个场景一个箱子；到店才能开；每人每箱一次；容量；成长值进账本；
+// 「下单小美」才有的同行加成：必须是已确认、带小美的报名，每单一次。
+func TestTreasureSoloAndCompanionOpensOnRealDB(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	scene := "sc_tr_" + stamp
+	user, other := "u_tr_a_"+stamp, "u_tr_b_"+stamp
+	act := "act_tr_" + stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = ANY($1)`, []string{user, other})
+		_, _ = pool.Exec(bg, `DELETE FROM treasure.opens WHERE user_id = ANY($1)`, []string{user, other})
+		_, _ = pool.Exec(bg, `DELETE FROM treasure.chests WHERE scene_id = $1`, scene)
+		_, _ = pool.Exec(bg, `DELETE FROM activity.participants WHERE activity_id = $1`, act)
+		_, _ = pool.Exec(bg, `DELETE FROM activity.activities WHERE id = $1`, act)
+		_, _ = pool.Exec(bg, `DELETE FROM reality.scenes WHERE id = $1`, scene)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	const lat, lng = 21.2, 106.05
+	exec(`INSERT INTO reality.scenes (id, name, area, type, latitude, longitude, best) VALUES ($1,'Tr Cafe','a','咖啡 · 店招',$2,$3,'')`, scene, lat, lng)
+	tr := treasure.NewPostgres(pool)
+	if _, err := tr.Spawn(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	var chestID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM treasure.chests WHERE scene_id = $1 AND status = 'ACTIVE'`, scene).Scan(&chestID); err != nil {
+		t.Fatalf("a coffee scene gets a live chest: %v", err)
+	}
+	if n, _ := tr.Spawn(ctx, now); n != 0 {
+		var c int
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM treasure.chests WHERE scene_id = $1 AND status = 'ACTIVE'`, scene).Scan(&c)
+		if c != 1 {
+			t.Fatalf("one live chest per scene: %d", c)
+		}
+	}
+	here := treasure.Location{Lat: lat, Lng: lng, AccuracyM: 10}
+	far := treasure.Location{Lat: lat + 0.01, Lng: lng, AccuracyM: 10}
+	if _, err := tr.OpenSolo(ctx, user, chestID, far, now); err != treasure.ErrTooFar {
+		t.Fatalf("1km away cannot open: %v", err)
+	}
+	res, err := tr.OpenSolo(ctx, user, chestID, here, now)
+	if err != nil || res.Points != treasure.SoloPoints || res.Total != treasure.SoloPoints {
+		t.Fatalf("open at the store: %+v %v", res, err)
+	}
+	if _, err := tr.OpenSolo(ctx, user, chestID, here, now); err != treasure.ErrAlreadyOpened {
+		t.Fatalf("one open per chest per person: %v", err)
+	}
+	if _, err := tr.OpenSolo(ctx, other, chestID, here, now); err != nil {
+		t.Fatalf("someone else can still open it: %v", err)
+	}
+
+	// 同行加成：没有带小美的确认报名 → 不行；有 → 行一次。
+	if _, err := tr.OpenCompanion(ctx, user, act, "xiaomei_1", here, now); err != treasure.ErrNotEligible {
+		t.Fatalf("no booking, no bonus: %v", err)
+	}
+	exec(`INSERT INTO activity.activities (id, payload) VALUES ($1, $2::jsonb)`, act, fmt.Sprintf(`{"activityId":"%s","title":"周六咖啡","status":"PUBLISHED","realitySceneId":"%s","startsAt":"%s"}`, act, scene, now.Add(30*time.Minute).Format(time.RFC3339)))
+	exec(`INSERT INTO activity.participants (activity_id, actor_id, state, companion_id) VALUES ($1,$2,'CONFIRMED','xiaomei_1')`, act, user)
+	nb, err := tr.Nearby(ctx, user, lat, lng, now)
+	if err != nil || len(nb.Bookings) != 1 || nb.Bookings[0].Points != treasure.CompanionPts {
+		t.Fatalf("the booking shows up as a bonus chest: %+v %v", nb.Bookings, err)
+	}
+	res, err = tr.OpenCompanion(ctx, user, act, "xiaomei_1", here, now)
+	if err != nil || res.Points != treasure.CompanionPts || res.Total != treasure.SoloPoints+treasure.CompanionPts {
+		t.Fatalf("companion open: %+v %v", res, err)
+	}
+	if _, err := tr.OpenCompanion(ctx, user, act, "xiaomei_1", here, now); err != treasure.ErrAlreadyOpened {
+		t.Fatalf("one bonus per booking: %v", err)
+	}
+	// 别人拿不到这一单的加成。
+	if _, err := tr.OpenCompanion(ctx, other, act, "xiaomei_1", here, now); err != treasure.ErrNotEligible {
+		t.Fatalf("someone else's booking is not mine: %v", err)
 	}
 }
