@@ -124,7 +124,10 @@ func TestMerchantPointsCountHostedOrdersOnce(t *testing.T) {
 	exec(`INSERT INTO business.accounts (id, owner_user_id, name, status, created_at) VALUES ($1,$3,'t','ACTIVE',$2)`, biz, now, "owner_"+biz)
 	exec(`INSERT INTO business.stores (id, business_id, name, address, status, created_at) VALUES ($1,$2,'s','a','ACTIVE',$3)`, store, biz, now)
 	order := func(id, lifecycle, storeID string) {
-		exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at, store_id) VALUES ($1,'r','a','n',$2,'{}'::jsonb,$3,$3,$4)`, id, lifecycle, now, storeID)
+		exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at, store_id) VALUES ($1,'r','a','n','CONFIRMED','{}'::jsonb,$2,$2,$3)`, id, now, storeID)
+		// 订单生命周期守卫：只能一步步走，且每步 version+1。
+		exec(`UPDATE fulfillment.orders SET lifecycle = 'EXECUTING', version = version + 1 WHERE id = $1`, id)
+		exec(`UPDATE fulfillment.orders SET lifecycle = $2, version = version + 1 WHERE id = $1`, id, lifecycle)
 	}
 	order(orders[0], "COMPLETED", store)
 	order(orders[1], "COMPLETED", store)
