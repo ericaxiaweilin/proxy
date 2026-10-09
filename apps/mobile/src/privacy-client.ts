@@ -142,6 +142,17 @@ export class PrivacyClient {
     return json as T;
   }
 
+  // NUDGE-OPTOUT-001：引导推送（发第一条动态 / 发第一个需求）的开关。读不出来就抛，由界面显示重试。
+  async getNudges(): Promise<boolean> {
+    const body = await this.call<{ enabled?: boolean }>("GET", "/v1/me/nudges");
+    return body.enabled !== false;
+  }
+
+  async setNudges(enabled: boolean): Promise<boolean> {
+    const body = await this.call<{ enabled?: boolean }>("POST", "/v1/me/nudges", { enabled });
+    return body.enabled !== false;
+  }
+
   async fetchMe(): Promise<PrivacyExportEnvelope> {
     return this.call<PrivacyExportEnvelope>("GET", "/v1/privacy/me");
   }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identitytier"
 	"github.com/proxy-app/proxy-api/internal/incentive"
 )
@@ -140,5 +141,48 @@ func TestMerchantPointsCountHostedOrdersOnce(t *testing.T) {
 	}
 	if pts, _ := st.Points(ctx, identitytier.Merchant, biz); pts != 2 {
 		t.Fatalf("two attributed completed orders = 2 points, once each: %d", pts)
+	}
+}
+
+// NUDGE-OPTOUT-001：退订的人不再出现在引导推送的候选里，恢复后回来。
+func TestNudgeOptOutRemovesTheUserFromCandidates(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	user := "u_no_" + stamp
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM identity.user_accounts WHERE id = $1`, user)
+	})
+	now := time.Now().UTC()
+	if _, err := pool.Exec(ctx, `INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'ACTIVE',$2,$2)`, user, now.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	src := guidance.NewPostgres(pool)
+	has := func() bool {
+		ids, err := src.Candidates(ctx, now, 24*time.Hour, 7*24*time.Hour, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			if id == user {
+				return true
+			}
+		}
+		return false
+	}
+	if on, _ := src.NudgesEnabled(ctx, user); !on || !has() {
+		t.Fatal("by default the user is a candidate")
+	}
+	if err := src.SetNudgesEnabled(ctx, user, false, now); err != nil {
+		t.Fatal(err)
+	}
+	if on, _ := src.NudgesEnabled(ctx, user); on || has() {
+		t.Fatal("opted out = not a candidate")
+	}
+	if err := src.SetNudgesEnabled(ctx, user, true, now); err != nil {
+		t.Fatal(err)
+	}
+	if !has() {
+		t.Fatal("opting back in restores the nudges")
 	}
 }

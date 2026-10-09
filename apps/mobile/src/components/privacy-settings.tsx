@@ -15,7 +15,7 @@
 // Errors are surfaced inline so the user can retry without leaving
 // the page; the parent surface does not need to handle them.
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Share, StyleSheet, Text, View } from "react-native";
+import { Alert, Share, StyleSheet, Switch, Text, View } from "react-native";
 import { documentDirectory, writeAsStringAsync } from "expo-file-system/legacy";
 import { color } from "../theme";
 import type {
@@ -48,6 +48,26 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
   // PRIVACY-EXPORT-INSPECT-001: 导出不能只给计数 —— 访问权要的是可检查的副本。
   const [showExportDetail, setShowExportDetail] = useState(false);
   const [saveState, setSaveState] = useState<{ kind: "idle" } | { kind: "saving" } | { kind: "saved"; name: string } | { kind: "failed"; message: string }>({ kind: "idle" });
+
+  // 引导推送（发第一条动态 / 发第一个需求）：默认开，用户可以关。订单和安全通知不受影响。
+  const [nudges, setNudges] = useState<boolean | undefined>(undefined);
+  const [nudgeBusy, setNudgeBusy] = useState(false);
+  useEffect(() => {
+    if (skipInitialFetch) return;
+    let cancelled = false;
+    void client.getNudges().then((on) => { if (!cancelled) setNudges(on); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [client, skipInitialFetch]);
+  const onToggleNudges = useCallback(async (next: boolean) => {
+    setNudgeBusy(true);
+    try {
+      setNudges(await client.setNudges(next));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setNudgeBusy(false);
+    }
+  }, [client]);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -242,6 +262,16 @@ export function PrivacySettings({ client, skipInitialFetch }: PrivacySettingsPro
         )}
       </View>
 
+      {nudges !== undefined ? (
+        <View style={[styles.card, styles.switchCard]}>
+          <View style={styles.switchCopy}>
+            <Text selectable style={styles.cardTitle}>引导提醒</Text>
+            <Text selectable style={styles.cardDesc}>偶尔提醒你发第一条动态、发第一个需求。关掉后不再收到；订单和安全通知不受影响。</Text>
+          </View>
+          <Switch accessibilityLabel="引导提醒" disabled={nudgeBusy} onValueChange={(v) => void onToggleNudges(v)} value={nudges} />
+        </View>
+      ) : null}
+
       <View style={styles.card}>
         <Text selectable style={styles.cardTitle}>🗑️ 请求删除账号</Text>
         <Text selectable style={styles.cardDesc}>30 天宽限期内你可以随时撤回。30 天后, 你的账号资料 (姓名 / 简介 / 头像 / 登录手机或邮箱 / 设备与登录会话) 会被永久删除, 账号被匿名化且无法再登录。交易 / 税务 / 安全 / 同意记录按法律要求保留。</Text>
@@ -296,6 +326,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: color.line
   },
+  switchCard: { alignItems: "center", flexDirection: "row", gap: 12 },
+  switchCopy: { flex: 1 },
   cardTitle: { fontSize: 16, fontWeight: "600", color: color.ink, marginBottom: 8 },
   cardDesc: { fontSize: 13, lineHeight: 20, color: color.muted, marginBottom: 12 },
   badge: {

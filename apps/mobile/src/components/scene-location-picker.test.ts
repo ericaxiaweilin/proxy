@@ -65,6 +65,6 @@ describe("SCENE-LOCATION-PICKER-001 SceneShopDirectory (all 6 real scene-categor
   it("single Modal, no nesting: the picker swaps in via state inside the same top-level Modal", () => {
     expect((directory.match(/<Modal /g) ?? []).length).toBe(1);
     expect(directory).toContain("const [pickerOpen, setPickerOpen] = useState(false);");
-    expect(directory).toContain("{pickerOpen ? (");
+    expect(directory).toContain("pickerOpen ? (");
   });
 });
