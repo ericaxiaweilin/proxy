@@ -6,15 +6,22 @@ export const HOLD_MS = 900; // 按住蓄力多久才发请求（和 PAO0 同一�
 export type TreasureChest = {
   id: string; sceneId: string; name: string; area: string; lat: number; lng: number;
   distanceM: number; points: number; remaining: number; expiresAt: string; openedByMe: boolean;
+  /** 金色箱：里面有券位。prizeLabel = 券的名字（例如「免费美式一杯」），prizeSlots = 还没被抽走的券位数。 */
+  prizeLabel?: string; prizeSlots?: number;
 };
 export type TreasureBooking = {
   activityId: string; companionId: string; title: string; sceneId: string; name: string; lat: number; lng: number;
-  distanceM: number; points: number; withVoucher: boolean;
+  distanceM: number; points: number; withVoucher: boolean; prizeLabel?: string;
 };
 export type TreasureNearby = {
   chests: TreasureChest[]; companionBookings: TreasureBooking[]; openedToday: number; dailyCap: number; radiusM: number; totalPoints: number;
 };
-export type TreasureResult = { kind: "SOLO" | "COMPANION"; points: number; sceneName: string; distanceM: number; claimId?: string; totalPoints: number };
+export type TreasureResult = { kind: "SOLO" | "COMPANION"; points: number; sceneName: string; distanceM: number; claimId?: string; prizeLabel?: string; hadPrize?: boolean; totalPoints: number };
+
+/** 这次开箱有没有开出券。 */
+export function wonPrize(r: TreasureResult): boolean {
+  return Boolean(r.claimId && r.prizeLabel);
+}
 
 /** 我 → 目标的方位角（度，0 = 正北，顺时针）。 */
 export function bearingDeg(fromLat: number, fromLng: number, toLat: number, toLng: number): number {
@@ -84,7 +91,8 @@ export function holdProgress(elapsedMs: number): number {
 }
 
 /** 粒子：按分数档位决定数量（普通 / 同行加成更多）。 */
-export function particleCount(kind: "SOLO" | "COMPANION", reduceMotion: boolean): number {
+export function particleCount(kind: "SOLO" | "COMPANION", reduceMotion: boolean, prize = false): number {
   if (reduceMotion) return 4;
+  if (prize) return 34;
   return kind === "COMPANION" ? 22 : 12;
 }

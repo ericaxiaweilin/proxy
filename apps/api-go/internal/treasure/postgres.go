@@ -183,6 +183,7 @@ type Result struct {
 	DistanceM  int    `json:"distanceM"`
 	ClaimID    string `json:"claimId,omitempty"`    // 带出了券（福利领取记录）
 	PrizeLabel string `json:"prizeLabel,omitempty"` // 券的名字，例如「免费美式一杯」
+	HadPrize   bool   `json:"hadPrize,omitempty"`   // 这个箱子里本来有券位（金色箱），没抽中也会告诉你
 	Total      int    `json:"totalPoints"`          // 开完之后账本里的积分合计（用户）
 }
 
@@ -297,7 +298,7 @@ func (p *Postgres) OpenSolo(ctx context.Context, userID, chestID string, loc Loc
 		return Result{}, err
 	}
 	openID := newOpenID(userID, now, chestID)
-	res := Result{Kind: "SOLO", Points: points, SceneName: sceneName, DistanceM: dist, Total: p.total(ctx, tx, userID)}
+	res := Result{Kind: "SOLO", Points: points, SceneName: sceneName, DistanceM: dist, Total: p.total(ctx, tx, userID), HadPrize: prizeSlots > 0}
 	if err := tx.Commit(ctx); err != nil {
 		return Result{}, err
 	}

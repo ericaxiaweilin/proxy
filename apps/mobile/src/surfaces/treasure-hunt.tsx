@@ -13,7 +13,7 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 import { color } from "../theme";
 import { TreasureClient, TreasureError, type DeviceFix } from "../treasure-client";
 import {
-  HOLD_MS, OPEN_RADIUS_M, bearingDeg, canOpenAt, compassLabel, distanceText, particleCount, radarPoint, radarRadius,
+  HOLD_MS, OPEN_RADIUS_M, wonPrize, bearingDeg, canOpenAt, compassLabel, distanceText, particleCount, radarPoint, radarRadius,
   reasonText, remainingText, type TreasureBooking, type TreasureChest, type TreasureNearby, type TreasureResult,
 } from "../treasure-model";
 import { buzz, isTreasureMuted, playSfx, releaseSfx, setTreasureMuted, stopSfx } from "../treasure-sfx";
@@ -24,8 +24,8 @@ const PRACTICE_ID = "__practice__";
 const RADAR = 264;
 
 type Target =
-  | { kind: "SOLO"; id: string; name: string; sub: string; lat: number; lng: number; points: number; remaining?: number; expiresAt?: string; practice?: boolean }
-  | { kind: "COMPANION"; id: string; name: string; sub: string; lat: number; lng: number; points: number; voucher: boolean; activityId: string; companionId: string; practice?: undefined };
+  | { kind: "SOLO"; id: string; name: string; sub: string; lat: number; lng: number; points: number; remaining?: number; expiresAt?: string; practice?: boolean; prizeLabel?: string; prizeSlots?: number }
+  | { kind: "COMPANION"; id: string; name: string; sub: string; lat: number; lng: number; points: number; voucher: boolean; prizeLabel?: string; activityId: string; companionId: string; practice?: undefined; prizeSlots?: undefined };
 
 // ---------------------------------------------------------------- 定位
 
@@ -206,7 +206,7 @@ export function TreasureHuntSurface({ client, onBack }: { client: TreasureClient
               <Text selectable style={styles.sectionTitle}>附近的宝箱</Text>
               {targets.map((t) => (
                 <Pressable key={`${t.kind}:${t.id}`} onPress={() => setSelectedId(t.id)} style={[styles.row, selected?.id === t.id && styles.rowOn]}>
-                  <Text style={styles.rowIcon}>{t.kind === "COMPANION" ? "💎" : t.practice ? "🎁" : "📦"}</Text>
+                  <Text style={styles.rowIcon}>{iconOf(t)}</Text>
                   <View style={{ flex: 1 }}>
                     <Text selectable style={styles.rowName}>{t.name}</Text>
                     <Text selectable style={styles.rowSub}>{t.sub}</Text>
@@ -224,11 +224,13 @@ export function TreasureHuntSurface({ client, onBack }: { client: TreasureClient
   );
 }
 
+const iconOf = (t: Target): string => (t.kind === "COMPANION" ? "💎" : t.practice ? "🎈" : t.prizeLabel ? "🎁" : "📦");
+
 function toChestTarget(c: TreasureChest): Target {
-  return { kind: "SOLO", id: c.id, name: c.name, sub: [c.area, `还剩 ${c.remaining} 个`].filter(Boolean).join(" · "), lat: c.lat, lng: c.lng, points: c.points, remaining: c.remaining, expiresAt: c.expiresAt };
+  return { kind: "SOLO", id: c.id, name: c.name, sub: [c.area, `还剩 ${c.remaining} 个`].filter(Boolean).join(" · "), lat: c.lat, lng: c.lng, points: c.points, remaining: c.remaining, expiresAt: c.expiresAt, ...(c.prizeLabel && (c.prizeSlots ?? 0) > 0 ? { prizeLabel: c.prizeLabel, prizeSlots: c.prizeSlots ?? 0 } : {}) };
 }
 function toBookingTarget(b: TreasureBooking): Target {
-  return { kind: "COMPANION", id: `${b.activityId}|${b.companionId}`, name: `${b.name} · 同行加成`, sub: b.title ? `你的订单：${b.title}` : "你有一单带小美同行的订单", lat: b.lat, lng: b.lng, points: b.points, voucher: b.withVoucher, activityId: b.activityId, companionId: b.companionId };
+  return { kind: "COMPANION", id: `${b.activityId}|${b.companionId}`, name: `${b.name} · 同行加成`, sub: b.title ? `你的订单：${b.title}` : "你有一单带小美同行的订单", lat: b.lat, lng: b.lng, points: b.points, voucher: b.withVoucher, ...(b.prizeLabel ? { prizeLabel: b.prizeLabel } : {}), activityId: b.activityId, companionId: b.companionId };
 }
 function distanceTo(fix: DeviceFix, t: { lat: number; lng: number }): number {
   const rad = Math.PI / 180;
@@ -274,11 +276,11 @@ function Radar({ fix, targets, selectedId, onSelect, reduceMotion }: { fix: Devi
           return (
             <Pressable key={`${t.kind}:${t.id}`} accessibilityLabel={`${t.name} ${distanceText(d)}`} hitSlop={10} onPress={() => onSelect(t.id)}
               style={{ position: "absolute", left: half + pt.x * (half - 14) - size / 2, top: half + pt.y * (half - 14) - size / 2, width: size, height: size }}>
-              {open && !reduceMotion ? (
+              {(open || t.prizeLabel) && !reduceMotion ? (
                 <Animated.View style={[styles.glow, { backgroundColor: tint, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }] }]} />
               ) : null}
               <View style={[styles.dot, { backgroundColor: tint, borderColor: on ? color.ink : color.white }, open && styles.dotOpen]}>
-                <Text style={styles.dotText}>{t.kind === "COMPANION" ? "💎" : t.practice ? "🎁" : "📦"}</Text>
+                <Text style={styles.dotText}>{iconOf(t)}</Text>
               </View>
             </Pressable>
           );
@@ -298,7 +300,7 @@ function DetailCard({ fix, target, distanceM, now, reduceMotion, onOpen }: { fix
   return (
     <View style={[styles.card, target.kind === "COMPANION" && styles.cardCompanion]}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Text style={{ fontSize: 30 }}>{target.kind === "COMPANION" ? "💎" : target.practice ? "🎁" : "📦"}</Text>
+        <Text style={{ fontSize: 30 }}>{iconOf(target)}</Text>
         <View style={{ flex: 1 }}>
           <Text selectable style={styles.cardTitle}>{target.name}</Text>
           <Text selectable style={styles.cardSub}>{target.sub}{left ? ` · ${left}后消失` : ""}</Text>
@@ -306,9 +308,28 @@ function DetailCard({ fix, target, distanceM, now, reduceMotion, onOpen }: { fix
       </View>
       <View style={styles.rewardRow}>
         <Text selectable style={styles.reward}>{target.practice ? "练习 · 不计分" : `+${target.points} 成长值`}</Text>
-        {target.kind === "COMPANION" && target.voucher ? <Text selectable style={styles.rewardVoucher}>+ 咖啡券</Text> : null}
+        {target.kind === "COMPANION" && target.voucher && target.prizeLabel ? <Text selectable style={styles.rewardVoucher}>+ {target.prizeLabel}</Text> : null}
       </View>
-      {target.kind === "COMPANION" ? <Text selectable style={styles.hint}>因为你约了小美同行，到店可以多开一个。</Text> : null}
+      {target.kind === "SOLO" && target.prizeLabel ? (
+        <View style={styles.prizeBanner}>
+          <Text style={styles.prizeEmoji}>🎫</Text>
+          <View style={{ flex: 1 }}>
+            <Text selectable style={styles.prizeTitle}>可能开出：{target.prizeLabel}</Text>
+            <Text selectable style={styles.prizeSub}>箱子里还有 {target.prizeSlots} 张，先到先得 · 开出来放进「我的权益」</Text>
+          </View>
+        </View>
+      ) : null}
+      {target.kind === "COMPANION" ? (
+        target.prizeLabel ? (
+          <View style={styles.prizeBanner}>
+            <Text style={styles.prizeEmoji}>🎫</Text>
+            <View style={{ flex: 1 }}>
+              <Text selectable style={styles.prizeTitle}>必出：{target.prizeLabel}</Text>
+              <Text selectable style={styles.prizeSub}>因为你约了小美同行，到店开这个箱子一定有券</Text>
+            </View>
+          </View>
+        ) : <Text selectable style={styles.hint}>因为你约了小美同行，到店可以多开一个。</Text>
+      ) : null}
       {open ? (
         <HoldToOpen label={target.practice ? "按住开箱（练习）" : "按住开箱"} reduceMotion={reduceMotion} onComplete={onOpen} />
       ) : (
@@ -383,8 +404,10 @@ function HoldToOpen({ label, reduceMotion, onComplete }: { label: string; reduce
 function ResultScene({ res, practice, reduceMotion, onClose }: { res: TreasureResult; practice: boolean; reduceMotion: boolean; onClose: () => void }): React.JSX.Element {
   const pop = useRef(new Animated.Value(0)).current;
   const count = useRef(new Animated.Value(0)).current;
+  const voucherPop = useRef(new Animated.Value(0)).current;
   const [shown, setShown] = useState(0);
-  const n = particleCount(res.kind, reduceMotion);
+  const won = wonPrize(res);
+  const n = particleCount(res.kind, reduceMotion, won);
   const particles = useMemo(() => Array.from({ length: n }, (_, i) => {
     const a = (i / n) * Math.PI * 2 + (i % 3) * 0.2;
     const dist = 80 + (i % 4) * 22;
@@ -397,9 +420,14 @@ function ResultScene({ res, practice, reduceMotion, onClose }: { res: TreasureRe
     const id = count.addListener(({ value }) => setShown(Math.round(value)));
     Animated.timing(count, { toValue: res.points, duration: 700, delay: 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start(() => {
       if (!practice) { playSfx("coin"); buzz(30); }
+      if (won) {
+        // 开出券：再翻出一张券卡，配一声「叮」和一串长震动。
+        setTimeout(() => { playSfx("ding"); buzz([0, 80, 60, 80, 60, 160]); }, 350);
+        Animated.spring(voucherPop, { toValue: 1, friction: 6, tension: 90, delay: 350, useNativeDriver: true }).start();
+      }
     });
     return () => count.removeListener(id);
-  }, [pop, count, particles, res.points, reduceMotion, practice]);
+  }, [pop, count, voucherPop, particles, res.points, reduceMotion, practice, won]);
 
   return (
     <View style={styles.resultMask}>
@@ -412,7 +440,17 @@ function ResultScene({ res, practice, reduceMotion, onClose }: { res: TreasureRe
         <Text style={styles.resultPlus}>+{shown}</Text>
         <Text style={styles.resultLabel}>{practice ? "练习成功 · 练习分不计入积分" : res.kind === "COMPANION" ? "同行加成 · 成长值" : "成长值"}</Text>
         {!practice ? <Text style={styles.resultTotal}>{res.sceneName} · 我的积分 {res.totalPoints}</Text> : <Text style={styles.resultTotal}>真宝箱要走到咖啡店 100 米内才能开</Text>}
-        {res.claimId ? <Text style={styles.resultVoucher}>🎫 咖啡券已放进「我的权益」</Text> : null}
+        {won ? (
+          <Animated.View style={[styles.voucherCard, { opacity: voucherPop, transform: [{ scale: voucherPop.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }, { rotate: voucherPop.interpolate({ inputRange: [0, 1], outputRange: ["-8deg", "0deg"] }) }] }]}>
+            <Text style={styles.voucherEmoji}>🎫</Text>
+            <View style={{ flex: 1 }}>
+              <Text selectable style={styles.voucherName}>{res.prizeLabel}</Text>
+              <Text selectable style={styles.voucherSub}>已放进「我的权益」· 到店出示</Text>
+            </View>
+          </Animated.View>
+        ) : !practice && res.hadPrize ? (
+          <Text selectable style={styles.resultTotal}>这次没抽中券，箱子里的券还在等下一位</Text>
+        ) : null}
         <Pressable onPress={onClose} style={styles.resultBtn}><Text style={styles.resultBtnText}>好的</Text></Pressable>
       </Animated.View>
     </View>
@@ -483,7 +521,14 @@ const styles = StyleSheet.create({
   resultPlus: { color: "#B47A00", fontSize: 54, fontVariant: ["tabular-nums"], fontWeight: "900" },
   resultLabel: { color: color.ink, fontSize: 14, fontWeight: "800", textAlign: "center" },
   resultTotal: { color: color.muted, fontSize: 12, textAlign: "center" },
-  resultVoucher: { color: "#5A3FC0", fontSize: 13, fontWeight: "800", marginTop: 4 },
+  voucherCard: { alignItems: "center", backgroundColor: "#FFF6DD", borderColor: GOLD, borderRadius: 16, borderWidth: 2, flexDirection: "row", gap: 10, marginTop: 8, paddingHorizontal: 14, paddingVertical: 12, width: "100%" },
+  voucherEmoji: { fontSize: 30 },
+  voucherName: { color: "#7A5200", fontSize: 16, fontWeight: "900" },
+  voucherSub: { color: "#8C6A1F", fontSize: 11, marginTop: 2 },
+  prizeBanner: { alignItems: "center", backgroundColor: "#FFF6DD", borderColor: GOLD, borderRadius: 14, borderWidth: 1.5, flexDirection: "row", gap: 10, padding: 10 },
+  prizeEmoji: { fontSize: 24 },
+  prizeTitle: { color: "#7A5200", fontSize: 14, fontWeight: "900" },
+  prizeSub: { color: "#8C6A1F", fontSize: 11, marginTop: 2 },
   resultBtn: { backgroundColor: color.ink, borderRadius: 16, marginTop: 14, paddingHorizontal: 34, paddingVertical: 12 },
   resultBtnText: { color: color.white, fontSize: 15, fontWeight: "800" },
 });

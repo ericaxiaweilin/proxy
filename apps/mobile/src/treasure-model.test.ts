@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TreasureClient, TreasureError } from "./treasure-client";
-import { bearingDeg, canOpenAt, compassLabel, distanceText, holdProgress, radarPoint, radarRadius, reasonText, remainingText } from "./treasure-model";
+import { particleCount, wonPrize, bearingDeg, canOpenAt, compassLabel, distanceText, holdProgress, radarPoint, radarRadius, reasonText, remainingText } from "./treasure-model";
 
 describe("treasure model", () => {
   it("bearings point the right way and read as compass words", () => {
@@ -44,6 +44,18 @@ describe("treasure model", () => {
       expect(reasonText(code)).not.toMatch(/[A-Z_]{6,}/);
     }
     expect(reasonText("something_new")).toBe("没开成，请稍后再试");
+  });
+});
+
+describe("prize drops", () => {
+  it("a voucher counts only when the claim really exists", () => {
+    expect(wonPrize({ kind: "SOLO", points: 20, sceneName: "x", distanceM: 10, totalPoints: 20 })).toBe(false);
+    expect(wonPrize({ kind: "SOLO", points: 20, sceneName: "x", distanceM: 10, totalPoints: 20, claimId: "c1", prizeLabel: "免费美式一杯" })).toBe(true);
+    expect(wonPrize({ kind: "SOLO", points: 20, sceneName: "x", distanceM: 10, totalPoints: 20, prizeLabel: "免费美式一杯" })).toBe(false);
+  });
+  it("a prize drop is the biggest burst, reduced motion stays small", () => {
+    expect(particleCount("SOLO", false, true)).toBeGreaterThan(particleCount("COMPANION", false));
+    expect(particleCount("SOLO", true, true)).toBe(4);
   });
 });
 
