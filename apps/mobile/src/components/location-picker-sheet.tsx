@@ -45,12 +45,16 @@ export { DEFAULT_LOCATION, LOCATION_OPTIONS };
 export type { Location, CustomLocation, PresetLocation, AnyLocation, CustomLocationFields, ReverseGeocodeShape };
 
 // gridToLatLng / formatRadius / reverseGeocode re-export 给 app-shell 单独用 —
-// shell 要把 active location 显示成 "河内 · (5,5) · 3 km" 时
-// 不需要再 import location-options 两次。reverseGeocode 让 shell
-// 在自定义 tab 里把 lat/lng 走 Nominatim 反查"还剑湖附近"。
+// shell 要把 active location 显示成 "河内 · 还剑湖" 时不需要再 import
+// location-options 两次。reverseGeocode 让 shell 在自定义 tab 里把 lat/lng 走
+// Nominatim 反查"还剑湖附近"。
 export { gridToLatLng, formatLocationTitle, formatRadius, reverseGeocode };
 
 type Tab = "PRESET" | "CUSTOM" | "HISTORY";
+
+// 自定义地点存在模型里的半径。界面上没有控件能改它（HOME-RADIUS-001）：它不进任何查询，
+// 只是 saved location 的 id 的一部分，所以固定一个值，免得同一个点存成两条。
+const SAVED_LOCATION_RADIUS = 3000 as const;
 
 // DEVICE-LOCATION-001：设备跟随那一行的文案。
 //
@@ -181,9 +185,11 @@ export function LocationPickerSheet({
   const [pin, setPin] = useState<GridCoord>(
     current.kind === "CUSTOM" ? { x: current.custom.gridX, y: current.custom.gridY } : { x: 5, y: 5 }
   );
-  const [radius, setRadius] = useState<1000 | 3000 | 5000>(
-    current.kind === "CUSTOM" ? current.custom.radiusMeters : 3000
-  );
+  // HOME-RADIUS-001（2026-10-09，用户：「home 首页的地图选点 覆盖范围5km可以移除 废话」）：
+  // 界面上不再问半径 —— 没有任何一处查询或筛选读它，它只用来画圈和三句文案。
+  // 字段留着并固定成 3000：自定义地点的 id 里带 `_r<radius>`，那是历史记录的键，
+  // 固定才能保证同一个点再次保存时并回同一条，而不是多出一条重复项。
+  const radius = SAVED_LOCATION_RADIUS;
   const [label, setLabel] = useState<string>(
     current.kind === "CUSTOM" ? current.area.replace(/^自定义 · /, "") : ""
   );
@@ -485,7 +491,6 @@ export function LocationPickerSheet({
                   cityHint={customCity}
                   initialPin={pin}
                   initialCoordinate={lastLatLng}
-                  radiusMeters={radius}
                   onChange={(nextPin, coordinate, kind) => {
                     let point = coordinate;
                     // LOC-PIN-3KM-001: 只有"拖拽微调"才限 3KM（以上次落点为锚）。
@@ -515,24 +520,8 @@ export function LocationPickerSheet({
               </Text>
               {pinNotice ? <Text selectable style={styles.pinNotice}>{pinNotice}</Text> : null}
 
-              {/* Radius selector */}
-              <Text selectable style={styles.fieldLabel}>覆盖半径</Text>
-              <View style={styles.radiusRow}>
-                {([1000, 3000, 5000] as const).map((r) => {
-                  const active = r === radius;
-                  return (
-                    <Pressable
-                      key={r}
-                      onPress={() => setRadius(r)}
-                      style={[styles.radiusChip, active && styles.radiusChipActive]}
-                    >
-                      <Text selectable style={[styles.radiusChipText, active && styles.radiusChipTextActive]}>
-                        {formatRadius(r)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              {/* HOME-RADIUS-001：这里原来有一排「覆盖半径 1 / 3 / 5 km」的选项。
+                  没有任何查询读它，画出来的圈反而让人以为选了点就限了范围 —— 删掉。 */}
 
               {/* Label input */}
               <Text selectable style={styles.fieldLabel}>地点名（可选）</Text>
@@ -553,10 +542,15 @@ export function LocationPickerSheet({
           ) : (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
               {history.length === 0 ? (
-                <ProxyEmptyState title="还没有保存过地图位置" sub="切到“地图选点”放置一个 pin，选择覆盖范围并命名后，这里会保留记录方便复用。" />
+                <ProxyEmptyState title="还没有保存过地图位置" sub="切到“地图选点”放置一个 pin 并命名后，这里会保留记录方便复用。" />
               ) : (
                 history.map((entry) => {
                   const active = current.kind === "CUSTOM" && current.id === entry.id;
+                  // HOME-RADIUS-001：这一行原来固定写「覆盖范围 3 km」。没有任何查询读
+                  // 那个半径，界面上却把它说成这个点的作用范围 —— 换成城市名，并且只在
+                  // 城市名不是标题本身时才补一行（否则同一句显示两遍）。
+                  const title = formatLocationTitle(entry);
+                  const sub = entry.city && entry.city !== title ? entry.city : "";
                   return (
                     <Pressable
                       key={entry.id}
@@ -570,8 +564,8 @@ export function LocationPickerSheet({
                         <ProxyIcon color={active ? color.white : color.ink} name="route" size={24} />
                       </View>
                       <View style={styles.optCopy}>
-                        <Text selectable style={styles.optTitle}>{formatLocationTitle(entry)}</Text>
-                        <Text selectable style={styles.optDesc}>覆盖范围 {formatRadius(entry.custom.radiusMeters)}</Text>
+                        <Text selectable style={styles.optTitle}>{title}</Text>
+                        {sub ? <Text selectable style={styles.optDesc}>{sub}</Text> : null}
                       </View>
                       <Text selectable style={styles.optAction}>{active ? "当前" : "切换"}</Text>
                     </Pressable>
@@ -599,7 +593,7 @@ export function LocationPickerSheet({
               >
                 <View style={styles.confirmCopy}>
                   <Text selectable style={styles.confirmText} numberOfLines={1}>
-                    ✓ {finalCommit.header} · {finalCommit.area} · {formatRadius(radius)}
+                    ✓ {finalCommit.header} · {finalCommit.area}
                   </Text>
                   <Text selectable style={styles.confirmSubText} numberOfLines={1}>
                     {finalCommit.city || "所选区域"}
@@ -741,17 +735,6 @@ const styles = StyleSheet.create({
     borderColor: color.line,
     marginTop: 4
   },
-  radiusRow: { flexDirection: "row", gap: 6, marginTop: 4 },
-  radiusChip: {
-    backgroundColor: "#F2EDF5",
-    borderRadius: 999,
-    flex: 1,
-    paddingVertical: 9,
-    alignItems: "center"
-  },
-  radiusChipActive: { backgroundColor: color.ink },
-  radiusChipText: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  radiusChipTextActive: { color: color.white },
   input: {
     backgroundColor: color.homeIntentInputBg,
     borderColor: "#DDD5E3",

@@ -91,10 +91,20 @@ describe("I18N-SETTINGS-001 shell + settings chrome", () => {
     expect(seen.size, `tabMe collapsed to ${seen.size} distinct strings`).toBe(CODES.length);
   });
 
-  it("substitutes the radius into the map-pin scope line", () => {
-    // 占位符漏了会渲染成「Map pin · Covers {radius}」这种一眼假的句子。
-    expect(translate("en", "locScopeMapPick", { radius: "3 km" })).toBe("Map pin · Covers 3 km");
-    expect(translate("zh", "locScopeMapPick", { radius: "1 km" })).toBe("地图选点 · 覆盖范围 1 km");
+  it("keeps the map-pin line free of any coverage claim (HOME-RADIUS-001)", () => {
+    // 用户：「home 首页的地图选点 覆盖范围5km可以移除 废话」（2026-10-09）。
+    // 没有任何查询读那个半径，所以这句话里不许再声明覆盖范围，也不许留 {radius}
+    // 占位符 —— 漏掉的占位符会原样印在界面上，那是一眼假的句子。
+    for (const code of CODES) {
+      const line = translate(code as Language, "locScopeMapPick");
+      expect(line, `${code} 那句不能空`).not.toBe("");
+      expect(line, `${code} 又带上半径了`).not.toContain("{radius}");
+      expect(line, `${code} 还在声称覆盖范围`).not.toMatch(/km|覆蓋|覆盖|覆盖|Covers|phủ|범위|範囲/);
+    }
+    // 六种语言各自的说法都存在（不是同一个词复制六遍）。
+    const lines = CODES.map((code) => translate(code as Language, "locScopeMapPick"));
+    expect(new Set(lines).size, "locScopeMapPick collapsed to one string").toBe(CODES.length);
+    expect(lines[0]).toBe("地图选点");
     // 定位失败那句带的是设备层的原始 message，也不能吞掉变量。
     expect(translate("en", "locStateUnavailable", { message: "GPS off" })).toContain("GPS off");
   });
@@ -176,8 +186,8 @@ describe("I18N-SETTINGS-001 the surfaces actually call the dictionary", () => {
       ">需要登录<",
       // 身份切换
       'title: "用户"', 'title: "商家"',
-      // 本地范围
-      "地图选点 · 覆盖范围",
+      // 本地范围（HOME-RADIUS-001：这句现在只有「地图选点」，半径那句已经删了）
+      "地图选点",
       "跟随你的位置 · 移动后自动更新",
       "你正在看的本地范围",
       "定位未授权 · 点",

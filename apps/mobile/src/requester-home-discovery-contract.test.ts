@@ -10,6 +10,11 @@ const shell = readFileSync(fileURLToPath(new URL("./shell/app-shell.tsx", import
 const scene = readFileSync(fileURLToPath(new URL("./surfaces/reality-scene-map.tsx", import.meta.url)), "utf8");
 const fixtures = readFileSync(fileURLToPath(new URL("./recommend-fixtures.ts", import.meta.url)), "utf8");
 const locationPicker = readFileSync(fileURLToPath(new URL("./components/location-picker-sheet.tsx", import.meta.url)), "utf8");
+// HOME-RADIUS-001 那几条是**判负**断言，而被删掉的东西的名字留在了注释里（那是"为什么删"，
+// 该留着）。所以判负之前先剥注释，否则注释自己把断言点红 —— 本仓踩过不止一次。
+const stripJsComments = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+const locationPickerCode = stripJsComments(locationPicker);
 const mapCanvas = readFileSync(fileURLToPath(new URL("./components/map-canvas.tsx", import.meta.url)), "utf8");
 const searchDock = readFileSync(fileURLToPath(new URL("./components/home-search-dock.tsx", import.meta.url)), "utf8");
 const homeAssistant = readFileSync(fileURLToPath(new URL("./surfaces/home-assistant.tsx", import.meta.url)), "utf8");
@@ -479,10 +484,18 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(locationPicker).not.toMatch(/\(\{eLat\.toFixed/);
     expect(locationPicker).not.toContain("自定义坐标</Text>");
     // I18N-SETTINGS-001：这句话进了字典，所以 shell 里是键而不是中文字面量。
-    // 钉的仍然是「覆盖范围由 formatRadius 给出，坐标不进 UI」。
-    expect(shell).toContain('t("locScopeMapPick", { radius: formatRadius(location.custom.radiusMeters) })');
+    // HOME-RADIUS-001（2026-10-09，用户：「覆盖范围5km可以移除 废话」）：钉的不再是
+    // 「覆盖范围由 formatRadius 给出」，而是**这句里不许再有覆盖范围** —— 没有一处查询
+    // 读那个半径，写出来只会让人以为首页被这个圈限住了。坐标仍然不进 UI。
+    expect(shell).toContain('t("locScopeMapPick")');
+    expect(shell).not.toContain("locScopeMapPick\", { radius");
     expect(shell).not.toMatch(/lat\.toFixed\(4\).*lng\.toFixed\(4\)/);
     expect(mapCanvas).not.toContain("当前 grid 坐标");
+    // 选点面板上那排 1 / 3 / 5 km 的芯片必须真的没了（只删文案不删控件=还问用户要半径）。
+    expect(locationPickerCode).not.toContain("覆盖半径");
+    expect(locationPickerCode).not.toMatch(/\[1000,\s*3000,\s*5000\]/);
+    // 地图也不许再凭空地画一个覆盖圈。
+    expect(locationPickerCode).not.toContain("radiusMeters={radius}");
   });
 
   it("MSG-LOCATION-DUPE-001: the location entry lives only on home, not on messages", () => {

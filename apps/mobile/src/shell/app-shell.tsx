@@ -23,7 +23,6 @@ import {
   DEFAULT_LOCATION,
   LocationPickerSheet,
   formatLocationTitle,
-  formatRadius,
   type AnyLocation,
   type CustomLocation,
   type PresetLocation
@@ -1377,8 +1376,8 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
   );
 }
 
-// 基线 .locationcontext：⌖ 图标块 + 城市 / 本地范围说明 + 切换⌄。
-// 自定义位置的坐标只用于数据层和地图定位；摘要层只呈现用户可理解的覆盖范围。
+// 基线 .locationcontext：⌖ 图标块 + 城市 + 切换⌄。
+// 自定义位置的坐标只用于数据层和地图定位，不进摘要层。
 function LocationContext({
   location,
   deviceState,
@@ -1410,9 +1409,10 @@ function LocationContext({
   //
   // 现在**没有值得说的事就不渲染这一行**：只有定位中 / 未授权 / 不可用 /
   // 手动选的地图点（那四件事用户确实需要知道）才出字幕。
-  const sub = location.kind === "CUSTOM"
-    ? t("locScopeMapPick", { radius: formatRadius(location.custom.radiusMeters) })
-    : deviceSub;
+  // HOME-RADIUS-001（2026-10-09，用户：「home 首页的地图选点 覆盖范围5km可以移除 废话」）：
+  // 手动选点这件事值得告诉用户（说明没在跟随设备），半径不值得 —— 没有任何查询读它，
+  // 写在首页上只会让人以为首页内容被这个圈限住了。
+  const sub = location.kind === "CUSTOM" ? t("locScopeMapPick") : deviceSub;
   return (
     <View style={styles.locationRow}>
     <Pressable

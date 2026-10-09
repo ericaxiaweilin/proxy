@@ -11429,6 +11429,49 @@ if ! grep -qF 'const sub = location.kind === "CUSTOM"' apps/mobile/src/shell/app
   exit 1
 fi
 
+# HOME-RADIUS-001（2026-10-09，用户：「home 首页的地图选点 覆盖范围5km可以移除 废话」）：
+# 地图选点那一屏有一排「覆盖半径 1 / 3 / 5 km」。查过：没有任何一处查询或筛选读
+# CustomLocation.radiusMeters（nearby-spots 用的是它自己的默认 3000），它只做三件事 ——
+# 画圈、写进 saved id、印在首页字幕上。所以它不是"暂时没接"，是一个会让人以为
+# 「首页被我选的圈限住了」的控件。这一档钉的是**控件真的没了**，不是只改了文案。
+# 命名测试必须先存在再跑：vitest 在没匹配到任何断言时照样退 0（本仓踩过），
+# 而这一串判据按 ID 筛的时候也要能被选中，所以 ID 写在这条 grep 的失败语里。
+if ! grep -qF 'keeps the map-pin line free of any coverage claim (HOME-RADIUS-001)' apps/mobile/src/i18n-shell-settings.test.ts; then
+  echo "  FAIL [HOME-RADIUS-001]: 那条命名测试不见了 —— vitest 跑不到任何断言也会报绿。" >&2
+  exit 1
+fi
+pnpm --filter @proxy/mobile exec vitest run \
+  src/i18n-shell-settings.test.ts src/requester-home-discovery-contract.test.ts \
+  src/components/location-picker-sheet.test.ts || exit $?
+# 注释里会提到被删掉的词，所以判负之前先剥注释（这一坑本仓踩过不止一次）。
+# 文件名必须写在每条命令里：先把源码 assign 给变量再 grep，这一步在 --changed 的索引里
+# 是「不引用任何文件」，于是它永远不参与 —— 只在 --all 才跑的判据等于没有判据。
+if perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/location-picker-sheet.tsx | grep -qE '覆盖半径|覆盖范围'; then
+  echo "  FAIL [HOME-RADIUS-001]: 选点面板又出现「覆盖半径/覆盖范围」—— 那是用户点名删掉的控件。" >&2
+  exit 1
+fi
+if perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/location-picker-sheet.tsx | grep -qE '\[1000,\s*3000,\s*5000\]'; then
+  echo "  FAIL [HOME-RADIUS-001]: 三档半径的选项又回来了（文案删了但还在问用户要半径 = 更糟）。" >&2
+  exit 1
+fi
+# 没控件就别画圈：MapCanvas 拿到 radiusMeters 才画，选点面板不许再传。
+if perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/location-picker-sheet.tsx | grep -qE 'radiusMeters=\{radius\}'; then
+  echo "  FAIL [HOME-RADIUS-001]: 面板又开始凭空地画覆盖圈。" >&2
+  exit 1
+fi
+# 六种语言里不许残留 {radius} 占位符 —— 漏一个就原样印在界面上。
+if grep -qE 'locScopeMapPick: "[^"]*\{radius\}' apps/mobile/src/i18n.ts; then
+  echo "  FAIL [HOME-RADIUS-001]: 有种语言的地图选点那句还带着 {radius}（占位符会印成字面量）。" >&2
+  exit 1
+fi
+# saved id 里的 `_r<半径>` 是历史记录的键：控件删了，键必须还是那个常量，
+# 否则同一个点再存一次就多出一条重复项。
+if ! grep -qE 'custom_geo_\$\{coordinateKey\}_r\$\{radius\}' apps/mobile/src/components/location-picker-sheet.tsx; then
+  echo "  FAIL [HOME-RADIUS-001]: 自定义地点的 id 不再带 _r<半径> —— 老历史记录会和新存的分裂成两条。" >&2
+  exit 1
+fi
+echo "    HOME-RADIUS-001: PASS (半径控件/圈/文案三处都没了 · 六种语言无占位符 · saved id 的键保持稳定)"
+
 for shellkey in guestMeTitle guestMeSub guestMeCta \
                ctxRequesterTitle ctxRequesterDesc ctxBusinessTitle ctxBusinessDesc \
                locScopeMapPick \
@@ -11439,9 +11482,10 @@ for shellkey in guestMeTitle guestMeSub guestMeCta \
     exit 1
   fi
 done
-# 本地范围那句话必须由 formatRadius 出半径，坐标不许进 UI（沿用首页那条契约的形状）。
-if ! grep -qF 't("locScopeMapPick", { radius: formatRadius(location.custom.radiusMeters) })' "$I18N_SHELL_CHROME"; then
-  echo "  FAIL [I18N-SETTINGS-001]: 地图选点那句的范围不再由 formatRadius 给出。" >&2
+# 本地范围那句不许再声明覆盖范围（HOME-RADIUS-001）：半径不喂任何查询，
+# 而 app-shell 里也不该出现中文硬编码 —— 这句必须由字典出。
+if ! grep -qF 't("locScopeMapPick")' "$I18N_SHELL_CHROME"; then
+  echo "  FAIL [I18N-SETTINGS-001]: app-shell 不再读 locScopeMapPick 这个键（首页那句又硬编码了？）。" >&2
   exit 1
 fi
 # 设置页：语言入口自己必须是翻译，不能再拼两种语言。
