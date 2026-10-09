@@ -91,122 +91,67 @@ describe("LocalNetClient post publishing", () => {
 // 场景：server 第一页全返别人的帖（agent_linh integration seeds 或更晚
 // 发的其他 user），commander 自己发的帖在第二页才出现。客户端必须分页
 // 找到自己帖为止，不能 first-page-empty 返 0。
-describe("LocalNetClient listMyFeedPosts pagination (R16.6)", () => {
-  it("paginates past first page when viewer's own posts are not in page 1", async () => {
-    const userId = "user_viewer_paginate";
+// 我的主页的帖子：服务端按作者取，不再把全局动态翻几页再在客户端挑。
+// 原来的做法（翻最多 10 页 × 50 条）在库里有上千条别人的帖子时必空白 —— 本机实测：
+// 比我最新一条还新的帖子有 1812 条，我的 23 条根本进不了前 500 条。
+describe("LocalNetClient listMyFeedPosts asks the server for my own posts (profile P0)", () => {
+  async function mine(userId: string, posts: unknown[], extra: Record<string, unknown> = {}) {
     const store = await authenticatedStore(userId);
-    let page = 0;
-    const requestedPaths: string[] = [];
+    const envelopes: Array<Record<string, unknown>> = [];
+    const publicCalls: string[] = [];
     const client = new LocalNetClient({
       baseUrl: "https://api.proxy.test",
       secureSessionStore: store,
       authClient: {
-        request: async () => { throw new Error("authenticated listMyFeedPosts must use public feed"); },
-        requestPublic: async (path, init) => {
-          page += 1;
-          requestedPaths.push(`${init.method} ${path}`);
-          if (page === 1) {
-            // 第一页 3 条全别人的帖 — 不含 viewer.
-            return {
-              status: 200,
-              json: async () => ({
-                posts: [
-                  { postId: "post_other_1", authorId: "agent_linh", authorType: "AGENT", body: "seed 1", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-09-03T10:00:00Z", sceneType: "UNKNOWN" },
-                  { postId: "post_other_2", authorId: "user_stranger", authorType: "USER", body: "seed 2", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-09-03T10:01:00Z", sceneType: "UNKNOWN" },
-                  { postId: "post_other_3", authorId: "user_other", authorType: "USER", body: "seed 3", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-09-03T10:02:00Z", sceneType: "UNKNOWN" }
-                ],
-                media: {},
-                nextCursor: "cursor_page_2",
-                hasMore: true
-              })
-            };
-          }
-          // 第二页包含 viewer 自己的 2 条 — 必须立刻返回。
-        if (page === 2) {
-            return {
-              status: 200,
-              json: async () => ({
-                posts: [
-                  { postId: "post_mine_1", authorId: userId, authorType: "USER", body: "我的帖 1", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-08-25T00:00:00Z", sceneType: "UNKNOWN" },
-                  { postId: "post_mine_2", authorId: userId, authorType: "USER", body: "我的帖 2", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-08-24T00:00:00Z", sceneType: "UNKNOWN" }
-                ],
-                media: { post_mine_1: [], post_mine_2: [] },
-                nextCursor: "cursor_page_3",
-                hasMore: false
-              })
-            };
-          }
-          throw new Error(`unexpected page ${page}`);
-        }
-      }
-    });
-
-    const mine = await client.listMyFeedPosts();
-    expect(mine.posts.map((p) => p.postId)).toEqual(["post_mine_1", "post_mine_2"]);
-    expect(mine.posts.every((p) => p.authorId === userId)).toBe(true);
-    expect(page).toBe(2); // 必须翻 2 页才停 (不准只拉第一页)。
-  });
-
-  it("returns immediately on first page when viewer's own posts are already there", async () => {
-    const userId = "user_viewer_fast";
-    const store = await authenticatedStore(userId);
-    let pages = 0;
-    const client = new LocalNetClient({
-      baseUrl: "https://api.proxy.test",
-      secureSessionStore: store,
-      authClient: {
-        request: async () => { throw new Error("unused"); },
-        requestPublic: async () => {
-          pages += 1;
+        request: async (_path, init) => {
+          envelopes.push(init.body as Record<string, unknown>);
           return {
             status: 200,
             json: async () => ({
-              posts: [
-                { postId: "post_mine_x", authorId: userId, authorType: "USER", body: "hi", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-09-03T00:00:00Z", sceneType: "UNKNOWN" }
-              ],
-              media: { post_mine_x: [] },
-              nextCursor: "cursor_x",
-              hasMore: true
+              commandId: "command_mine_001", outcome: "ACCEPTED", aggregate: { type: "Feed", id: "", version: 0, state: "LISTED" }, eventRefs: [],
+              correlationId: "correlation_mine_001",
+              operationRef: JSON.stringify({ posts, media: {}, nextCursor: "", hasMore: false, ...extra })
             })
           };
-        }
+        },
+        requestPublic: async (path) => { publicCalls.push(path); throw new Error("my posts must never be scraped from the public feed"); }
       }
     });
+    return { client, envelopes, publicCalls };
+  }
+  const post = (id: string, author: string) => ({ postId: id, authorId: author, authorType: "USER", body: id, mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-08-25T00:00:00Z", sceneType: "UNKNOWN" });
 
-    const mine = await client.listMyFeedPosts();
-    expect(mine.posts.map((p) => p.postId)).toEqual(["post_mine_x"]);
-    expect(pages).toBe(1); // 第一页就有 viewer 帖, 不需要翻。
+  it("sends ONE authenticated request filtered to my account id, never walks the global feed", async () => {
+    const { client, envelopes, publicCalls } = await mine("user_viewer_a", [post("post_mine_1", "user_viewer_a"), post("post_mine_2", "user_viewer_a")]);
+    const read = await client.listMyFeedPosts();
+    expect(read.posts.map((p) => p.postId)).toEqual(["post_mine_1", "post_mine_2"]);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.commandType).toBe("ListFeedPosts");
+    expect(envelopes[0]!.payload).toMatchObject({ authorIds: ["user_viewer_a"], limit: 50 });
+    expect(publicCalls).toEqual([]);
   });
 
-  it("returns empty array when viewer truly has zero posts after paginating", async () => {
-    const userId = "user_viewer_empty";
-    const store = await authenticatedStore(userId);
-    let pages = 0;
+  it("an empty answer is a real answer (no posts yet), and a cursor is passed through for the next page", async () => {
+    const { client, envelopes } = await mine("user_viewer_b", [], { nextCursor: "", hasMore: false });
+    expect((await client.listMyFeedPosts()).posts).toEqual([]);
+    await client.listMyFeedPosts("cursor_2");
+    expect(envelopes[1]!.payload).toMatchObject({ cursor: "cursor_2", authorIds: ["user_viewer_b"] });
+  });
+
+  it("other people's profiles use the public feed with the author filter, one request", async () => {
+    const store = await authenticatedStore("user_viewer_c");
+    const paths: string[] = [];
     const client = new LocalNetClient({
-      baseUrl: "https://api.proxy.test",
-      secureSessionStore: store,
+      baseUrl: "https://api.proxy.test", secureSessionStore: store,
       authClient: {
         request: async () => { throw new Error("unused"); },
-        requestPublic: async () => {
-          pages += 1;
-          return {
-            status: 200,
-            json: async () => ({
-              posts: [
-                { postId: `p${pages}`, authorId: "user_stranger", authorType: "USER", body: "others", mediaRefs: [], visibility: "PUBLIC", cityScope: "hanoi", status: "PUBLISHED", contextRefs: [], createdAt: "2026-09-03T00:00:00Z", sceneType: "UNKNOWN" }
-              ],
-              media: {},
-              nextCursor: pages < 2 ? "next" : "",
-              hasMore: pages < 2
-            })
-          };
-        }
+        requestPublic: async (path) => { paths.push(path); return { status: 200, json: async () => ({ posts: [post("p1", "user_other")], media: {}, nextCursor: "", hasMore: false }) }; }
       }
     });
-
-    const mine = await client.listMyFeedPosts();
-    expect(mine.posts).toEqual([]);
-    expect(pages).toBe(2); // 翻到底 (hasMore=false) 后停止, 不无限翻。
+    const read = await client.listPostsByAuthors(["user_other"], 50);
+    expect(read.posts).toHaveLength(1);
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toContain("authors=user_other");
   });
 });
 

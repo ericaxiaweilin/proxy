@@ -80,7 +80,7 @@ import { GrowthClient } from "../growth-client";
 import { BenefitHubSurface } from "./benefit-hub";
 import { MyGrowthSurface } from "./my-benefits";
 import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
-// STORE-REC-MANAGE-001: 推荐管理整屏（页签 + 列表 + 详情 + 表单）。
+// STORE-REC-MANAGE-001: 店铺推荐整屏（页签 + 列表 + 详情 + 表单）。
 // storeonboarding 的 client 现在只在那一屏里用，me.tsx 不再直接持有它。
 import { StoreRecommendationManage } from "./store-recommendation-manage";
 import { OrderPermissionGate, ProviderApplicationSurface } from "./provider-application";
@@ -236,10 +236,10 @@ interface PersonaConfig {
   alert?: { icon: string; title: string; desc: string; route: string; tag: string };
 }
 
-// STORE-TILES-001：「推荐管理」页的三条入口。
+// STORE-TILES-001：「店铺推荐」页的三条入口。
 //
-// 产品稿把「企业 / 店铺」组从 4 行平铺整合成 2 个入口磁贴（我的店铺 / 推荐管理），
-// 这 3 条推荐相关入口原样搬进「推荐管理」，一个都没删：
+// 产品稿把「企业 / 店铺」组从 4 行平铺整合成 2 个入口磁贴（我的店铺 / 店铺推荐），
+// 这 3 条推荐相关入口原样搬进「店铺推荐」，一个都没删：
 //   · 推荐商铺进体系 —— 把场地 / 商家推荐进体系（STORE-REC-001 钉的就是这条）
 //   · 我推荐的店 —— 推荐人自己的进展（STORE-REC-007）
 //   · 推荐评估队列 —— 运营侧出结论（STORE-REC-002 / 004，operator-only）
@@ -258,7 +258,6 @@ const STORE_REC_MANAGE_TABS: Array<{ id: "mine" | "new"; label: string }> = [
 const STORE_REC_QUEUE_ROW: MenuRow & { route: string } = {
   icon: "target",
   label: "推荐评估队列",
-  desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）",
   route: "storerecqueue"
 };
 
@@ -281,52 +280,54 @@ const REQUESTER_ME: PersonaConfig = {
     {
       id: "personal_profile",
       title: "个人管理",
-      hint: "基本信息、二维码、状态管理在一个页里",
       rows: [
-        { icon: "profile-ring", label: "个人管理", desc: "基本信息 · 二维码 · 状态管理 (可接单)", grad: true, route: "personalmanage" },
-        { icon: "profile-ring", label: "个人主页", desc: "对外展示 · Threads R2 · 名片、动态、能力、可用时间", route: "personalhub" },
-        { icon: "arrow-up-right", label: "社媒与联系", desc: "TikTok、Zalo、Instagram 与可见范围", route: "socialidentity" },
-        { icon: "route", label: "访问与转化", desc: "渠道 → 主页 → 聊天 → 订单", route: "socialanalytics" },
+        { icon: "profile-ring", label: "个人管理", grad: true, route: "personalmanage" },
+        { icon: "profile-ring", label: "个人主页", route: "personalhub" },
+        { icon: "arrow-up-right", label: "社媒与联系", route: "socialidentity" },
+        { icon: "route", label: "访问与转化", route: "socialanalytics" },
         // ORDER-PERMISSION-001：接单权限申请入口 —— 实名 + 本人照片，运营审核；任何人可申请，不按性别设门。
-        { icon: "kyc-logo", label: "KYC认证", desc: "实名 + 证件 + 履约条款 · 通过后开放接单和 AI 分身", route: "providerapply" }
+        { icon: "kyc-logo", label: "KYC认证", route: "providerapply" }
       ]
     },
     {
       id: "my_market",
       title: "我的市场",
-      hint: "个人资产",
       rows: [
-        { icon: "◎", label: "我的场景", desc: "R15.13 · 我发起的 Scene 与收到的邀请", route: "myscenes" },
-        { icon: "diamond", label: "我的订单", desc: "我发布的 / 我参与的已成交订单", route: "myorders" },
-        { icon: "clock", label: "能力与可用时间", desc: "能力、主题、区域与空闲时间", route: "available" },
-        { icon: "ring", label: "我的活动", desc: "已参加 / 我发起的活动", route: "myactivities" },
-        { icon: "star", label: "收藏", desc: "场景灵感、商家、Creator、动态与活动", route: "favorites" },
-        { icon: "growth-logo", label: "我的权益", desc: "等级、成长值、成长任务与可领取的活动权益", route: "benefits" }
+        { icon: "◎", label: "我的场景", route: "myscenes" },
+        { icon: "diamond", label: "我的订单", route: "myorders" },
+        { icon: "clock", label: "能力与可用时间", route: "available" },
+        { icon: "ring", label: "我的活动", route: "myactivities" },
+        { icon: "star", label: "收藏", route: "favorites" },
+        { icon: "growth-logo", label: "我的权益", route: "benefits" }
       ]
     },
     {
       id: "biz",
-      title: "企业 / 店铺",
-      hint: "经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）",
+      // STORE-TILES-003（2026-10-09，产品原话：「把用户侧 我的-企业/店铺 改为 场景推荐」）：
+      // 组名从「企业 / 店铺」改成「场景推荐」。旧组名读起来是**商家侧**的经营模块，
+      // 又和并排的「我的店铺」撞在一起 —— 这正是 STORE-TILES-002 那条抱怨的另一半。
+      // 这一组在用户侧干的其实是「把好的场景 / 店铺推荐进体系」，名字跟着用户侧的用途走。
+      // ⚠️ id 仍是 "biz"：effectiveSections 按 id 把服务端下发的 rows 合并进来，
+      // 改 id 会让那一路静默断掉。两个磁贴与四个路由一字未动。
+      title: "场景推荐",
       // STORE-TILES-001：按产品稿把这组从 4 行平铺整合成 2 个入口磁贴。
       // 原来的 4 个目的地一个都没丢 —— 我的店铺 → bdash（企业 / 店铺资料）；
-      // 推荐管理 → storerecmanage，页内就是 STORE_REC_MANAGE_TABS 那 2 个页签。
+      // 店铺推荐 → storerecmanage，页内就是 STORE_REC_MANAGE_TABS 那 2 个页签。
       // rows 留空是刻意的：服务端下发的 managed sections 仍按 id 合并进 rows
       // （见 effectiveSections），那一路不能因为这里换成磁贴就断掉。
       tiles: [
-        { icon: "home", label: "我的店铺", desc: "企业 · 经营 · 工作台", route: "bdash" },
-        { icon: "star", label: "推荐管理", desc: "推荐 · 状态 · 审核", route: "storerecmanage" }
+        { icon: "home", label: "我的店铺", route: "bdash" },
+        { icon: "star", label: "店铺推荐", route: "storerecmanage" }
       ],
       rows: []
     },
     {
       id: "account",
       title: "账户",
-      hint: "安全与结算",
       rows: [
-        { icon: "coin", label: "钱包与结算", desc: "付款、收入、退款与记录", route: "wallet" },
-        { icon: "ai-manage", label: "AI 管理", desc: "分身状态 · 照片与动态盘点", route: "aimanage" },
-        { icon: "gear", label: "设置与隐私", desc: "安全、推荐、通知与隐私（含数据下载/删除）", route: "appbehavior" }
+        { icon: "coin", label: "钱包与结算", route: "wallet" },
+        { icon: "ai-manage", label: "AI 管理", route: "aimanage" },
+        { icon: "gear", label: "设置与隐私", route: "appbehavior" }
       ]
     },
     // AI-FACET-CLUSTER-001: 好友与关系（谁）→ AI 分身（生成照片/视频素材）→
@@ -340,11 +341,10 @@ const REQUESTER_ME: PersonaConfig = {
     {
       id: "identity_content",
       title: "关系与内容",
-      hint: "好友与关系管运营 · AI 分身出内容 · FACET 管投放",
       rows: [
-        { icon: "target", label: "好友与关系", desc: "运营关系图 · 标签、备注、来源与互动记录", grad: true, route: "friendcrm" },
-        { icon: "aiPersona", label: "AI分身", desc: "用你授权的形象生成照片、视频内容", route: "aiidentity" },
-        { icon: "facet-logo", label: "FACET", desc: "同一份内容，按关系对象投放给谁看", route: "facet" }
+        { icon: "target", label: "好友与关系", grad: true, route: "friendcrm" },
+        { icon: "aiPersona", label: "AI分身", route: "aiidentity" },
+        { icon: "facet-logo", label: "FACET", route: "facet" }
       ]
     }
   ]
@@ -363,36 +363,34 @@ const BUSINESS_ME: PersonaConfig = {
   // STORE-HUB-NAV-001：bdash 已经改成「我的店铺」hub，这条「Proxy 中心」（应用状态 /
   // 主体权限 / 业务工作区）不能跟着落到店铺列表上 —— 它的原目的地是企业 / 店铺资料
   // （企业主体那几行就是「主体权限」），跟着搬到 bdashprofile。
-  settingsRow: { icon: "P", label: "Proxy 中心", desc: "应用状态、主体权限与业务工作区", route: "bdashprofile" },
+  settingsRow: { icon: "P", label: "Proxy 中心", route: "bdashprofile" },
   sections: [
     {
       title: "关系",
-      hint: "真人网络 · 个人轻 CRM 关系图",
       rows: [
-        { icon: "target", label: "好友与关系", desc: "关系图 · 轻 CRM · 标签、备注、来源与互动记录", grad: true, route: "friendcrm" }
+        { icon: "target", label: "好友与关系", grad: true, route: "friendcrm" }
       ]
     },
     {
       title: "商家 · 我的",
-      hint: "业务资产",
       rows: [
         { icon: "◎", label: "Creator 经营", desc: "功能预览 · 实时数据待接入", grad: true, route: "trustedteam" },
-        { icon: "券", label: "券", desc: "查看真实券状态", route: "vouchers" },
-        { icon: "↗", label: "活动导流", desc: "商家活动 · 可报名", route: "merchantcampaign" },
+        { icon: "券", label: "券", route: "vouchers" },
+        { icon: "↗", label: "活动导流", route: "merchantcampaign" },
         // STORE-CONSOLIDATE-001（2026-10-02）：「线上店铺」入口已并入「我的店铺」
         // （企业 / 店铺组，bdash → MyStoresHub）。两个 tile 点进去是同一页，留着就是
         // 用户看到的"重复的2个"。路由 merchantstorefront 保留（深链 + 店内导航还指它，
         // 渲染的也是 hub），删的只是这个菜单 tile。
         { icon: "₫", label: "销售中心", desc: "功能预览 · 实时数据待接入", route: "outcomehistory" },
-        { icon: "✦", label: "经营", desc: "门店经营助手", route: "enterpriseops" },
+        { icon: "✦", label: "经营", route: "enterpriseops" },
         // STORE-REC-002/004: 评估队列对 BUSINESS 身份也要可达 —— 运营更可能挂在这个
         // 身份下，而此前入口只挂在 REQUESTER 的「企业 / 店铺」组里。
         // 队列本身是 operator-only（服务端白名单），普通商家点进去会看到明确的
         // 「没有运营权限」，而不是一个空列表。
-        { icon: "target", label: "推荐评估队列", desc: "运营查看用户与小美推荐进体系的商铺（需运营权限）", route: "storerecqueue" },
+        { icon: "target", label: "推荐评估队列", route: "storerecqueue" },
         // BENEFIT-WIRE-001: 商家侧核销。需要店铺主体，没有主体时子页会说清楚，
         // 而不是塞一个空 merchantId 让核销必然失败。
-        { icon: "gift", label: "权益核销", desc: "扫描用户出示的权益验证码并确认核销", route: "benefitredeem" }
+        { icon: "gift", label: "权益核销", route: "benefitredeem" }
       ]
     }
   ]
@@ -407,11 +405,9 @@ function toManagedMenuSections(sections: ExperienceMenuSection[]): MenuSection[]
   return sections.map((section) => ({
     id: section.id,
     title: section.title,
-    hint: section.hint ?? "",
     rows: section.items.map((item) => ({
       icon: item.icon,
       label: item.label,
-      desc: item.description,
       action: item.action,
       ...(item.accent !== undefined ? { grad: item.accent } : {})
     }))
@@ -1010,7 +1006,7 @@ export function MeSurface({
   const [socialOpenError, setSocialOpenError] = useState<string | undefined>(undefined);
   const [socialSettings, setSocialSettings] = useState({ merchant: true, profile: false, influence: false });
   const [collaboration, setCollaboration] = useState({ enabled: false, types: ["探店", "UGC"], rate: "", contact: "" });
-  // STORE-REC-MANAGE-001: 推荐表单的状态跟着「推荐管理」整屏一起搬进了
+  // STORE-REC-MANAGE-001: 推荐表单的状态跟着「店铺推荐」整屏一起搬进了
   // ./store-recommendation-manage —— me.tsx 不再自己持有一份，否则同一件事
   // 会有两处状态、两条提交路径。
   // 个人二维码复制反馈（PROFILE-QR-001）。
@@ -1315,71 +1311,13 @@ export function MeSurface({
       try {
         const read = await localNet.listMyFeedPosts();
         if (cancelled) return;
-        if (read.posts.length > 0) {
-          setProfilePosts(read.posts);
-          setProfileMedia(read.media);
-          setProfilePostsState("ready");
-          return;
-        }
-        let cursor: string | undefined = undefined;
-        let hasMore = true;
-        const allPosts: typeof read.posts = [];
-        const allMedia: Record<string, FeedMediaItem[]> = {};
-        let pages = 0;
-        while (hasMore && pages < 4 && !cancelled) {
-          const page = await localNet.listFeedPosts(cursor, 50);
-          if (cancelled) return;
-          allPosts.push(...page.posts);
-          Object.assign(allMedia, page.media);
-          cursor = page.nextCursor;
-          hasMore = page.hasMore;
-          pages += 1;
-        }
-        if (cancelled) return;
-        const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-        const filtered = allPosts.filter((post) => post.authorId === viewerAccountId || post.authorDisplayName === profileDraft.name || post.body.includes(myHandle) || post.authorId === profileDraft.handle || post.authorId === profileDraft.name);
-        if (filtered.length > 0) {
-          const media: Record<string, FeedMediaItem[]> = {};
-          for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
-          setProfilePosts(filtered);
-          setProfileMedia(media);
-        } else {
-          setProfilePosts(read.posts);
-          setProfileMedia(read.media);
-        }
-        // 走到这里说明两次读取都成功了（可能是空列表）—— 空是答案，不是失败。
+        // 服务端按作者取：空就是真的没发过（空是答案，不是失败）；取不到才是失败。
+        setProfilePosts(read.posts);
+        setProfileMedia(read.media);
         setProfilePostsState("ready");
       } catch {
-        try {
-          let cursor: string | undefined = undefined;
-          let hasMore = true;
-          const allPosts: FeedPost[] = [];
-          const allMedia: Record<string, FeedMediaItem[]> = {};
-          let pages = 0;
-          while (hasMore && pages < 4 && !cancelled) {
-            const page = await localNet.listFeedPosts(cursor, 50);
-            if (cancelled) return;
-            allPosts.push(...page.posts);
-            Object.assign(allMedia, page.media);
-            cursor = page.nextCursor;
-            hasMore = page.hasMore;
-            pages += 1;
-          }
-          if (cancelled) return;
-          const myHandle = profileDraft.handle.startsWith("@") ? profileDraft.handle : `@${profileDraft.handle}`;
-          const filtered = allPosts.filter((post) => post.authorId === viewerAccountId || post.authorDisplayName === profileDraft.name || post.body.includes(myHandle));
-          if (filtered.length > 0) {
-            const media: Record<string, FeedMediaItem[]> = {};
-            for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
-            setProfilePosts(filtered);
-            setProfileMedia(media);
-          }
-          setProfilePostsState("ready");
-        } catch {
-          // 两条路都失败。以前这里直接把异常吞掉（catch 体是空的）：数组留空 →
-          // 页面显示「0 条动态」，和「你还没发过动态」一模一样。失败必须自己说出来。
-          setProfilePostsState("failed");
-        }
+        // 以前这里吞掉异常、数组留空 → 页面显示「0 条动态」，和「你还没发过动态」一模一样。失败必须自己说出来。
+        if (!cancelled) setProfilePostsState("failed");
       }
     })();
     return () => { cancelled = true; };
@@ -1548,7 +1486,14 @@ export function MeSurface({
   // STORE-TILES-001：磁贴跟菜单行走**同一条**路由解析。不另开一套，否则
   // 同一个目的地会出现「点磁贴一种行为、点行另一种行为」。
   function pressTile(tile: MenuTile): void {
-    pressRow({ icon: tile.icon, label: tile.label, desc: tile.desc, route: tile.route });
+    // 2026-10-09：`desc` 可选 + tsconfig 的 `exactOptionalPropertyTypes` ⇒ 不许
+    // `desc: tile.desc`（undefined 赋给可选属性直接编译不过）。缺席就真的不写这个键。
+    pressRow({
+      icon: tile.icon,
+      label: tile.label,
+      route: tile.route,
+      ...(tile.desc !== undefined ? { desc: tile.desc } : {})
+    });
   }
 
   function pressRow(row: MenuRow): void {
@@ -1570,8 +1515,17 @@ export function MeSurface({
       return;
     }
     if (row.route) {
-      // 菜单行自带 label/desc/icon，注册表里没有这条路由时用行自身的文案兜底。
-      setSubPage(meSubPage(row.route) ?? { title: row.label, desc: row.desc, icon: row.icon, route: row.route });
+      // 菜单行自带 label/icon，注册表里没有这条路由时用行自身的文案兜底。
+      // 2026-10-09：`desc` 可选 + `exactOptionalPropertyTypes` ⇒ 用条件展开，别写
+      // `desc: row.desc`（那会编译不过，也把「没有描述」伪装成一个 undefined 键）。
+      setSubPage(
+        meSubPage(row.route) ?? {
+          title: row.label,
+          icon: row.icon,
+          route: row.route,
+          ...(row.desc !== undefined ? { desc: row.desc } : {})
+        }
+      );
     }
   }
 
@@ -1828,7 +1782,7 @@ export function MeSurface({
               <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.detailTitle}>{subPage.title}</Text>
-            <Text selectable style={styles.detailSub}>{subPage.desc}</Text>
+            {subPage.desc ? <Text selectable style={styles.detailSub}>{subPage.desc}</Text> : null}
             <View style={styles.fallbackSection}><View style={styles.detailSectionHead}><Text selectable style={styles.detailSectionTitle}>我发起的场景</Text></View>
               {myScenes.length === 0 ? <View style={styles.prototypeCard}><Text selectable style={styles.prototypeCardTitle}>还没有发起场景</Text></View> : myScenes.map((row) => <View key={row.sceneId} style={styles.prototypeCard}><Text selectable style={styles.prototypeCardTitle}>{row.title}</Text><Text selectable style={styles.prototypeCardDesc}>{row.status} · {new Date(row.startsAt).toLocaleString()}</Text></View>)}
             </View>
@@ -2430,15 +2384,13 @@ export function MeSurface({
               <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.detailTitle}>能力与可用时间</Text>
-            <Text selectable style={styles.detailSub}>维护你愿意接受邀请的能力。</Text>
-
             <Pressable onPress={() => setAvailabilityPanel("CALENDAR")} style={styles.availabilitySummaryCard}>
               <View style={styles.availabilityRuleIcon}><ProxySymbolIcon color={color.ink} symbol="clock" size={22} /></View>
               <View style={styles.availabilityRuleCopy}><Text selectable style={styles.prototypeCardTitle}>可用时间</Text><Text selectable style={styles.abilitySub}>{describeAvRule(avRule)} · {Object.keys(avOverrides).length} 个例外</Text></View>
               <Text selectable style={styles.walletActionArrow}>›</Text>
             </Pressable>
 
-            <View style={styles.detailSectionHead}><Text selectable style={styles.detailSectionTitle}>我的能力</Text><Text selectable style={styles.detailSectionHint}>{abilities.length} 项 · {passportError ? "同步失败" : "已接 supply"}</Text></View>
+            <View style={styles.detailSectionHead}><Text selectable style={styles.detailSectionTitle}>我的能力</Text><Text selectable style={styles.detailSectionHint}>{abilities.length} 项{passportError ? " · 同步失败" : ""}</Text></View>
             {passportError ? <Text selectable style={{ color: "#B00020", fontSize: 11, marginBottom: 6 }}>{passportError}</Text> : null}
             {abilities.map((ability) => (
               <View key={ability.id} style={styles.abilityCompactCard}>
@@ -2560,10 +2512,8 @@ export function MeSurface({
               <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>个人管理</Text>
-            <Text selectable style={styles.subPageSub}>基本信息、二维码、状态管理都集中在这里。</Text>
 
             <Text selectable style={styles.customSectionTitle}>基本信息</Text>
-            <Text selectable style={styles.customSectionHint}>公开主页展示</Text>
             <View style={styles.profileManageRow}>
               <View style={styles.profileManageAva}>
                 {profileAvatarUri ? <CircularAvatarImage accessibilityLabel={`${profileDraft.name}头像`} size={88} uri={profileAvatarUri} /> : <Text selectable style={styles.profileManageAvaLetter}>{profileDraft.name.slice(0, 1).toUpperCase()}</Text>}
@@ -2582,10 +2532,8 @@ export function MeSurface({
             </Pressable>
 
             <Text selectable style={styles.customSectionTitle}>二维码</Text>
-            <Text selectable style={styles.customSectionHint}>保存、复制、放大都在这</Text>
             <QrCard
               title={`${profileDraft.name} · Proxy`}
-              desc={manageQrPayload ? "扫码打开你的 Proxy 主页；也可以直接存图或复制链接发给好友。" : "还没设置个人主页名，先起一个才能生成二维码。"}
               qrValue={manageQrPayload ?? undefined}
               qrSize={160}
               shotRef={qrCardShotRef}
@@ -2600,7 +2548,6 @@ export function MeSurface({
             />
 
             <Text selectable style={styles.customSectionTitle}>状态管理</Text>
-            <Text selectable style={styles.customSectionHint}>决定你出现在人物发现、机会分发的方式</Text>
             <Pressable
               accessibilityLabel="选择状态"
               onPress={() => setAvailabilityOpen(true)}
@@ -2970,7 +2917,6 @@ export function MeSurface({
                 </Pressable>
                 {qrCaption ? <Text selectable style={styles.qrRealHandle}>{qrCaption}</Text> : null}
               </View>
-              <Text selectable style={styles.qrRealHint}>{storeId ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。可用于桌牌、海报和 Creator 分享。点二维码可放大。" : "点二维码可放大，方便对方扫描；扫出来是一张标准 vCard 名片，存进通讯录即可。TikTok / Zalo 是否展示，继续遵循你的可见范围。"}</Text>
               <View style={styles.qrRealActions}>
                 <Pressable onPress={() => void copyQrText(qrCaption)} style={styles.qrRealBtnGhost}>
                   <Text selectable style={styles.qrRealBtnTextGhost}>{storeId ? "复制店名" : "复制 @handle"}</Text>
@@ -2995,7 +2941,6 @@ export function MeSurface({
             {storeId ? null : (
               <>
                 <Text selectable style={styles.customSectionTitle}>扫码后看到</Text>
-                <Text selectable style={styles.customSectionHint}>预览</Text>
                 <View style={styles.privacyLadder}>
                   {[
                     ["1", "Proxy 主页", "姓名、城市、公开能力、Proxy 信誉", "始终"],
@@ -3057,7 +3002,7 @@ export function MeSurface({
             <View style={styles.enterpriseHero}>
               <Text selectable style={styles.enterpriseSkillId}>enterprise_ops</Text>
               <Text selectable style={styles.enterpriseHeroTitle}>企业运营助手</Text>
-              <Text selectable style={styles.enterpriseHeroText}>上传现实资料，或直接说"建店、整理商品、做内容、复盘经营"。系统只生成 Draft，业务真源始终要由商家确认。</Text>
+              <Text selectable style={styles.enterpriseHeroText}>上传现实资料，或直接说"建店、整理商品、做内容、复盘经营"。系统只生成草稿，最终要由你确认。</Text>
             </View>
             <View style={styles.enterpriseQuickGrid}>
               {/* UI-ENTERPRISE-HONEST-001：这里原来有 4 张卡（把店铺数字化 / 整理商品与
@@ -3069,16 +3014,15 @@ export function MeSurface({
 
                   这不是 UI 小瑕疵，是**承诺了不存在的能力**。现在只留真能做的这一张，
                   能力没做出来之前不加回来 —— 加一张能点的卡片比不加更糟。 */}
-              {[["把店铺数字化", "照片 / 菜单 / 产品 / 品牌资料"]].map(([title, desc]) => (
+              {["把店铺数字化"].map((title) => (
                 <Pressable key={title} accessibilityLabel={title} onPress={() => setEnterpriseOpsStage("DRAFT_READY")} style={styles.enterpriseQuick}>
                   <Text selectable style={styles.enterpriseQuickTitle}>{title}</Text>
-                  <Text selectable style={styles.enterpriseQuickDesc}>{desc}</Text>
                 </Pressable>
               ))}
             </View>
             <View style={styles.detailSectionHead}>
               <Text selectable style={styles.detailSectionTitle}>给 Proxy 看现实资料</Text>
-              <Text selectable style={styles.detailSectionHint}>{enterpriseAssets.length} 个 Source Assets</Text>
+              <Text selectable style={styles.detailSectionHint}>{enterpriseAssets.length} 份</Text>
             </View>
             <View style={styles.enterpriseAssetTray}>
               {enterpriseAssets.map((asset) => (
@@ -3261,7 +3205,7 @@ export function MeSurface({
             <View style={styles.storeTop}>
               <View style={styles.storeTopRow}>
                 <Gradient from={color.magenta} to={color.violet} style={styles.storeAvatar}>
-                  <Text selectable style={styles.storeAvatarText}>B</Text>
+                  <Text selectable style={styles.storeAvatarText}>{(liveShopName ?? persona.name).slice(0, 1).toUpperCase()}</Text>
                 </Gradient>
                 <View style={styles.heroCopy}>
                   <Text selectable style={styles.heroName}>{liveShopName ?? persona.name}</Text>
@@ -3272,41 +3216,41 @@ export function MeSurface({
 
             <QrCard
               title={merchantCard ? "商家身份二维码" : "个人二维码"}
-              desc={merchantCard
-                ? "扫这张码会把门店存成联系人（标准 vCard 名片），任何手机的相机都能扫。点下方按钮打开可放大、存图、分享的完整页面。"
-                : "还没有接入店铺主体，这里先放你的个人名片。点下方按钮可以放大、存图、分享。"}
               actionLabel={merchantCard ? "打开商家二维码" : "打开我的二维码"}
               onAction={() => openSubPage("personalqr", { backRoute: "bdashprofile", ...(merchantId ? { qrStoreId: merchantId, qrTitle: "商家二维码" } : {}) })}
               qrValue={merchantQrValue ?? undefined}
             />
 
-            <View style={styles.subSection}>
-              <Text selectable style={styles.subSectionTitle}>企业主体</Text>
-              {[
-                ["主体名称", "Bonsaidon · 海鲜自助"],
-                ["经营城市", "河内"],
-                ["经营节点", "3 个"],
-                ["身份验证", "已认证 · Proxy 商家身份"]
-              ].map(([label, value]) => (
-                <View key={label} style={styles.subRow}>
-                  <Text selectable style={styles.subRowLabel}>{label}</Text>
-                  <Text selectable style={styles.subRowValue}>{value}</Text>
+            {/* BDASH-SHOP-002（2026-10-09）：这张「企业主体」表原来是**写死**的
+                ——「Bonsaidon · 海鲜自助 / 河内 / 3 个 / 已认证 · Proxy 商家身份」，
+                而且**没有店铺的用户也会看到**：等于把一家不存在的店、一个没人做过的
+                核验，当成用户自己的资料显示出来（BDASH-SHOP-001 修 hero 时漏掉的同一张表，
+                那次只删了 hero 上那句 fabricated 的「主体已验证」）。
+
+                现在只留**真有来源**的一行：主体名称 = `useMerchantIdentity` 里的 ACTIVE 账号
+                （和上面 hero 用的是同一个 `liveShopName`）。没有主体就整块不画。
+                「经营城市 / 经营节点 / 身份验证」在后端**没有对应字段**（`MerchantAccount`
+                只有 `{ id, name }`），所以删掉而不是填 `—` —— 三行 `—` 是噪声，不是信息；
+                「未接入」该说的是整块不存在，而不是逐行假装有字段却空着。 */}
+            {liveShopName ? (
+              <View style={styles.subSection}>
+                <Text selectable style={styles.subSectionTitle}>企业主体</Text>
+                <View style={styles.subRow}>
+                  <Text selectable style={styles.subRowLabel}>主体名称</Text>
+                  <Text selectable style={styles.subRowValue}>{liveShopName}</Text>
                 </View>
-              ))}
-            </View>
+              </View>
+            ) : null}
 
             <Text selectable style={styles.customSectionTitle}>二维码与展示</Text>
-            <Text selectable style={styles.customSectionHint}>Proxy 商家身份</Text>
             <SocialRow
               icon="◈"
               label="门店主页"
-              desc="顾客扫码先看到这家店的公开信息与信誉"
               onPress={() => openSubPage("merchantstorefront")}
             />
             <SocialRow
               icon="⌁"
               label="访问与转化"
-              desc="知道二维码带来多少到店与核销"
               onPress={() => openSubPage("socialanalytics")}
             />
           </ScrollView>
@@ -3341,7 +3285,7 @@ export function MeSurface({
             <Pressable onPress={() => setSubPage(undefined)} style={styles.subPageBack}>
               <ProxyBackGlyph />
             </Pressable>
-            <Text selectable style={styles.subPageTitle}>推荐管理</Text>
+            <Text selectable style={styles.subPageTitle}>店铺推荐</Text>
             <Text selectable style={styles.subPageDesc}>把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。</Text>
             {/* STORE-HUB-004：建店属于 workspace（本屏），不属于「我的店铺」——
                 那一屏只放**已经处理完**的店，还没建出来的店不在里面，所以不能把人指过去。 */}
@@ -3423,7 +3367,7 @@ export function MeSurface({
     }
 
     // STORE-REC-007: 我推荐的店 —— 推荐人自己的进展视图。
-    // STORE-REC-MANAGE-001 之后它是「推荐管理」的页签①，但这条路由不能断
+    // STORE-REC-MANAGE-001 之后它是「店铺推荐」的页签①，但这条路由不能断
     // （深链 / 别处跳过来都得还能到），所以直接落到那一屏的「我推荐的店」页签。
     if (subPage.route === "mystorerecs") {
       return contentWrapper(
@@ -3440,7 +3384,7 @@ export function MeSurface({
     }
 
     // STORE-REC-001 / STORE-REC-MANAGE-001: 推荐商铺进体系 —— 表单本体搬进了
-    // 「推荐管理」的页签②，这条路由直接落到那一个页签（原来的表单状态与提交
+    // 「店铺推荐」的页签②，这条路由直接落到那一个页签（原来的表单状态与提交
     // 逻辑一字未改，只是换了持有者，见 ./store-recommendation-manage）。
     if (subPage.route === "recommendstore") {
       return contentWrapper(
@@ -3468,7 +3412,7 @@ export function MeSurface({
             <ProxyBackGlyph />
           </Pressable>
           <Text selectable style={styles.detailTitle}>{subPage.title}</Text>
-          <Text selectable style={styles.detailSub}>{subPage.desc}</Text>
+          {subPage.desc ? <Text selectable style={styles.detailSub}>{subPage.desc}</Text> : null}
 
           {content?.sections?.map((section, sIdx) => (
             <View key={sIdx} style={styles.fallbackSection}>
@@ -3620,7 +3564,6 @@ export function MeSurface({
           <View key={section.id ?? section.title} style={styles.section}>
             <View style={styles.sectionHead}>
               <Text selectable style={styles.sectionTitle}>{section.title}</Text>
-              <Text selectable style={styles.sectionHint}>{section.hint}</Text>
             </View>
             {section.tiles && section.tiles.length > 0 ? (
               <View style={styles.tileGrid}>
@@ -3630,7 +3573,7 @@ export function MeSurface({
                       <ProxySymbolIcon color={color.ink} size={28} symbol={tile.icon} />
                     </View>
                     <Text selectable style={styles.tileLabel}>{tile.label}</Text>
-                    <Text selectable style={styles.tileDesc}>{tile.desc}</Text>
+                    {tile.desc ? <Text selectable style={styles.tileDesc}>{tile.desc}</Text> : null}
                   </Pressable>
                 ))}
               </View>

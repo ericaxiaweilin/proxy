@@ -103,30 +103,12 @@ export function OtherProfileSurface({ target, engagement, localNet, moderation, 
     let cancelled = false;
     void (async () => {
       try {
-        // 若传入的 posts 为空或少于 1 页，分页扫 feed 按 authorId/name 兜底，避免他人的主页空白
+        // 传进来的帖子为空：直接按作者问服务端（不再翻全局动态再在客户端挑，库里帖子一多就挑不到）。
         if (resolvedPosts.length > 0) return;
-        let cursor: string | undefined = undefined;
-        let hasMore = true;
-        const allPosts: FeedPost[] = [];
-        const allMedia: Record<string, FeedMediaItem[]> = {};
-        let pages = 0;
-        while (hasMore && pages < 4 && !cancelled) {
-          const page = await localNet.listFeedPosts(cursor, 50);
-          if (cancelled) return;
-          allPosts.push(...page.posts);
-          Object.assign(allMedia, page.media);
-          cursor = page.nextCursor;
-          hasMore = page.hasMore;
-          pages += 1;
-        }
-        if (cancelled) return;
-        const filtered = allPosts.filter((post) => post.authorId === target.userId || post.authorDisplayName === target.name);
-        if (filtered.length > 0) {
-          const media: Record<string, FeedMediaItem[]> = {};
-          for (const post of filtered) { const items = allMedia[post.postId]; if (items) media[post.postId] = items; }
-          setResolvedPosts(filtered);
-          setResolvedMedia(media);
-        }
+        const read = await localNet.listPostsByAuthors([target.userId], 50);
+        if (cancelled || read.posts.length === 0) return;
+        setResolvedPosts(read.posts);
+        setResolvedMedia(read.media);
       } catch {}
     })();
     return () => { cancelled = true; };

@@ -227,10 +227,11 @@ export class LocalNetClient {
   }
 
   // 「关注」tab：只取这些作者的帖子（服务端按作者过滤，不依赖他们碰巧在最近 25 条里）。最多 200 个作者、一次 50 条。
-  public async listPostsByAuthors(authorIds: readonly string[], limit = 50): Promise<FeedReadModel> {
+  public async listPostsByAuthors(authorIds: readonly string[], limit = 50, cursor?: string): Promise<FeedReadModel> {
     const ids = authorIds.filter((id) => id !== "").slice(0, 200);
     if (ids.length === 0) return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
     const query = [`limit=${Math.max(1, Math.min(50, limit))}`, `authors=${encodeURIComponent(ids.join(","))}`];
+    if (cursor) query.push(`cursor=${encodeURIComponent(cursor)}`);
     if (this.input.authClient.requestPublic) {
       const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
       if (response.status < 200 || response.status >= 300) {
@@ -239,38 +240,27 @@ export class LocalNetClient {
       const payload = ListFeedPostsPayloadSchema.parse(await response.json());
       return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
     }
-    const result = await this.sendCommand(undefined, "ListFeedPosts", { type: "Feed", id: "local" }, { limit, authorIds: ids }, undefined, true);
+    const result = await this.sendCommand(undefined, "ListFeedPosts", { type: "Feed", id: "local" }, cursor ? { limit, authorIds: ids, cursor } : { limit, authorIds: ids }, undefined, true);
     const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
     return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
   }
 
-  public async listMyFeedPosts(): Promise<FeedReadModel> {
+  /**
+   * 我的主页的帖子：服务端按作者取（以登录身份读，所以我自己的「仅关注者 / 定向」帖子也在）。
+   *
+   * 以前是把全局动态翻最多 10 页 × 50 条、再在客户端挑出自己的 —— 库里只要有几千条别人的帖子
+   * （联调种子 / 老用户）把我的挤出最新 500 条，主页就空白了（P0）。现在直接问服务端「这个作者的帖子」。
+   */
+  public async listMyFeedPosts(cursor?: string, limit = 50): Promise<FeedReadModel> {
     const session = await this.requireSession();
-    // R16.6 fix: paginate through the feed until we find posts owned by the
-    // current viewer. Without paging, the newest N posts (often agent_linh
-    // integration seeds or other users) shadow the viewer's older content and
-    // the profile goes blank. Cap at 10 pages × 50 = 500 to avoid runaway.
-    const PAGE_CAP = 10;
-    const PAGE_SIZE = 50;
-    const mine: FeedReadModel = { posts: [], media: {}, nextCursor: undefined, hasMore: false };
-    let cursor: string | undefined;
-    for (let page = 0; page < PAGE_CAP; page += 1) {
-      const read = await this.listFeedPosts(cursor, PAGE_SIZE);
-      const ownPosts = read.posts.filter((post) => post.authorId === session.userAccountId);
-      mine.posts.push(...ownPosts);
-      for (const post of ownPosts) {
-        const items = read.media[post.postId];
-        if (items) mine.media[post.postId] = items;
-      }
-      if (ownPosts.length > 0) {
-        mine.nextCursor = read.nextCursor;
-        mine.hasMore = read.hasMore;
-        return mine;
-      }
-      if (!read.hasMore || !read.nextCursor) break;
-      cursor = read.nextCursor;
-    }
-    return mine;
+    const result = await this.sendCommand(
+      session,
+      "ListFeedPosts",
+      { type: "Feed", id: "local" },
+      cursor ? { cursor, limit, authorIds: [session.userAccountId] } : { limit, authorIds: [session.userAccountId] }
+    );
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
   }
 
   /**
