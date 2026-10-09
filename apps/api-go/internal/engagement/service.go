@@ -191,6 +191,8 @@ type Repository interface {
 	CountFollowers(ctx context.Context, userID string) (int, error)
 	CountFollowing(ctx context.Context, userID string) (int, error)
 	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
+	// ListFollowing：我关注的全部人（最近关注的在前，最多 limit 个）。客户端启动时一次读回整份，不用逐个 IsFollowing。
+	ListFollowing(ctx context.Context, followerID string, limit int) ([]string, error)
 	SetReaction(ctx context.Context, r Reaction, active bool) (bool, error)
 	AddReply(ctx context.Context, r Reply) error
 	ListRepliesByPost(ctx context.Context, postID string, limit int) ([]Reply, error)
@@ -331,6 +333,32 @@ func (r *MemoryRepository) CountFollowing(_ context.Context, userID string) (int
 		}
 	}
 	return count, nil
+}
+
+// ListFollowing（内存版）：按关注时间倒序。
+func (r *MemoryRepository) ListFollowing(_ context.Context, followerID string, limit int) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rows := []Follow{}
+	for _, f := range r.follows {
+		if f.FollowerID == followerID {
+			rows = append(rows, f)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+			return rows[i].CreatedAt.After(rows[j].CreatedAt)
+		}
+		return rows[i].FolloweeID < rows[j].FolloweeID
+	})
+	out := []string{}
+	for _, f := range rows {
+		if len(out) >= limit {
+			break
+		}
+		out = append(out, f.FolloweeID)
+	}
+	return out, nil
 }
 
 // R15.54 — IsFollowing: actor 是否 follow 了 target
@@ -696,7 +724,7 @@ func NewWithRepository(repository Repository) *Service {
 
 func (s *Service) Supports(commandType string) bool {
 	switch commandType {
-	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "GetReceivedEngagementStats", "RecordFeedPreference", "ReportPost", "MuteAuthor", "UnmuteAuthor", "ListMutedAuthors", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
+	case "FollowProfile", "UnfollowProfile", "GetFollowCounts", "IsFollowing", "ListMyFollowing", "ReactToPost", "ReplyToPost", "ListPostReplies", "RepostPost", "BookmarkPost", "GetPostEngagement", "GetReceivedEngagementStats", "RecordFeedPreference", "ReportPost", "MuteAuthor", "UnmuteAuthor", "ListMutedAuthors", "PinPost", "UnpinPost", "ListPinnedPosts", "ListUserReplies", "ListUserBookmarks":
 		return true
 	default:
 		return false
@@ -719,6 +747,8 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		return s.getFollowCounts(ctx, e)
 	case "IsFollowing":
 		return s.isFollowing(ctx, e)
+	case "ListMyFollowing":
+		return s.listMyFollowing(ctx, e)
 	case "ReactToPost":
 		return s.react(ctx, e)
 	case "ReplyToPost":
@@ -891,6 +921,25 @@ func (s *Service) isFollowing(ctx context.Context, e command.Envelope) command.R
 		accepted.OperationRef = mustMarshal(followingState{IsFollowing: is})
 		return accepted
 	}()
+}
+
+// ---------- ListMyFollowing ----------
+
+const maxListFollowing = 2000
+
+// listMyFollowing：我关注的全部人（以登录身份为准，不看 payload）。客户端启动时读回整份，
+// 这样「关注」状态不依赖信息流里碰巧出现了谁——重启后也不会丢。
+func (s *Service) listMyFollowing(ctx context.Context, e command.Envelope) command.Result {
+	if e.Actor.Type != "USER" || e.Actor.ID == "" {
+		return command.Rejected(e, "FOLLOW_NOT_ALLOWED", "AUTHORIZATION", "AFTER_USER_ACTION", "engagement.follow_not_allowed", nil)
+	}
+	ids, err := s.repository.ListFollowing(ctx, e.Actor.ID, maxListFollowing)
+	if err != nil {
+		return command.Rejected(e, "LIST_FOLLOWING_FAILED", "INTERNAL", "SAFE_RETRY", "engagement.list_following_failed", nil)
+	}
+	accepted := command.Accepted(e, "FollowingList", e.Actor.ID, 1, "OK", nil)
+	accepted.OperationRef = mustMarshal(map[string]any{"followeeIds": ids})
+	return accepted
 }
 
 // ---------- ReactToPost ----------

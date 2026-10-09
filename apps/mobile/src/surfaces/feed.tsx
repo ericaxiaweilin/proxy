@@ -589,6 +589,48 @@ export function FeedSurface({
     })();
     return () => { cancelled = true; };
   }, [posts, profileClient, viewerAccountId]);
+  // FOLLOW-LIST-001（2026-10-09，用户 P0：「在动态点了关注，重启后关注没有了」）：
+  // 上面那条逐作者 isFollowing 回查只认**当前信息流里出现的作者**，而且 posts 一变 effect 就重跑、
+  // 在飞的结果被丢掉——关注过但这一页没出现的人、或结果还没回来时，关注 tab 与头像菜单都是空的。
+  // 现在启动时直接读回服务端的完整关注列表（一次请求），不依赖信息流里有谁；
+  // 并入时回放用户这次会话里自己的决定（刚点的关注 / 取消不能被慢回来的列表覆盖）。
+  useEffect(() => {
+    if (!viewerAccountId) return undefined;
+    let cancelled = false;
+    void engagement.listMyFollowing().then((ids) => {
+      if (cancelled) return;
+      setFollowing((current) => {
+        const next = new Set([...current, ...ids]);
+        for (const [authorId, on] of followDecisionsRef.current) {
+          if (on) next.add(authorId);
+          else next.delete(authorId);
+        }
+        return next;
+      });
+    }).catch(() => {
+      // 读不到就保持现状（下面那条逐作者回查仍然兜底），不因为一次失败清空。
+    });
+    return () => { cancelled = true; };
+  }, [viewerAccountId, engagement]);
+  // 「关注」tab 的内容：服务端按我关注的作者取帖，并进当前列表。信息流是全局公开时间流，
+  // 只看最近 25 条的话，关注的人这几天没发 / 被冲到后面就会是空的（FOLLOW-LIST-001）。
+  const followingKey = useMemo(() => [...following].sort().join(","), [following]);
+  useEffect(() => {
+    if (tab !== "FOLLOWING" || followingKey === "") return undefined;
+    let cancelled = false;
+    void localNet.listPostsByAuthors(followingKey.split(",")).then((read) => {
+      if (cancelled || read.posts.length === 0) return;
+      setPosts((current) => {
+        const seen = new Set(current.map((p) => p.postId));
+        const extra = read.posts.filter((p) => !seen.has(p.postId));
+        return extra.length === 0 ? current : [...current, ...extra].sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      });
+      setMedia((current) => ({ ...read.media, ...current }));
+      void hydrateEngagement(read.posts);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, followingKey, localNet]);
   // FOLLOW-STATE-HYDRATE-001（2026-09-26，用户：「点头像 → 关注 → 已关注 → 切模块回来
   // 被重置」）：`following` 过去**只有** toggleProfileFollow 一个写点，从不回读 ——
   // 它实际是「本会话手动点过谁」的内存集合，remount（切模块）即清空。四个消费点

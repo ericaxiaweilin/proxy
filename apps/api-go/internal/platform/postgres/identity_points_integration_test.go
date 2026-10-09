@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/proxy-app/proxy-api/internal/engagement"
 	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identitytier"
 	"github.com/proxy-app/proxy-api/internal/incentive"
@@ -331,5 +332,50 @@ func TestWeatherWatchUpcomingIncludesConfirmedDemands(t *testing.T) {
 	}
 	if found == nil || len(found.People) != 2 || found.DurationMin != 180 {
 		t.Fatalf("confirmed demand with owner + the confirmed applicant only: %+v", found)
+	}
+}
+
+// FOLLOW-LIST-001：关注列表落库、读得回来；「关注」tab 按作者取帖不依赖最近 25 条。
+func TestFollowListPersistsAndFeedCanBeScopedToFollowedAuthors(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	viewer, followed, stranger := "u_fl_v_"+stamp, "u_fl_f_"+stamp, "u_fl_s_"+stamp
+	posts := []string{"p_fl1_" + stamp, "p_fl2_" + stamp}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM engagement.follows WHERE follower_id = $1`, viewer)
+		_, _ = pool.Exec(bg, `DELETE FROM localnet.posts WHERE id = ANY($1)`, posts)
+	})
+	now := time.Now().UTC()
+	for i, author := range []string{followed, stranger} {
+		if _, err := pool.Exec(ctx, `INSERT INTO localnet.posts (id, author_type, author_id, body, created_at, status, visibility) VALUES ($1,'USER',$2,'x',$3,'PUBLISHED','PUBLIC')`, posts[i], author, now.Add(-time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eng := NewEngagementRepository(pool)
+	if err := eng.AddFollow(ctx, engagement.Follow{FollowerID: viewer, FolloweeID: followed, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := eng.ListFollowing(ctx, viewer, 100)
+	if err != nil || len(ids) != 1 || ids[0] != followed {
+		t.Fatalf("the follow is in the database and reads back: %v %v", ids, err)
+	}
+	feed := NewLocalNetRepository(pool)
+	got, err := feed.ListFeedPageByAuthors(ctx, "", []string{followed}, time.Time{}, "", 26)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got {
+		if p.AuthorID != followed {
+			t.Fatalf("only the followed author's posts: %s", p.AuthorID)
+		}
+	}
+	found := false
+	for _, p := range got {
+		found = found || p.ID == posts[0]
+	}
+	if !found {
+		t.Fatal("the followed author's post is there")
 	}
 }

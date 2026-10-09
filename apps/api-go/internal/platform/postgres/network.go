@@ -182,6 +182,18 @@ func (r *LocalNetRepository) Snapshot(ctx context.Context) ([]localnet.Post, err
 }
 
 func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, before time.Time, beforeID string, limit int) ([]localnet.Post, error) {
+	return r.listFeedPage(ctx, actorID, nil, before, beforeID, limit)
+}
+
+// ListFeedPageByAuthors：同一条时间流，只取这些作者的帖子（「关注」tab 用，不再依赖这些人碰巧在最近 25 条里）。
+func (r *LocalNetRepository) ListFeedPageByAuthors(ctx context.Context, actorID string, authorIDs []string, before time.Time, beforeID string, limit int) ([]localnet.Post, error) {
+	if len(authorIDs) == 0 {
+		return []localnet.Post{}, nil
+	}
+	return r.listFeedPage(ctx, actorID, authorIDs, before, beforeID, limit)
+}
+
+func (r *LocalNetRepository) listFeedPage(ctx context.Context, actorID string, authorIDs []string, before time.Time, beforeID string, limit int) ([]localnet.Post, error) {
 	if limit <= 0 || limit > 51 {
 		limit = 26
 	}
@@ -217,8 +229,9 @@ func (r *LocalNetRepository) ListFeedPage(ctx context.Context, actorID string, b
 			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
 		  )
 		  AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id > $3))
+		  AND ($5::text[] IS NULL OR author_id = ANY($5))
 		ORDER BY created_at DESC, id ASC
-		LIMIT $4`, actorID, beforeValue, beforeID, limit)
+		LIMIT $4`, actorID, beforeValue, beforeID, limit, authorIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1502,6 +1515,25 @@ func (r *EngagementRepository) IsFollowing(ctx context.Context, followerID, foll
 		SELECT EXISTS(SELECT 1 FROM engagement.follows WHERE follower_id = $1 AND followee_id = $2)`,
 		followerID, followeeID).Scan(&exists)
 	return exists, err
+}
+
+// ListFollowing：我关注的全部人，最近关注的在前。
+func (r *EngagementRepository) ListFollowing(ctx context.Context, followerID string, limit int) ([]string, error) {
+	rows, err := queryerForContext(ctx, r.pool).Query(ctx, `
+		SELECT followee_id FROM engagement.follows WHERE follower_id = $1 ORDER BY created_at DESC, followee_id LIMIT $2`, followerID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // R15.56 — AddPostPin: ON CONFLICT 幂等返 (stored, created=false, nil) 如果已存在

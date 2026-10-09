@@ -361,6 +361,8 @@ commands:
     domain: Supply
   - command: ListMyConvos
     domain: Conversation
+  - command: ListMyFollowing
+    domain: Engagement
   - command: ListMyFriendships
     domain: Relationship
   - command: ListMyInvitations

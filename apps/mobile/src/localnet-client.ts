@@ -226,6 +226,24 @@ export class LocalNetClient {
     };
   }
 
+  // 「关注」tab：只取这些作者的帖子（服务端按作者过滤，不依赖他们碰巧在最近 25 条里）。最多 200 个作者、一次 50 条。
+  public async listPostsByAuthors(authorIds: readonly string[], limit = 50): Promise<FeedReadModel> {
+    const ids = authorIds.filter((id) => id !== "").slice(0, 200);
+    if (ids.length === 0) return { posts: [], media: {}, nextCursor: undefined, hasMore: false };
+    const query = [`limit=${Math.max(1, Math.min(50, limit))}`, `authors=${encodeURIComponent(ids.join(","))}`];
+    if (this.input.authClient.requestPublic) {
+      const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
+      if (response.status < 200 || response.status >= 300) {
+        throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);
+      }
+      const payload = ListFeedPostsPayloadSchema.parse(await response.json());
+      return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+    }
+    const result = await this.sendCommand(undefined, "ListFeedPosts", { type: "Feed", id: "local" }, { limit, authorIds: ids }, undefined, true);
+    const payload = ListFeedPostsPayloadSchema.parse(this.decodeOperationRef(result));
+    return { posts: payload.posts, media: payload.media, nextCursor: payload.nextCursor || undefined, hasMore: payload.hasMore === true };
+  }
+
   public async listMyFeedPosts(): Promise<FeedReadModel> {
     const session = await this.requireSession();
     // R16.6 fix: paginate through the feed until we find posts owned by the

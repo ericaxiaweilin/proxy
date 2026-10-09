@@ -946,6 +946,10 @@ type postNotFoundRepo struct {
 	inner *MemoryRepository
 }
 
+func (r *postNotFoundRepo) ListFollowing(ctx context.Context, followerID string, limit int) ([]string, error) {
+	return r.inner.ListFollowing(ctx, followerID, limit)
+}
+
 func (p *postNotFoundRepo) AddFollow(ctx context.Context, f Follow) error {
 	return p.inner.AddFollow(ctx, f)
 }
@@ -1062,5 +1066,36 @@ func TestReceivedEngagementStatsCountsOthersActionsInWindow(t *testing.T) {
 	other := envelopeFor("GetReceivedEngagementStats", map[string]any{"ownerId": "user_other"}, "")
 	if res := svc.Handle(other); res.Outcome != "REJECTED" {
 		t.Fatalf("other owner stats: got %s, want REJECTED", res.Outcome)
+	}
+}
+
+// FOLLOW-LIST-001：启动时读回我关注的全部人（最近关注的在前），以登录身份为准。
+func TestListMyFollowingReturnsEveryoneIFollowNewestFirstAndOnlyMine(t *testing.T) {
+	s := New()
+	for _, who := range []string{"author_a", "author_b", "author_c"} {
+		if r := s.Handle(envelopeWithActor("FollowProfile", "user_001", map[string]any{"followeeId": who})); r.Outcome != "ACCEPTED" {
+			t.Fatalf("follow %s: %+v", who, r.Error)
+		}
+		time.Sleep(2 * time.Millisecond) // 关注时间不同，倒序才有意义
+	}
+	_ = s.Handle(envelopeWithActor("FollowProfile", "someone_else", map[string]any{"followeeId": "author_z"}))
+	r := s.Handle(envelopeWithActor("ListMyFollowing", "user_001", map[string]any{}))
+	if r.Outcome != "ACCEPTED" {
+		t.Fatalf("list: %+v", r.Error)
+	}
+	var body struct {
+		FolloweeIDs []string `json:"followeeIds"`
+	}
+	if err := json.Unmarshal([]byte(r.OperationRef), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.FolloweeIDs) != 3 || body.FolloweeIDs[0] != "author_c" || body.FolloweeIDs[2] != "author_a" {
+		t.Fatalf("mine only, newest first: %v", body.FolloweeIDs)
+	}
+	_ = s.Handle(envelopeWithActor("UnfollowProfile", "user_001", map[string]any{"followeeId": "author_b"}))
+	r = s.Handle(envelopeWithActor("ListMyFollowing", "user_001", map[string]any{}))
+	_ = json.Unmarshal([]byte(r.OperationRef), &body)
+	if len(body.FolloweeIDs) != 2 {
+		t.Fatalf("unfollow shows up: %v", body.FolloweeIDs)
 	}
 }

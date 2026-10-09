@@ -339,6 +339,14 @@ type FeedPageRepository interface {
 	ListFeedPage(ctx context.Context, actorID string, before time.Time, beforeID string, limit int) ([]Post, error)
 }
 
+// FeedAuthorPageRepository 是可选的窄读：同一条时间流，只取指定作者的帖子（「关注」tab）。
+type FeedAuthorPageRepository interface {
+	ListFeedPageByAuthors(ctx context.Context, actorID string, authorIDs []string, before time.Time, beforeID string, limit int) ([]Post, error)
+}
+
+// 「关注」tab 一次最多带多少个作者。
+const maxFeedAuthorFilter = 200
+
 // MentionRepository is the optional narrow read used by the profile TAGGED tab.
 //
 // Why this exists: TAGGED used to be derived on the client by scanning a single
@@ -2630,8 +2638,13 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		Limit  int    `json:"limit"`
 		// R15.94: search query — server 侧 filter (body 包含 search, case-insensitive).
 		Search string `json:"search"`
+		// 只看这些作者（「关注」tab）。空 = 全局公开时间流。
+		AuthorIDs []string `json:"authorIds"`
 	}
 	_ = decode(e.Payload, &request) // legacy malformed payloads keep first-page behavior
+	if len(request.AuthorIDs) > maxFeedAuthorFilter {
+		request.AuthorIDs = request.AuthorIDs[:maxFeedAuthorFilter]
+	}
 	search := strings.ToLower(strings.TrimSpace(request.Search))
 	if request.Limit <= 0 {
 		request.Limit = 25
@@ -2658,10 +2671,26 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	}
 	var posts []Post
 	var err error
-	if pageRepository, ok := s.repository.(FeedPageRepository); ok {
+	if authorRepo, ok := s.repository.(FeedAuthorPageRepository); ok && len(request.AuthorIDs) > 0 {
+		posts, err = authorRepo.ListFeedPageByAuthors(ctx, e.Actor.ID, request.AuthorIDs, cursor.CreatedAt, cursor.PostID, request.Limit+1)
+	} else if pageRepository, ok := s.repository.(FeedPageRepository); ok && len(request.AuthorIDs) == 0 {
 		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
 	} else {
 		posts, err = s.repository.Snapshot(ctx)
+	}
+	if err == nil && len(request.AuthorIDs) > 0 {
+		// 内存仓（或没有按作者读的仓）：取全量再按作者留。PG 仓已经在 SQL 里按作者过滤，这里再过一遍是无害的。
+		wanted := make(map[string]bool, len(request.AuthorIDs))
+		for _, id := range request.AuthorIDs {
+			wanted[id] = true
+		}
+		kept := posts[:0:0]
+		for _, p := range posts {
+			if wanted[p.AuthorID] {
+				kept = append(kept, p)
+			}
+		}
+		posts = kept
 	}
 	if err != nil {
 		return command.Rejected(e, "FEED_READ_FAILED", "INTERNAL", "SAFE_RETRY", "localnet.feed_read_failed", nil)

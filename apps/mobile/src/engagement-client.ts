@@ -238,6 +238,17 @@ export class EngagementClient {
     return state.isFollowing;
   }
 
+  // 我关注的全部人（服务端按登录身份读，最近关注的在前）。启动时一次读回整份，
+  // 「关注」状态不再依赖信息流里碰巧出现了谁。
+  public async listMyFollowing(): Promise<string[]> {
+    const result = await this.command("ListMyFollowing", { type: "Profile", id: "me" }, {});
+    if (!result.operationRef) {
+      throw new EngagementProtocolError("listMyFollowing response missing operationRef");
+    }
+    const body = JSON.parse(result.operationRef) as { followeeIds?: unknown };
+    return Array.isArray(body.followeeIds) ? body.followeeIds.filter((id): id is string => typeof id === "string" && id !== "") : [];
+  }
+
   // R15.56 — PinPost: 幂等 (ALREADY_PINNED). 限 3 个上限 (server PIN_LIMIT_EXCEEDED)
   public async pinPost(postId: string): Promise<"PINNED" | "ALREADY_PINNED"> {
     const result = await this.command("PinPost", { type: "Post", id: postId }, { postId });

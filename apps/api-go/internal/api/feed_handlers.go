@@ -51,6 +51,23 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 	readContext, cancel := context.WithTimeout(r.Context(), readTimeout)
 	defer cancel()
 	feedPayload := map[string]any{"cursor": cursor, "limit": limit}
+	// 「关注」tab：只取这些作者（逗号分隔，最多 200 个，每个不超过 128 字符）。
+	if raw := strings.TrimSpace(r.URL.Query().Get("authors")); raw != "" {
+		ids := []string{}
+		for _, id := range strings.Split(raw, ",") {
+			id = strings.TrimSpace(id)
+			if id == "" || len(id) > 128 {
+				continue
+			}
+			ids = append(ids, id)
+			if len(ids) == 200 {
+				break
+			}
+		}
+		if len(ids) > 0 {
+			feedPayload["authorIds"] = ids
+		}
+	}
 	if search != "" {
 		feedPayload["search"] = search
 	}
