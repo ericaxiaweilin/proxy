@@ -58,6 +58,9 @@ export type PostReportReason = (typeof POST_REPORT_REASONS)[number];
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { color, shadows } from "../theme";
 import { CoffeeScenesHub } from "./coffee-scenes";
+import { useOnTabActivated, useTabActive } from "../shell/tab-active";
+
+const NO_POSTS_SEEN: ReadonlySet<string> = new Set();
 import { CustomFeedHub, type CustomFeed } from "./custom-feed";
 import { readCustomFeedsAsync } from "../expo-custom-feed-store";
 import { defaultFeedPrefs, readFeedPrefsAsync, writeFeedPrefs } from "../expo-feed-prefs-store";
@@ -783,7 +786,9 @@ export function FeedSurface({
     }
     return visiblePostIds(cards, scrollY, viewportHeight);
   }, [cardYs, cardHeights, ownPostIds, scrollY, viewportHeight]);
-  useFeedImpressions(localNet, seenPostIds);
+  // 隐藏的 tab（TAB-KEEP-ALIVE-001）不计浏览停留：不可见 = 没有一条帖子「在屏幕上」。
+  const tabActive = useTabActive();
+  useFeedImpressions(localNet, tabActive ? seenPostIds : NO_POSTS_SEEN);
 
   // 【新增】视频帧位置上报：videoKey 格式 "postId:index:mediaAssetId"
   const onVideoFrame = useCallback((videoKey: string, frame: { y: number; height: number }) => {
@@ -927,6 +932,8 @@ export function FeedSurface({
   // PULL-REFRESH-001: 下拉重拉第一页，fresh 穿透 HTTP 缓存（同发布后的重载，FEED-FRESH-001）；
   // 正在搜索时按当前查询重拉。
   const feedPull = usePullToRefresh(useCallback(() => loadFeed(searchQuery || undefined, true), [loadFeed, searchQuery]));
+  // TAB-KEEP-ALIVE-001：tab 挂着不销毁了，隐藏超过 30 秒再回来时补拉一次最新动态。
+  useOnTabActivated(() => { void feedPull.onRefresh(); });
 
   async function loadMoreFeed(): Promise<void> {
     if (!hasMore || !nextCursor || loadingMoreRef.current || phase !== "READY") return;

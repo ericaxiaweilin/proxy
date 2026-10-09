@@ -4,7 +4,8 @@
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useUsageTracker } from "../usage-tracker";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { TabActiveContext } from "./tab-active";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -148,6 +149,21 @@ function rootTabs(t: (key: MessageKey) => string): ReadonlyArray<{ id: RootTab; 
   ];
 }
 
+// TAB-KEEP-ALIVE-001：根 tab 的承载层。mounted=false（没访问过）不挂子树；active=false 用 display:none 隐藏；
+// 隐藏的 tab 在外壳重渲时直接跳过（memo 比较：前后都不是活动的就不重渲），所以挂着的 tab 不拖慢当前 tab。
+// active 通过 context 告诉子树「你现在是否可见」（比如信息流据此暂停浏览停留计时）。
+const TabPane = memo(
+  function TabPane({ active, mounted, children }: { active: boolean; mounted: boolean; children: React.ReactNode }): React.JSX.Element | null {
+    if (!mounted) return null;
+    return (
+      <TabActiveContext.Provider value={active}>
+        <View collapsable={false} style={active ? styles.paneActive : styles.paneHidden}>{children}</View>
+      </TabActiveContext.Provider>
+    );
+  },
+  (prev, next) => !prev.active && !next.active && prev.mounted === next.mounted,
+);
+
 export function AppShell({
   localNet,
   activities,
@@ -218,6 +234,12 @@ export function AppShell({
   // 放条件里就是 hooks-not-in-conditional 门禁要抓的东西。
   const { t } = useI18n();
   const [tab, setTab] = useState<RootTab>("HOME");
+  // TAB-KEEP-ALIVE-001（性能）：五个根 tab 访问过一次就一直挂着，切 tab 只是显示 / 隐藏，
+  // 不再每次销毁 + 重建整屏（原来每次切换都要重新挂载几千行的页面并重新拉数据，这是「切 tab 不快」的主因）。
+  // 没访问过的 tab 不挂（冷启动不多花钱）；隐藏的 tab 不跟着外壳的状态变化重渲（见 TabPane）。
+  const visitedTabsRef = useRef<Set<RootTab>>(new Set<RootTab>(["HOME"]));
+  visitedTabsRef.current.add(tab);
+  const visitedTabs = visitedTabsRef.current;
   // LEGAL-BANNER-001: 法律 kill 状态。开机拉一次，每次回前台刷新一次。
   // 拉失败静默（不知道≠没事，但拦界面更糟），下次回前台再试；用户手动关掉
   // 只管当次会话（组件自己在无 kill 时返回 null）。
@@ -733,6 +755,8 @@ export function AppShell({
     );
   }
 
+  // 覆盖整个 body 的目的地（活动详情 / 场景 / 个人主页…）盖在 tab 之上，这时下面的 tab 全部隐藏但保持挂载。
+  const overlayOpen = Boolean(activityDetailId || realitySceneOpen || hotScenesOpen || openAIProfile || openHumanProfile);
   return (
     <>
       <SafeAreaView edges={["top"]} style={styles.safeArea}>
@@ -866,7 +890,9 @@ export function AppShell({
               setTab("MESSAGES");
             }}
           />
-        ) : tab === "HOME" ? (
+        ) : null}
+        <TabPane active={!overlayOpen && tab === "HOME"} mounted={visitedTabs.has("HOME")}>
+          {
           sceneComposerTool ? (
             <SceneComposerSurface tool={sceneComposerTool} scene={scene} onBack={() => setSceneComposerTool(undefined)} onCreated={() => setSceneComposerTool(undefined)} />
           ) : homeAssistant && context === "BUSINESS" ? (
@@ -1031,7 +1057,10 @@ export function AppShell({
               bottomNavVisible={isNavVisible}
             />
           )
-        ) : tab === "MARKET" ? (
+          }
+        </TabPane>
+        <TabPane active={!overlayOpen && tab === "MARKET"} mounted={visitedTabs.has("MARKET")}>
+          {
           <MarketSurface
               activities={activities}
               marketplace={marketplace}
@@ -1060,7 +1089,10 @@ export function AppShell({
               // 头像 URI 由向导用 resolveCreatorPhoto 解析好带来。
               onOpenPersonProfile={(person, avatarUri) => setOpenHumanProfile({ userId: person.userAccountId || person.agentId, name: person.name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
             />
-        ) : tab === "FEED" ? (
+          }
+        </TabPane>
+        <TabPane active={!overlayOpen && tab === "FEED"} mounted={visitedTabs.has("FEED")}>
+          {
           feedChatAuthor ? (
             <ConversationSurface
               author={feedChatAuthor}
@@ -1106,7 +1138,10 @@ export function AppShell({
               onSectionChange={setFeedSection}
             />
           )
-        ) : tab === "MESSAGES" ? (
+          }
+        </TabPane>
+        <TabPane active={!overlayOpen && tab === "MESSAGES"} mounted={visitedTabs.has("MESSAGES")}>
+          {
           messageChatAuthor ? (
             <ConversationSurface
               author={messageChatAuthor}
@@ -1126,7 +1161,11 @@ export function AppShell({
           ) : (
             <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={(conversationId) => { setRoomLayerInMore(false); setRoomChatId(conversationId); }} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
-        ) : isGuest ? (
+          }
+        </TabPane>
+        <TabPane active={!overlayOpen && tab === "ME"} mounted={visitedTabs.has("ME")}>
+          {
+        isGuest ? (
           <View style={styles.guestMe}>
             <Text selectable style={styles.guestMeTitle}>{t("guestMeTitle")}</Text>
             <Text selectable style={styles.guestMeSub}>{t("guestMeSub")}</Text>
@@ -1181,7 +1220,9 @@ export function AppShell({
               bottomNavVisible={isNavVisible}
               {...(scene ? { scene } : {})}
             />
-          )}
+          )
+          }
+        </TabPane>
         </View>
         {isNavVisible ? <RootNav activePage={currentPage} compact={compactWidth} bottomInset={insets.bottom} onCommitPage={goToPage} /> : null}
         <ContextSwitcherSheet
@@ -1797,6 +1838,8 @@ const styles = StyleSheet.create({
   locationSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
   locationSwitch: { color: "#6E6575", fontSize: 12, fontWeight: "800" },
   body: { flex: 1 },
+  paneActive: { flex: 1 },
+  paneHidden: { display: "none" },
   dockWrap: {
     position: "absolute",
     alignSelf: "center",

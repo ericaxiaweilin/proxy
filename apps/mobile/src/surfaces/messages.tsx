@@ -1,5 +1,6 @@
 // Messaging Home — 对齐 Lotus COMPLETE v8 单文件版
 // 1:1 还原 v8 的 homeHead/homeTabs/folderRow/dialogs+convos + Requests(Mặc Kệ) 入口
+import { useTabActive } from "../shell/tab-active";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, AppState, NativeScrollEvent, NativeSyntheticEvent, PanResponder, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from "react-native";
 import { usePullToRefresh } from "../components/pull-to-refresh";
@@ -305,8 +306,10 @@ export function MessagesSurface({
   // PULL-REFRESH-001: 下拉立刻重拉收件箱（不用等 5 秒轮询）。
   const inboxPull = usePullToRefresh(refreshInbox);
 
+  // TAB-KEEP-ALIVE-001：tab 被隐藏（挂着但看不见）时停掉 5 秒轮询，回到这一页立刻补拉一次。
+  const tabActive = useTabActive();
   useEffect(() => {
-    if (!conversationClient) return;
+    if (!conversationClient || !tabActive) return;
     let foreground = AppState.currentState === "active";
     void refreshInbox();
     const timer = setInterval(() => { if (foreground) void refreshInbox(); }, 5_000);
@@ -315,7 +318,7 @@ export function MessagesSurface({
       if (foreground) void refreshInbox();
     });
     return () => { clearInterval(timer); appState.remove(); };
-  }, [conversationClient, refreshInbox]);
+  }, [conversationClient, refreshInbox, tabActive]);
 
   const inboxLoaded = serverDialogs !== undefined || inboxError;
   const visibleDialogs = useMemo(

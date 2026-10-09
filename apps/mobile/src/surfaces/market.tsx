@@ -7,6 +7,7 @@
 //   - pin 位置 = 服务端下发的真 lat/lng（OPP-REAL-COORDS-001），无坐标才跳过
 //   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
 //   - “快速真实地址” = showUserLocation 蓝点 + “用我当前位置”按钮
+import { useOnTabActivated } from "../shell/tab-active";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { usePullToRefresh } from "../components/pull-to-refresh";
@@ -356,6 +357,8 @@ export function MarketSurface({
 
   // PULL-REFRESH-001: 下拉重拉当前 tab 的数据。
   const marketPull = usePullToRefresh(useCallback(() => (tab === "OPPORTUNITY" ? loadOpportunities() : loadActivities()), [tab, loadOpportunities, loadActivities]));
+  // TAB-KEEP-ALIVE-001：隐藏超过 30 秒再回到市场时补拉一次。
+  useOnTabActivated(() => { void marketPull.onRefresh(); });
 
   // M4: 机会页拉取真实供给（QuerySuppliers market=hn capability=ZH），用于“供给匹配”状态行
   useEffect(() => {

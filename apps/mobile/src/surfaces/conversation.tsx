@@ -3,6 +3,7 @@
 // 接入模型底座：SendMessage 后服务端调用 modelStack.Complete() 生成 AI 回复。
 // R36.1 Lotus 对话视觉：cluster 气泡 / 对象基线 / 安全条 / 表情包 Drawer。
 // 设计引用：docs/design/references/Proxy_Messaging_R36_1_Secure_Stickers.html
+import { useTabActive } from "../shell/tab-active";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { ActivityIndicator, AppState, FlatList, Image, Keyboard, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -570,6 +571,7 @@ export function ConversationSurface({
   // this screen is foregrounded we refresh every 3s, pause in background, and
   // refresh immediately on resume. This gives two-device QA deterministic
   // delivery without pretending the current HTTP command API is a WebSocket.
+  const tabActive = useTabActive();
   useEffect(() => {
     if (!convId) return;
     let cancelled = false;
@@ -593,13 +595,14 @@ export function ConversationSurface({
     };
     setLoading(true);
     void refresh();
-    const timer = setInterval(() => void refresh(), 3_000);
+    // TAB-KEEP-ALIVE-001：会话页被隐藏（挂着但看不见）时不轮询。
+    const timer = tabActive ? setInterval(() => void refresh(), 3_000) : undefined;
     const appState = AppState.addEventListener("change", (state) => {
       foreground = state === "active";
       if (foreground) void refresh();
     });
-    return () => { cancelled = true; clearInterval(timer); appState.remove(); };
-  }, [convId, activeConvo, conversationClient, hydrateMessages]);
+    return () => { cancelled = true; if (timer) clearInterval(timer); appState.remove(); };
+  }, [convId, activeConvo, conversationClient, hydrateMessages, tabActive]);
 
   // 挂载时创建会话
   // ASSISTANT-THREAD-001: 有真人 id 就建真人 DM（PROFILE 源，不塞假开场白）——

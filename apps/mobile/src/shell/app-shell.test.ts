@@ -125,7 +125,7 @@ describe("PROFILE-FROM-ANY-TAB-001 profile destinations must not be tab-scoped",
   // 只断言它存在的话，把它挪回 HOME 分支测试依然全绿 —— 那正是当初漏掉的原因。
   it("reads openHumanProfile BEFORE the tab branches (its writer lives in FEED)", () => {
     const readAt = shell.indexOf(") : openHumanProfile ? (");
-    const homeAt = shell.indexOf(') : tab === "HOME" ? (');
+    const homeAt = shell.indexOf('<TabPane active={!overlayOpen && tab === "HOME"}');
     expect(readAt).toBeGreaterThan(-1);
     expect(homeAt).toBeGreaterThan(-1);
     expect(readAt).toBeLessThan(homeAt);
@@ -135,7 +135,7 @@ describe("PROFILE-FROM-ANY-TAB-001 profile destinations must not be tab-scoped",
     // 同一个洞的第二份：动态页 → 现实场景图 → 点某个 AI 账号，
     // tab 仍是 FEED，所以 AI 主页也必须挂在 tab 分支之上。
     const readAt = shell.indexOf(") : openAIProfile ? (");
-    const homeAt = shell.indexOf(') : tab === "HOME" ? (');
+    const homeAt = shell.indexOf('<TabPane active={!overlayOpen && tab === "HOME"}');
     expect(readAt).toBeGreaterThan(-1);
     expect(readAt).toBeLessThan(homeAt);
   });
@@ -217,5 +217,37 @@ describe("app shell body swipe PanResponder (R15.34.3)", () => {
     expect(handlers.onMoveShouldSetPanResponder!(null, { dx: 100, dy: 5 })).toBe(true);
     // dy 超过 dx*0.8 — 不算横滑
     expect(handlers.onMoveShouldSetPanResponder!(null, { dx: 100, dy: 90 })).toBe(false);
+  });
+});
+
+// TAB-KEEP-ALIVE-001（性能）：切 tab 不再销毁重建整屏。
+describe("TAB-KEEP-ALIVE-001 root tabs stay mounted", () => {
+  const shell = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+  it("renders every root tab inside a TabPane (lazy mount, hidden instead of unmounted)", () => {
+    for (const name of ["HOME", "MARKET", "FEED", "MESSAGES", "ME"]) {
+      expect(shell, `${name} 不在 TabPane 里`).toContain(`<TabPane active={!overlayOpen && tab === "${name}"} mounted={visitedTabs.has("${name}")}>`);
+    }
+    // 老的「tab === X ? (...) : tab === Y ? ...」整屏替换链不许回来。
+    expect(shell).not.toContain(') : tab === "MARKET" ? (');
+    expect(shell).not.toContain(') : tab === "FEED" ? (');
+  });
+
+  it("hidden panes skip re-rendering and tell their subtree they are hidden", () => {
+    expect(shell).toContain("(prev, next) => !prev.active && !next.active && prev.mounted === next.mounted");
+    expect(shell).toContain("TabActiveContext.Provider value={active}");
+    expect(shell).toContain('paneHidden: { display: "none" }');
+  });
+
+  it("every overlay (activity / scene / profiles) hides the tabs underneath instead of unmounting them", () => {
+    expect(shell).toContain("const overlayOpen = Boolean(activityDetailId || realitySceneOpen || hotScenesOpen || openAIProfile || openHumanProfile);");
+  });
+
+  it("things that tick in the background pause while their tab is hidden", () => {
+    const feed = readFileSync(new URL("../surfaces/feed.tsx", import.meta.url), "utf8");
+    const messages = readFileSync(new URL("../surfaces/messages.tsx", import.meta.url), "utf8");
+    const conversation = readFileSync(new URL("../surfaces/conversation.tsx", import.meta.url), "utf8");
+    expect(feed).toContain("useFeedImpressions(localNet, tabActive ? seenPostIds : NO_POSTS_SEEN)");
+    expect(messages).toContain("if (!conversationClient || !tabActive) return;");
+    expect(conversation).toContain("const timer = tabActive ? setInterval");
   });
 });
