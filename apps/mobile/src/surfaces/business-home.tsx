@@ -15,7 +15,10 @@ import { ownMerchantActivities } from "../merchant-home-activities";
 import { useEffect, useRef, useState } from "react";
 import { NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { HomeChatBox, type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
+import { type HomeAttachment, type HomeIntentMode } from "../components/home-chat-box";
+import { HomeSearchDock } from "../components/home-search-dock";
+import type { RelationshipClient } from "../relationship-client";
+import type { ProfileClient, ProfileWire } from "../profile-client";
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { type MarketTab } from "../market-fixtures";
@@ -72,6 +75,10 @@ export function BusinessHome({
   onOpenCreatorProfile,
   onOpenActivity,
   onChat,
+  onOpenAssistantConversation,
+  profileClient,
+  relationship,
+  viewerAccountId,
   onChromeVisibilityChange,
   bottomNavVisible,
   business,
@@ -85,13 +92,61 @@ export function BusinessHome({
   // MERCHANT-HOME-OWN-ACTIVITIES-001：点本店活动卡进活动详情页（不是跳市场）。
   onOpenActivity?: ((activityId: string) => void) | undefined;
   onChat?: ((text: string, mode?: HomeIntentMode, attachment?: HomeAttachment) => void) | undefined;
+  // 对齐用户侧首页：输入框默认搜索（全站真人），左侧 AI 标识进 Proxy AI 会话。
+  onOpenAssistantConversation?: (() => void) | undefined;
+  profileClient?: ProfileClient | undefined;
+  relationship?: RelationshipClient | undefined;
+  viewerAccountId?: string | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
   business?: BusinessClient | undefined;
   activities?: ActivityClient | undefined;
   supply?: SupplyClient | undefined;
 }): React.JSX.Element {
-  const [intentMode, setIntentMode] = useState<HomeIntentMode>();
+  // 首页搜索（对齐用户侧 HomeSearchDock）：搜全站真人，结果在输入框下面。
+  const [searchQuery, setSearchQuery] = useState("");
+  const [people, setPeople] = useState<ReadonlyArray<ProfileWire> | undefined>(undefined);
+  const [searchState, setSearchState] = useState<"idle" | "busy" | "failed">("idle");
+  const [lastQuery, setLastQuery] = useState("");
+  const [responseText, setResponseText] = useState<string>();
+  const [friendStates, setFriendStates] = useState<ReadonlyMap<string, "SENT" | "BUSY">>(new Map());
+  const searchSeq = useRef(0);
+
+  async function runSearch(query: string): Promise<void> {
+    const q = query.trim();
+    if (!q) return;
+    if (!profileClient) {
+      setResponseText("搜索暂不可用");
+      return;
+    }
+    const seq = (searchSeq.current += 1);
+    setPeople(undefined);
+    setSearchState("busy");
+    setLastQuery(q);
+    try {
+      const found = await profileClient.searchProfiles(q);
+      if (searchSeq.current !== seq) return;
+      setPeople(found);
+      setSearchState("idle");
+      setResponseText(found.length > 0 ? `找到 ${found.length} 位` : `没有找到「${q}」`);
+    } catch {
+      if (searchSeq.current !== seq) return;
+      setSearchState("failed");
+      setResponseText("搜索失败，请重试");
+    }
+  }
+
+  async function addFriend(person: ProfileWire): Promise<void> {
+    if (!relationship || !viewerAccountId) return;
+    const id = person.userAccountId;
+    setFriendStates((prev) => new Map(prev).set(id, "BUSY"));
+    try {
+      await relationship.sendFriendRequest(id);
+      setFriendStates((prev) => new Map(prev).set(id, "SENT"));
+    } catch {
+      setFriendStates((prev) => { const next = new Map(prev); next.delete(id); return next; });
+    }
+  }
   // MERCHANT-ACCOUNT-SWITCH-001：一个店主可以有多家经营主体。以前这里只留
   // accountName（字符串），整页被钉死在 listMyAccounts 的第一条上，
   // 另一家主体的经营结果永远看不到 —— 不是没数据，是没入口。
@@ -323,16 +378,56 @@ export function BusinessHome({
         </Pressable>
       ) : null}
 
-      {onChat ? (
-        <HomeChatBox
-          contextLabel="商家"
-          placeholder="例如：周六想办一场门店体验活动"
-          mode={intentMode}
-          onSelectMode={(mode) => {
-            setIntentMode((current) => current === mode ? undefined : mode);
-          }}
-          onSend={(text, mode, attachment) => onChat(text, mode, attachment)}
-        />
+      {/* 对齐用户侧首页：单行输入默认搜索；左侧 AI 标识显式进 Proxy AI 会话。 */}
+      <HomeSearchDock
+        placeholder="搜人、找活动、问 AI"
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        suggestions={[]}
+        onApplySuggestion={() => undefined}
+        intentRemix={false}
+        intentSlot={null}
+        onRemix={() => undefined}
+        onExchange={() => undefined}
+        onExecute={(text, attachment) => {
+          // 带照片只能交给 AI（搜索用不上图）；纯文字就是搜索。
+          if (attachment && onChat) onChat(text, undefined, attachment);
+          else void runSearch(text);
+        }}
+        responseText={responseText}
+        onOpenConversation={() => { if (onOpenAssistantConversation) onOpenAssistantConversation(); else onChat?.(""); }}
+      />
+      {people !== undefined && people.length > 0 ? (
+        <View>
+          {people.map((person) => {
+            const isSelf = !!viewerAccountId && person.userAccountId === viewerAccountId;
+            const displayName = person.name || person.handle || person.userAccountId;
+            const sub = [person.handle ? `@${person.handle.replace(/^@+/, "")}` : "", person.city].filter(Boolean).join(" · ");
+            const fs = friendStates.get(person.userAccountId);
+            return (
+              <View key={`found:${person.userAccountId}`} style={searchStyles.row}>
+                <View style={searchStyles.copy}>
+                  <Text selectable style={searchStyles.name}>{displayName}</Text>
+                  {sub ? <Text selectable style={searchStyles.sub}>{sub}</Text> : null}
+                </View>
+                <Pressable accessibilityLabel={`${displayName} · 查看主页`} onPress={() => onOpenCreatorProfile?.(person.userAccountId, displayName)}>
+                  <Text selectable style={searchStyles.action}>主页</Text>
+                </Pressable>
+                {isSelf ? <Text selectable style={searchStyles.sub}>这是你</Text> : (
+                  <Pressable accessibilityLabel={`${displayName} · 加好友`} disabled={fs !== undefined || !relationship} onPress={() => void addFriend(person)}>
+                    <Text selectable style={searchStyles.action}>{fs === "SENT" ? "已申请" : fs === "BUSY" ? "…" : "加好友"}</Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+      {searchState === "failed" ? (
+        <View style={searchStyles.row}>
+          <Text selectable style={searchStyles.sub}>搜索失败</Text>
+          <Pressable accessibilityLabel="重试搜索" onPress={() => { if (lastQuery) void runSearch(lastQuery); }}><Text selectable style={searchStyles.action}>重试</Text></Pressable>
+        </View>
       ) : null}
 
       <View style={styles.controlPlane} testID="merchant-control-plane">
@@ -610,4 +705,12 @@ const styles = StyleSheet.create({
   resultTitle: { color: color.ink, fontSize: 14, fontWeight: "800" },
   resultSub: { color: color.ink, fontSize: 12, fontWeight: "600" },
   resultHint: { color: color.muted, fontSize: 11 },
+});
+
+const searchStyles = StyleSheet.create({
+  row: { alignItems: "center", flexDirection: "row", gap: 12, marginTop: 8 },
+  copy: { flex: 1, minWidth: 0 },
+  name: { color: color.ink, fontSize: 13, fontWeight: "700" },
+  sub: { color: color.muted, fontSize: 11, marginTop: 2 },
+  action: { color: color.violet, fontSize: 12, fontWeight: "800" },
 });

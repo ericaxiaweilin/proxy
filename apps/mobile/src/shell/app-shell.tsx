@@ -899,6 +899,10 @@ export function AppShell({
               onOpenCreatorProfile={(userId, name, avatarUri) => setOpenHumanProfile({ userId, name, ...(avatarUri ? { avatarUri } : {}), posts: [], mediaByPost: {} })}
               onOpenActivity={(activityId) => setActivityDetailId(activityId)}
               onChat={(text, mode, attachment) => openHomeAssistant(text, mode, attachment)}
+              onOpenAssistantConversation={openProxyAIConversation}
+              profileClient={profile}
+              relationship={relationship}
+              {...(viewerAccountId ? { viewerAccountId } : {})}
               bottomNavVisible={isNavVisible}
               business={business}
               activities={activities}
