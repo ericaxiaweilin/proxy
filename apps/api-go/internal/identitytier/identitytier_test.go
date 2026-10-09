@@ -28,8 +28,8 @@ func TestLadderIsStrictlyIncreasingAndOnlyUsersEarnTodayWithoutInventedRules(t *
 			t.Fatalf("ladder must increase: %+v", l)
 		}
 	}
-	if len(EarnRules(User)) == 0 || len(EarnRules(Provider)) != 0 || len(EarnRules(Merchant)) != 0 {
-		t.Fatal("provider / merchant earn rules are not decided yet — none are invented")
+	if len(EarnRules(User)) == 0 || len(EarnRules(Provider)) != 0 || len(EarnRules(Merchant)) != 1 {
+		t.Fatal("providers have no ledger rules yet; merchants earn one point per hosted order")
 	}
 	if Valid("X") || !Valid(Merchant) {
 		t.Fatal("kinds")
@@ -42,17 +42,26 @@ func TestMerchantLadderIsFiveStarsWithExponentialDifficulty(t *testing.T) {
 		t.Fatalf("1-5 stars: %d", len(l))
 	}
 	for i := 2; i < len(l); i++ {
-		if (l[i].Min - l[i-1].Min) <= (l[i-1].Min - l[i-2].Min) {
+		if (l[i].Min - l[i-1].Min) < (l[i-1].Min - l[i-2].Min) {
 			t.Fatalf("each star must be harder than the last: %+v", l)
 		}
 	}
-	if r := Resolve(Merchant, 899); r.Stars != 3 || r.Tier != "STAR" {
-		t.Fatalf("899 = 3 stars: %+v", r)
+	if r := Resolve(Merchant, 599); r.Stars != 3 || r.Tier != "STAR" {
+		t.Fatalf("599 = 3 stars: %+v", r)
 	}
 	if r := Resolve(Merchant, 5000); r.Stars != 5 || !r.Highest {
 		t.Fatalf("top star: %+v", r)
 	}
 	if Resolve(User, 5000).Tier != "PLATINUM" {
 		t.Fatal("users keep the bronze..platinum ladder")
+	}
+}
+
+// 按数据推算：每月接待 100 单 = 每月 100 分 → 3 个月 3 星，12 个月 5 星。
+func TestMerchantLadderMatchesTheCalibration(t *testing.T) {
+	const perMonth = 100
+	at := func(months int) int { return Resolve(Merchant, perMonth*months).Stars }
+	if at(1) != 1 || at(3) != 3 || at(6) != 4 || at(12) != 5 || at(11) != 4 {
+		t.Fatalf("1m=%d 3m=%d 6m=%d 11m=%d 12m=%d", at(1), at(3), at(6), at(11), at(12))
 	}
 }

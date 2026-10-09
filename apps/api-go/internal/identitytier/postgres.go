@@ -130,3 +130,19 @@ func (p *Postgres) Recent(ctx context.Context, k Kind, id string, limit int) ([]
 	}
 	return out, rows.Err()
 }
+
+// CollectMerchant：商家每接待一单 +1 分（订单已履约完成，且被指认到这家商家名下的店 —— fulfillment.orders.store_id）。
+// 幂等，可每轮重跑；老订单没有 store_id 不回填（没人能诚实补上）。返回新增笔数。
+func (p *Postgres) CollectMerchant(ctx context.Context, now time.Time) (int, error) {
+	points := 1
+	for _, r := range EarnRules(Merchant) {
+		points = r.Points
+	}
+	tag, err := p.pool.Exec(ctx, `
+		INSERT INTO growth.point_ledger (id, subject_kind, subject_id, delta, reason, ref, created_at)
+		SELECT 'pl_' || md5('MERCHANT|' || s.business_id || '|ORDER_HOSTED|' || o.id), 'MERCHANT', s.business_id, $1, 'ORDER_HOSTED', o.id, $2
+		  FROM fulfillment.orders o JOIN business.stores s ON s.id = o.store_id
+		 WHERE o.store_id <> '' AND o.lifecycle = 'COMPLETED'
+		ON CONFLICT (subject_kind, subject_id, reason, ref) DO NOTHING`, points, now.UTC())
+	return int(tag.RowsAffected()), err
+}

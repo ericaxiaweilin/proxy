@@ -97,3 +97,43 @@ func TestIdentityPointsCollectIdempotentlyAndScoreCampaignsGrantOnlyThoseWhoReac
 		t.Fatalf("growth-points rewards land in the ledger: %d", after)
 	}
 }
+
+// 商家每接待一单（履约完成且归因到本店）+1 分；重跑不重复；没归因的单不算。
+func TestMerchantPointsCountHostedOrdersOnce(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	biz, store := "biz_ip_"+stamp, "store_ip_"+stamp
+	orders := []string{"o_ip1_" + stamp, "o_ip2_" + stamp, "o_ip3_" + stamp}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = $1`, biz)
+		_, _ = pool.Exec(bg, `DELETE FROM fulfillment.orders WHERE id = ANY($1)`, orders)
+		_, _ = pool.Exec(bg, `DELETE FROM business.stores WHERE id = $1`, store)
+		_, _ = pool.Exec(bg, `DELETE FROM business.accounts WHERE id = $1`, biz)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	exec(`INSERT INTO business.accounts (id, owner_user_id, name, status, created_at) VALUES ($1,'owner_x','t','ACTIVE',$2)`, biz, now)
+	exec(`INSERT INTO business.stores (id, business_id, name, address, status, created_at) VALUES ($1,$2,'s','a','ACTIVE',$3)`, store, biz, now)
+	order := func(id, lifecycle, storeID string) {
+		exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at, store_id) VALUES ($1,'r','a','n',$2,'{}'::jsonb,$3,$3,$4)`, id, lifecycle, now, storeID)
+	}
+	order(orders[0], "COMPLETED", store)
+	order(orders[1], "COMPLETED", store)
+	order(orders[2], "COMPLETED", "") // 没归因到店：不算
+	st := identitytier.NewPostgres(pool)
+	for i := 0; i < 2; i++ {
+		if _, err := st.CollectMerchant(ctx, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if pts, _ := st.Points(ctx, identitytier.Merchant, biz); pts != 2 {
+		t.Fatalf("two attributed completed orders = 2 points, once each: %d", pts)
+	}
+}
