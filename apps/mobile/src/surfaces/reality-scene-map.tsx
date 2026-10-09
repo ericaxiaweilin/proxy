@@ -152,7 +152,7 @@ function companionSignalLabel(signal: CompanionSuggestion["signal"]): string {
 
 type FeaturedHuman = { userId: string; name: string; city?: string | undefined; avatarUri?: string | undefined };
 
-export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile, onPickScene, pickSceneLabel, flatMap }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void; onPickScene?: ((sceneId: string) => void) | undefined; pickSceneLabel?: string | undefined; flatMap?: boolean | undefined }): React.JSX.Element {
+export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile, onPickScene, pickSceneLabel, flatMap, onOpenTreasure }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void; onPickScene?: ((sceneId: string) => void) | undefined; pickSceneLabel?: string | undefined; flatMap?: boolean | undefined; onOpenTreasure?: (() => void) | undefined }): React.JSX.Element {
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
   // 供热：图钉换成真实聚合圈（sceneHeatScore），0 分不渲染。
@@ -1072,9 +1072,22 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
         <Pressable accessibilityLabel="返回" onPress={onBack} style={styles.roundButton}><ProxyBackGlyph /></Pressable>
               <View style={styles.topCopy}><Text selectable style={styles.title}>场景地图</Text><Text selectable style={styles.subtitle}>场景目录 · {scenes.length} 个场景</Text></View>
         <Pressable accessibilityLabel={view === "MAP" ? "切换列表" : "切换地图"} onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={styles.roundButton}><ProxyIcon color={color.ink} name={view === "MAP" ? "storeLines" : "crosshair"} size={21} /></Pressable>
+        {onOpenTreasure ? (
+          <Pressable accessibilityLabel="寻宝" onPress={onOpenTreasure} style={styles.roundButton}><Text style={{ fontSize: 20 }}>🎁</Text></Pressable>
+        ) : null}
         <Pressable accessibilityLabel={searchOpen ? "关闭搜索" : "搜索场景"} onPress={() => { if (searchOpen) setQuery(""); setSearchOpen((open) => !open); }} style={styles.roundButton}><ProxyIcon color={color.ink} name="search" size={21} /></Pressable>
       </View>
       {nearbyError ? <Text selectable style={styles.nearbyError}>{nearbyError}</Text> : null}
+      {onOpenTreasure ? (
+        <Pressable accessibilityLabel="寻宝" onPress={onOpenTreasure} style={styles.treasureBanner}>
+          <Text style={{ fontSize: 22 }}>🎁</Text>
+          <View style={{ flex: 1 }}>
+            <Text selectable style={styles.treasureTitle}>寻宝</Text>
+            <Text selectable style={styles.treasureSub}>走到咖啡店开箱得成长值；约了小美同行，到店多开一个</Text>
+          </View>
+          <Text selectable style={styles.treasureGo}>›</Text>
+        </Pressable>
+      ) : null}
       <View style={styles.stats}>
         <Stat value={Math.max(0, scenes.filter((scene) => !visited.has(scene.id)).length)} label="未探索" onPress={() => setFilter("UNSEEN")} />
         {/* 「开放中」计数删掉：读的是 seed 静态布尔值，不是实时营业状态，
@@ -1379,6 +1392,10 @@ function DataRow({ label, value, last = false }: { label: string; value: string;
 }
 
 const styles = StyleSheet.create({
+  treasureBanner: { alignItems: "center", backgroundColor: "#FFF6DD", borderColor: "#F5D88A", borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 10, marginBottom: 8, marginHorizontal: 12, paddingHorizontal: 12, paddingVertical: 9 },
+  treasureTitle: { color: "#7A5200", fontSize: 14, fontWeight: "800" },
+  treasureSub: { color: "#8C6A1F", fontSize: 11, marginTop: 1 },
+  treasureGo: { color: "#8C6A1F", fontSize: 20 },
   root: { backgroundColor: color.offWhite, flex: 1 },
   topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingVertical: 6 },
   topCopy: { flex: 1 }, title: { color: color.ink, fontSize: 27, fontWeight: "900", lineHeight: 34 }, subtitle: { color: color.muted, fontSize: 12, marginTop: 1 },

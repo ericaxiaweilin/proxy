@@ -239,7 +239,7 @@ describe("TAB-KEEP-ALIVE-001 root tabs stay mounted", () => {
   });
 
   it("every overlay (activity / scene / profiles) hides the tabs underneath instead of unmounting them", () => {
-    expect(shell).toContain("const overlayOpen = Boolean(activityDetailId || realitySceneOpen || hotScenesOpen || openAIProfile || openHumanProfile);");
+    expect(shell).toContain("const overlayOpen = Boolean(treasureOpen || activityDetailId || realitySceneOpen || hotScenesOpen || openAIProfile || openHumanProfile);");
   });
 
   it("things that tick in the background pause while their tab is hidden", () => {

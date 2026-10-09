@@ -4,7 +4,7 @@
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useUsageTracker } from "../usage-tracker";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TabActiveContext } from "./tab-active";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { AccessibilityInfo } from "react-native";
@@ -68,6 +68,8 @@ import { FeedSurface } from "../surfaces/feed";
 import { FeedPrefsSurface } from "../surfaces/feed-prefs";
 import { FulfillmentWorkspace, type WorkspaceTarget } from "../surfaces/fulfillment-workspace";
 import { HomeAssistantSurface } from "../surfaces/home-assistant";
+import { TreasureHuntSurface } from "../surfaces/treasure-hunt";
+import { TreasureClient } from "../treasure-client";
 import { MarketSurface, type MarketViewMode } from "../surfaces/market";
 import { MeSurface } from "../surfaces/me";
 import { MessagesSurface } from "../surfaces/messages";
@@ -480,6 +482,9 @@ export function AppShell({
   const [followDevice, setFollowDevice] = useState(true);
   const [locationRestoreDone, setLocationRestoreDone] = useState(false);
   const [realitySceneOpen, setRealitySceneOpen] = useState(false);
+  // TREASURE-001：寻宝整屏（盖在场景地图之上，关掉回到地图）。
+  const [treasureOpen, setTreasureOpen] = useState(false);
+  const treasureClient = useMemo(() => new TreasureClient(sessionAuthClient), [sessionAuthClient]);
   // HOT-SCENES-PAGE-001：首页热榜「更多」进的那一整页——跟 realitySceneOpen
   // 同一个待遇（覆盖整个 body 的目的地，不属于任何一个 tab）。
   const [hotScenesOpen, setHotScenesOpen] = useState(false);
@@ -756,7 +761,7 @@ export function AppShell({
   }
 
   // 覆盖整个 body 的目的地（活动详情 / 场景 / 个人主页…）盖在 tab 之上，这时下面的 tab 全部隐藏但保持挂载。
-  const overlayOpen = Boolean(activityDetailId || realitySceneOpen || hotScenesOpen || openAIProfile || openHumanProfile);
+  const overlayOpen = Boolean(treasureOpen || activityDetailId || realitySceneOpen || hotScenesOpen || openAIProfile || openHumanProfile);
   return (
     <>
       <SafeAreaView edges={["top"]} style={styles.safeArea}>
@@ -831,7 +836,9 @@ export function AppShell({
           会立刻让动态入口再次失效，而且不会有任何测试变红。
           ============================================================
         */}
-        {activityDetailId ? (
+        {treasureOpen ? (
+          <TreasureHuntSurface client={treasureClient} onBack={() => setTreasureOpen(false)} />
+        ) : activityDetailId ? (
           <ActivityDetailSurface
             client={activities}
             moderation={moderation}
@@ -839,7 +846,7 @@ export function AppShell({
             onBack={() => setActivityDetailId(undefined)}
           />
         ) : realitySceneOpen ? (
-          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
+          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onOpenTreasure={() => setTreasureOpen(true)} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
         ) : hotScenesOpen ? (
           // HOT-SCENES-PAGE-001：跟 realitySceneOpen 同一个「点场景卡 → 进详情」
           // 落点——带 sceneId 直达该场景，不带 = 总览（SCENE-MAP-DEFAULT-001 同一条道理）。

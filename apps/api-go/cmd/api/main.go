@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/proxy-app/proxy-api/internal/identitytier"
+	"github.com/proxy-app/proxy-api/internal/treasure"
 	"github.com/proxy-app/proxy-api/internal/weather"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/proxy-app/proxy-api/internal/accountstatus"
@@ -764,6 +767,7 @@ func main() {
 		server.Weather = &weather.Service{Provider: weather.OpenMeteo{}}
 		server.IdentityTiers = identitytier.NewPostgres(pool)
 		server.NudgePrefs = guidance.NewPostgres(pool)
+		server.Treasure = treasure.NewPostgres(pool)
 		// OPS-MATCHING-TUNABLES-001：撮合引擎的旋钮与决策留痕（控制台 /v1/operator/matching）。
 		// 加载失败绝不拦启动：退回出厂默认就是改代码之前那套数，引擎照常跑，
 		// 而原因写进启动日志（配置读不出来 = 起不来 是另一种不可用）。
@@ -996,6 +1000,9 @@ func main() {
 	// same verified-identity pattern MerchantPublishIdentity already uses.
 	benefitService.WithMerchantVerifier(businessService)
 	server.Benefit = benefitService
+	if server.Treasure != nil {
+		server.Treasure.Claimer = treasureClaimer{svc: benefitService}
+	}
 	// WALLET-001：挂载钱包域（内存默认 / PG 分支已在上面换好）。
 	server.Wallet = walletService
 	// GROWTH-REAL-DATA-001: read-only over fulfillmentService's own Order
@@ -1093,4 +1100,21 @@ func main() {
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// treasureClaimer 替用户领一张同行加成带的咖啡券（走福利服务自己的资格 / 名额检查）。
+type treasureClaimer struct{ svc *benefit.Service }
+
+func (c treasureClaimer) Claim(ctx context.Context, userID, campaignID, benefitID string) (string, error) {
+	res := c.svc.HandleClaimBenefit(ctx, command.Envelope{
+		CommandType: "ClaimBenefit", CommandID: "treasure-" + userID + "-" + benefitID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		IdempotencyKey: "treasure-" + userID + "-" + benefitID + "-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		Actor:          command.Actor{Type: "USER", ID: userID}, Principal: command.Principal{Type: "INDIVIDUAL", ID: userID},
+		Payload: map[string]any{"campaignId": campaignID, "benefitId": benefitID},
+	})
+	if res.Error != nil {
+		return "", errors.New(res.Error.ErrorCode)
+	}
+	id, _ := res.Body["claimId"].(string)
+	return id, nil
 }

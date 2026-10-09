@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/proxy-app/proxy-api/internal/treasure"
 	"github.com/proxy-app/proxy-api/internal/weather"
 	"net/http"
 	"os"
@@ -153,6 +154,8 @@ type Server struct {
 	IdentityTiers IdentityTierSource
 	// NUDGE-OPTOUT-001：引导推送开关。
 	NudgePrefs NudgePrefs
+	// TREASURE-001：寻宝。
+	Treasure *treasure.Postgres
 	// MatchEval：撮合离线回放评估（OPS-MATCH-EVAL-001），组合根接线。
 	MatchEval MatchEvalSource
 	// ProviderList / ProviderProfile：小美画像（OPS-PROVIDER-PROFILE-001），组合根接线。
@@ -369,6 +372,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
 	mux.HandleFunc("/v1/weather", s.publicWeather)
 	mux.HandleFunc("/v1/me/nudges", s.myNudges)
+	mux.HandleFunc("/v1/treasure/nearby", s.treasureNearby)
+	mux.HandleFunc("/v1/treasure/open", s.treasureOpen)
 	mux.HandleFunc("/v1/scene-assets", s.publicSceneAssets)
 	mux.HandleFunc("/v1/reality-scenes/nearby", s.nearbyRealityScenes)
 	mux.HandleFunc("/v1/scenes/", s.dynamicSceneRead)

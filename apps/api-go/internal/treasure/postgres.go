@@ -57,6 +57,8 @@ type Chest struct {
 	SceneID    string    `json:"sceneId"`
 	Name       string    `json:"name"`
 	Area       string    `json:"area"`
+	Lat        float64   `json:"lat"` // 场景（店）的公开坐标，客户端算方位用
+	Lng        float64   `json:"lng"`
 	DistanceM  int       `json:"distanceM"`
 	Points     int       `json:"points"`
 	Remaining  int       `json:"remaining"`
@@ -65,14 +67,16 @@ type Chest struct {
 }
 
 type Booking struct {
-	ActivityID  string `json:"activityId"`
-	CompanionID string `json:"companionId"`
-	Title       string `json:"title"`
-	SceneID     string `json:"sceneId"`
-	Name        string `json:"name"`
-	DistanceM   int    `json:"distanceM"`
-	Points      int    `json:"points"`
-	WithVoucher bool   `json:"withVoucher"`
+	ActivityID  string  `json:"activityId"`
+	CompanionID string  `json:"companionId"`
+	Title       string  `json:"title"`
+	SceneID     string  `json:"sceneId"`
+	Name        string  `json:"name"`
+	Lat         float64 `json:"lat"`
+	Lng         float64 `json:"lng"`
+	DistanceM   int     `json:"distanceM"`
+	Points      int     `json:"points"`
+	WithVoucher bool    `json:"withVoucher"`
 }
 
 type Nearby struct {
@@ -127,7 +131,7 @@ func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, 
 		if d > nearbyLimitM {
 			continue
 		}
-		c.DistanceM = int(d)
+		c.DistanceM, c.Lat, c.Lng = int(d), slat, slng
 		out.Chests = append(out.Chests, c)
 	}
 	rows.Close()
@@ -157,7 +161,7 @@ func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, 
 			brows.Close()
 			return out, err
 		}
-		b.DistanceM = int(matching.DistanceMeters(lat, lng, slat, slng))
+		b.DistanceM, b.Lat, b.Lng = int(matching.DistanceMeters(lat, lng, slat, slng)), slat, slng
 		b.Points, b.WithVoucher = CompanionPts, withVoucher
 		out.Bookings = append(out.Bookings, b)
 	}
@@ -165,6 +169,7 @@ func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, 
 	if err := p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM treasure.opens WHERE user_id = $1 AND kind = 'SOLO' AND opened_at >= $2`, userID, LocalDayStart(now)).Scan(&out.OpenedToday); err != nil {
 		return out, err
 	}
+	_ = p.pool.QueryRow(ctx, `SELECT COALESCE(SUM(delta),0) FROM growth.point_ledger WHERE subject_kind = 'USER' AND subject_id = $1`, userID).Scan(&out.TotalPoints)
 	return out, nil
 }
 

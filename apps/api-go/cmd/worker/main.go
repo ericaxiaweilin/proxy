@@ -28,6 +28,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/outbox"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/tagging"
+	"github.com/proxy-app/proxy-api/internal/treasure"
 	"github.com/proxy-app/proxy-api/internal/weather"
 	"github.com/proxy-app/proxy-api/internal/weatherwatch"
 )
@@ -705,6 +706,18 @@ func main() {
 		}
 	}
 	runWeather()
+	// TREASURE-001：给每个咖啡店场景保持一个活箱子（每 15 分钟补；收掉到期 / 开空的）。
+	treasureStore := treasure.NewPostgres(pool)
+	treasureTicker := time.NewTicker(15 * time.Minute)
+	defer treasureTicker.Stop()
+	runTreasure := func() {
+		if n, err := treasureStore.Spawn(ctx, time.Now().UTC()); err != nil {
+			log.Printf("treasure spawn failed: %v", err)
+		} else if n > 0 {
+			log.Printf("treasure: spawned=%d", n)
+		}
+	}
+	runTreasure()
 	runIncentives := func() {
 		// 先把用户已经做成的事折成积分（固定规则，幂等），再按分数发奖励活动。
 		if n, err := tierStore.CollectProvider(ctx, time.Now().UTC()); err != nil {
@@ -745,6 +758,8 @@ func main() {
 			return
 		case <-weatherTicker.C:
 			runWeather()
+		case <-treasureTicker.C:
+			runTreasure()
 		case <-ticker.C:
 			processed, runErr := outboxWorker.RunOnce(ctx)
 			if runErr != nil {
