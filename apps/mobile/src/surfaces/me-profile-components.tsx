@@ -288,7 +288,8 @@ function QrCard({
   onQrPress
 }: {
   title: string;
-  desc: string;
+  // 2026-10-09：副文案可选（没有描述就不画那行，而不是画一行空的）。
+  desc?: string;
   actionLabel?: string | undefined;
   onAction?: (() => void) | undefined;
   alignCenter?: boolean | undefined;
@@ -317,7 +318,7 @@ function QrCard({
       </View>
       <View style={[styles.qrCardText, alignCenter && styles.qrCardTextCenter]}>
         <Text selectable style={styles.qrCardTitle}>{title}</Text>
-        <Text selectable style={styles.qrCardDesc}>{desc}</Text>
+        {desc ? <Text selectable style={styles.qrCardDesc}>{desc}</Text> : null}
         {buttons ? (
           <View style={styles.qrCardActions}>
             {buttons.map((action) => (
@@ -345,7 +346,7 @@ function SocialRow({
 }: {
   icon: string;
   label: string;
-  desc: string;
+  desc?: string;
   onPress?: () => void;
 }): React.JSX.Element {
   return (
@@ -355,7 +356,7 @@ function SocialRow({
       </View>
       <View style={styles.socialRowCopy}>
         <Text selectable style={styles.socialRowLabel}>{label}</Text>
-        <Text selectable style={styles.socialRowDesc}>{desc}</Text>
+        {desc ? <Text selectable style={styles.socialRowDesc}>{desc}</Text> : null}
       </View>
       <Text selectable style={styles.socialRowChev}>›</Text>
     </Pressable>
@@ -378,7 +379,6 @@ function AvailabilitySheet({
       <Pressable onPress={onClose} style={styles.availabilityOverlay}>
         <Pressable onPress={() => undefined} style={styles.availabilitySheet}>
           <Text selectable style={styles.availabilityTitle}>个人状态</Text>
-          <Text selectable style={styles.availabilitySub}>这是市场状态，不是身份切换。</Text>
           {AVAILABILITY_OPTIONS.map((option) => {
             const active = option.id === current;
             return (
@@ -470,7 +470,7 @@ function ServiceRow({ row, onPress }: { row: MenuRow; onPress?: () => void }): R
       )}
       <View style={styles.serviceCopy}>
         <Text selectable style={styles.serviceLabel}>{row.label}</Text>
-        <Text selectable style={styles.serviceDesc}>{row.desc}</Text>
+        {row.desc ? <Text selectable style={styles.serviceDesc}>{row.desc}</Text> : null}
       </View>
       <Text selectable style={styles.chev}>›</Text>
     </Pressable>

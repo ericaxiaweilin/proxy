@@ -3,7 +3,7 @@ import type { StoreRecommendation } from "../storeonboarding-client";
 // vitest 直接 import —— 地图 URL 不在这里另写一份。
 import { googleMapsUrl } from "../components/location-options";
 
-// STORE-REC-MANAGE-001: 「推荐管理」的读模型。
+// STORE-REC-MANAGE-001: 「店铺推荐」的读模型。
 //
 // 为什么判断逻辑全在这个纯 .ts 里、而不是写在组件里：`surfaces/*.tsx` 不能被
 // vitest import（RN 组件在 node 环境跑不起来）。凡是「错了会静默给出错误结论」
@@ -145,7 +145,7 @@ export interface RecStage {
 // 「线下洽谈」「签约完成」在系统里**没有任何数据源** —— 画出来只能是编的，
 // 而且会顺带承诺一份平台并没有的合同。所以第三段换成系统真正关心的那件事：
 // **店铺接入**。采纳 ≠ 已存在，这一步要有人真的把店建出来
-// （STORE-REC-007 存在的全部理由）。建店属于 workspace（推荐管理这一屏），
+// （STORE-REC-007 存在的全部理由）。建店属于 workspace（店铺推荐这一屏），
 // 不属于「我的店铺」—— 那一屏只放已经处理完的店。
 export function recStages(row: StoreRecommendation): RecStage[] {
   const status = recStatus(row);
@@ -205,7 +205,7 @@ export function recStages(row: StoreRecommendation): RecStage[] {
 // 换成这一步**真正该谁做什么**。
 //
 // STORE-HUB-004：不再写「去『我的店铺』把店建出来」。两屏分工是 ——
-// 「推荐管理」是 workspace（在飞的推荐在这里处理），「我的店铺」只放**已经处理完**
+// 「店铺推荐」是 workspace（在飞的推荐在这里处理），「我的店铺」只放**已经处理完**
 // 的店（真实存在的店）。所以还没建出来的店**不在**「我的店铺」里，把人指过去是空指。
 export function recNextStep(row: StoreRecommendation): string {
   const status = recStatus(row);
@@ -290,7 +290,7 @@ export function recMapsUrl(row: StoreRecommendation): string | undefined {
 //   ③ 没有任何「独家期」字段或规则。
 // 所以这里只写今天真会发生的事。要上奖励/独家条款，得先把规则定下来再改这句话。
 export const REC_TIP =
-  "推荐先由平台运营评估。采纳后要有人真的把店建出来（在「推荐管理」里建），建完才会出现在「我的店铺」—— 采纳本身不等于店铺已存在。";
+  "推荐先由平台运营评估。采纳后要有人真的把店建出来（在「店铺推荐」里建），建完才会出现在「我的店铺」—— 采纳本身不等于店铺已存在。";
 
 // 表单里目前**不收**的东西。设计稿有详细地址 / 对接人电话 / 店铺照片三项 ——
 // 详细地址从 STORE-REC-ADDRESS-001（迁移 130）起已经收了，所以这句提示里

@@ -1364,7 +1364,6 @@ function SceneComposerSurface({ tool, onBack, onCreated, scene }: { tool: SceneT
     <View style={styles.composerRoot}>
       <Pressable onPress={onBack} style={styles.composerBack}><ProxyBackGlyph label="返回" /></Pressable>
       <Text selectable style={styles.composerTitle}>{meta?.label ?? tool} · Scene Composer</Text>
-      <Text selectable style={styles.composerSub}>P0: 把意图变成可邀请的 Scene — 预算进场景而非买人</Text>
       <View style={styles.composerField}><Text selectable style={styles.composerLabel}>意图</Text><View style={styles.composerInput}><Text selectable style={styles.composerInputText}>例如：周六下午想在西湖拍照 · 2–4人</Text></View></View>
       <View style={styles.composerRow}><Pressable onPress={() => setParticipation("OPEN_SIGNUP")} style={[styles.composerChip, participation==="OPEN_SIGNUP"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="OPEN_SIGNUP"&&styles.composerChipTextActive]}>公开报名</Text></Pressable><Pressable onPress={() => setParticipation("PRIVATE_INVITE")} style={[styles.composerChip, participation==="PRIVATE_INVITE"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="PRIVATE_INVITE"&&styles.composerChipTextActive]}>私邀关系</Text></Pressable><Pressable onPress={() => setParticipation("HYBRID")} style={[styles.composerChip, participation==="HYBRID"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, participation==="HYBRID"&&styles.composerChipTextActive]}>混合</Text></Pressable></View>
       <View style={styles.composerRow}><Pressable onPress={() => setCost("HOST_SPONSORED")} style={[styles.composerChip, cost==="HOST_SPONSORED"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="HOST_SPONSORED"&&styles.composerChipTextActive]}>Host Sponsored</Text></Pressable><Pressable onPress={() => setCost("AA")} style={[styles.composerChip, cost==="AA"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="AA"&&styles.composerChipTextActive]}>AA</Text></Pressable><Pressable onPress={() => setCost("MERCHANT_SPONSORED")} style={[styles.composerChip, cost==="MERCHANT_SPONSORED"&&styles.composerChipActive]}><Text selectable style={[styles.composerChipText, cost==="MERCHANT_SPONSORED"&&styles.composerChipTextActive]}>商家权益</Text></Pressable></View>
@@ -1992,7 +1991,6 @@ const styles = StyleSheet.create({
   composerBack: { alignSelf: "flex-start", paddingVertical: 6 },
   // composerBackText 已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   composerTitle: { color: color.ink, fontSize: 22, fontWeight: "900" },
-  composerSub: { color: color.muted, fontSize: 12, lineHeight: 17 },
   composerField: { marginTop: 6, gap: 6 },
   composerLabel: { color: color.ink, fontSize: 12, fontWeight: "800" },
   composerInput: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1, borderRadius: 14, padding: 12 },

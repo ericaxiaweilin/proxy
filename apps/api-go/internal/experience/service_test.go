@@ -105,6 +105,45 @@ func TestRequesterManifest(t *testing.T) {
 			t.Fatalf("my market item %d drifted to an obsolete baseline: %+v", index, item)
 		}
 	}
+
+	// 2026-10-09：分组副标题 `hint` 整体删除（用户：「把解释性的废话全部删除」）。
+	// 服务端若再下发这个键，客户端契约 ExperienceMenuSectionSchema（`.strict()`）会**整包
+	// 校验失败** —— 失败是静默的（experience-client 抛协议错，菜单降级），所以这里直接钉
+	// 序列化结果：任何一个 section 都不许带 hint。
+	for index, raw := range sections {
+		section, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("section %d is not an object: %+v", index, raw)
+		}
+		if value, present := section["hint"]; present {
+			t.Fatalf("section %d still carries a hint subtitle (%v): %+v", index, value, section)
+		}
+	}
+
+	// 2026-10-09（同一轮的 `desc` 清扫）：菜单行/磁贴的灰色副文案 `description` 也
+	// 从服务端删掉了。理由与上面的 `hint` 完全一样 —— 契约 `ExperienceMenuItemSchema`
+	// 是 `.strict()`，服务端若再下发这个键，客户端**整包**校验失败，而失败是静默的
+	// （experience-client 抛协议错、菜单降级，不会有任何门禁变红）。所以这里同样直接钉
+	// 序列化结果：每一个 item 都不许带 description。
+	for index, raw := range sections {
+		section, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("section %d is not an object: %+v", index, raw)
+		}
+		items, ok := section["items"].([]any)
+		if !ok {
+			t.Fatalf("section %d has no items array: %+v", index, section)
+		}
+		for itemIndex, rawItem := range items {
+			item, ok := rawItem.(map[string]any)
+			if !ok {
+				t.Fatalf("section %d item %d is not an object: %+v", index, itemIndex, rawItem)
+			}
+			if value, present := item["description"]; present {
+				t.Fatalf("section %d item %d still carries a description (%v): %+v", index, itemIndex, value, item)
+			}
+		}
+	}
 }
 
 func TestRejectsUnknownContext(t *testing.T) {

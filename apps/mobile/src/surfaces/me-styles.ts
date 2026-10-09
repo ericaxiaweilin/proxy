@@ -200,7 +200,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 1
   },
   sectionTitle: { color: color.ink, fontSize: 17, fontWeight: "800", lineHeight: 24 },
-  sectionHint: { color: color.muted, fontSize: 11, lineHeight: 15 },
+  // 2026-10-09：`sectionHint` 样式随分组副标题一起删除（用户：「把解释性的废话全部删除」）。
 
   // STORE-TILES-001：「企业 / 店铺」的入口磁贴。产品稿里就是「品牌绿圆角方块 +
   // 黑图标 + 粗标题 + 灰色副标题」，方块明显大于菜单行那枚 44×44，且没有卡片底 /
@@ -260,7 +260,6 @@ export const styles = StyleSheet.create({
   enterpriseQuickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 },
   enterpriseQuick: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, minHeight: 84, padding: 10, width: "48.8%", ...shadows.card },
   enterpriseQuickTitle: { color: color.ink, fontSize: 11, fontWeight: "900" },
-  enterpriseQuickDesc: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 5 },
   enterpriseAssetTray: { flexDirection: "row", gap: 7, marginTop: 7 },
   enterpriseAsset: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 12, borderWidth: 1, flex: 1, minHeight: 61, padding: 7 },
   enterpriseAssetThumb: { color: "#6F37B9", fontSize: 16 },
@@ -313,7 +312,6 @@ export const styles = StyleSheet.create({
   },
   subPageIconText: { color: color.ink, fontSize: 28 },
   subPageTitle: { color: color.ink, fontSize: 18, fontWeight: "800", marginBottom: 6 },
-  subPageSub: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 16 },
   subPageDesc: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 16 },
   profileManageRow: { flexDirection: "row", alignItems: "center", padding: 12, backgroundColor: color.white, borderRadius: 10, borderWidth: 1, borderColor: color.line, marginBottom: 12 },
   profileManageAva: { width: 88, height: 88, borderRadius: 44, backgroundColor: color.magenta, alignItems: "center", justifyContent: "center", marginRight: 12, overflow: "hidden" },
@@ -606,7 +604,8 @@ export const styles = StyleSheet.create({
     paddingVertical: 6
   },
   customSectionTitle: { color: color.ink, fontSize: 11, fontWeight: "700", marginTop: 10 },
-  customSectionHint: { color: color.muted, fontSize: 11, marginBottom: 2, marginTop: 1 },
+  // 2026-10-09：`customSectionHint`（连同同时变死的 `subPageSub` / `enterpriseQuickDesc`）随
+  // 「解释性灰字」清扫一起删除（用户：「把解释性的废话全部删除」）。
   subRow: {
     borderBottomColor: color.line,
     borderBottomWidth: 1,

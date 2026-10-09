@@ -721,7 +721,6 @@ export function MarketSurface({
         <Pressable accessibilityLabel="KYC提示面板" onPress={() => undefined} style={[styles.publishMenuSheet, { marginBottom: bottomNavVisible === false ? 24 : 104 }]}>
           <View style={styles.publishMenuGrab} />
           <Text selectable style={styles.publishMenuTitle}>先完成KYC认证</Text>
-          <Text selectable style={styles.publishMenuHint}>接单前需要先通过 KYC 认证。</Text>
           <View style={styles.publishMenu}>
             <Pressable accessibilityLabel="去KYC认证" onPress={() => { setKycGateOpen(false); onRequireKYC?.(); }} style={styles.publishMenuPrimary}>
               <Text selectable style={styles.publishMenuPrimaryText}>去KYC认证</Text>
@@ -1963,7 +1962,6 @@ const styles = StyleSheet.create({
   publishMenuSheet: { backgroundColor: color.white, borderColor: color.line, borderRadius: 24, borderWidth: 1, paddingBottom: 14, paddingHorizontal: 14, paddingTop: 8, ...shadows.card },
   publishMenuGrab: { alignSelf: "center", backgroundColor: color.line, borderRadius: 99, height: 4, marginBottom: 8, width: 38 },
   publishMenuTitle: { color: color.ink, fontSize: 20, fontWeight: "900" },
-  publishMenuHint: { color: color.muted, fontSize: 12, lineHeight: 17, marginBottom: 12, marginTop: 3 },
   publishMenu: { flexDirection: "column", gap: 8 },
   publishMenuPrimary: { alignItems: "center", backgroundColor: color.ink, borderRadius: 14, flex: 1, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48 },
   publishMenuPrimaryText: { color: color.white, fontSize: 14, fontWeight: "800" },

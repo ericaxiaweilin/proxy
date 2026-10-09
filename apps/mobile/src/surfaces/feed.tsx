@@ -3109,7 +3109,6 @@ function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, 
           {!showReportReasons ? (
             <>
               <Text selectable style={postMenuStyles.title}>更多操作</Text>
-              <Text selectable style={postMenuStyles.subtitle}>选一项作用于这篇帖子</Text>
               {error ? <Text selectable style={postMenuStyles.error}>{error}</Text> : null}
               <Pressable onPress={() => { void onNotInterested(); }} style={postMenuStyles.row}>
                 <ProxyIcon color={color.ink} name="thumbDown" size={26} style={postMenuStyles.rowIconSlot} />
@@ -3153,7 +3152,6 @@ function PostMenuModal({ open, post, error, onClose, onReport, onNotInterested, 
           ) : (
             <>
               <Text selectable style={postMenuStyles.title}>举报原因</Text>
-              <Text selectable style={postMenuStyles.subtitle}>选一个最贴近的</Text>
               {error ? <Text selectable style={postMenuStyles.error}>{error}</Text> : null}
               <Pressable onPress={() => { void onReport("SPAM"); }} style={postMenuStyles.row}>
                 <Text selectable style={postMenuStyles.rowTitle}>垃圾广告</Text>
@@ -3183,7 +3181,6 @@ const postMenuStyles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
   sheet: { backgroundColor: color.appBg, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16, paddingBottom: 24 },
   title: { color: color.ink, fontSize: 16, fontWeight: "700", marginBottom: 4 },
-  subtitle: { color: color.muted, fontSize: 12, lineHeight: 18, marginBottom: 12 },
   error: { color: "#dc2626", fontSize: 12, lineHeight: 18, marginBottom: 10, padding: 8, backgroundColor: "rgba(220, 38, 38, 0.08)", borderRadius: 6 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(0,0,0,0.08)" },
   rowIcon: { fontSize: 18, marginRight: 12 },
@@ -3224,7 +3221,6 @@ function SharePostSheet({ target, contacts, contactsError, sendingTo, onPickCont
       <Pressable onPress={onClose} style={postMenuStyles.backdrop}>
         <Pressable onPress={(e) => e.stopPropagation()} style={postMenuStyles.sheet}>
           <Text selectable style={postMenuStyles.title}>分享给</Text>
-          <Text selectable style={postMenuStyles.subtitle}>选一位聊过天的联系人，直接发一条私信</Text>
           {contacts === undefined ? (
             <Text selectable style={sharePostStyles.loading}>加载联系人…</Text>
           ) : contactsError ? (

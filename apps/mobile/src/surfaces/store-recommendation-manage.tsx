@@ -26,7 +26,7 @@ import {
   type RecStageState
 } from "./store-recommendation-manage-model";
 
-// STORE-REC-MANAGE-001: 「推荐管理」—— 推荐这件事的完整界面。
+// STORE-REC-MANAGE-001: 「店铺推荐」—— 推荐这件事的完整界面。
 //
 // 它把原来平铺的 3 条入口收成两个页签 + 一个运营入口：
 //   · 我推荐的店   → 列表屏（my-store-recommendations.tsx）+ 这一层拿数据
@@ -318,7 +318,7 @@ export function StoreRecommendationManage({
   return (
     <View>
       {/* STORE-HUB-MOVE-001：体系接入行原来在「我的店铺」hub 里 —— 建店/二维码
-          是把店弄进体系的动作，不是已有店铺的数据，归推荐管理。 */}
+          是把店弄进体系的动作，不是已有店铺的数据，归店铺推荐。 */}
       {onOpenStore || onOpenStoreProfile ? (
         <View style={s.accessSection}>
           {onOpenStore ? (

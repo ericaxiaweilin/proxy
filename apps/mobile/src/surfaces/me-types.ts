@@ -8,7 +8,7 @@ import type { ExperienceAction } from "@proxy/contracts";
 // 字符串，等于把「域名」这件事漏进了导航参数里。
 export type MeSubPage = {
   title: string;
-  desc: string;
+  desc?: string;
   icon: string;
   route: string;
   qrStoreId?: string | undefined;
@@ -80,7 +80,10 @@ export type EnterpriseOpsStage = "READY" | "DRAFT_READY" | "CONFIRMED" | "PUBLIS
 export interface MenuRow {
   icon: string;
   label: string;
-  desc: string;
+// 2026-10-09：`desc`（行/磁贴的灰色副文案）改成可选（用户：「把解释性的废话全部删除」）。
+  // 那些副文案讲的是「这一项里有什么 / 为什么这样设计」，用户点进去自然就看得到；
+  // 只有**状态诚实标记**（如「功能预览 · 实时数据待接入」）才留着。
+  desc?: string;
   grad?: boolean;
   action?: ExperienceAction;
   route?: string;
@@ -93,14 +96,16 @@ export interface MenuRow {
 export interface MenuTile {
   icon: string;
   label: string;
-  desc: string;
+  desc?: string;
   route: string;
 }
 
 export interface MenuSection {
   id?: string;
   title: string;
-  hint: string;
+  // 2026-10-09：`hint`（分组副标题）整体删除（用户：「把解释性的废话全部删除」）。
+  // 它渲染成标题旁边那行小字，讲的是设计意图而不是用户需要的信息。契约侧的
+  // ExperienceMenuSectionSchema 同步删掉了 `hint`，且是 `.strict()`。
   rows: MenuRow[];
   /** 给了磁贴就渲染成网格；此时 rows 通常为空（两者可以并存，先磁贴后行）。 */
   tiles?: MenuTile[];

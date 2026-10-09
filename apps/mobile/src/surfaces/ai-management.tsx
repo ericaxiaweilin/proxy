@@ -271,7 +271,7 @@ function SheetTabs<T extends string>({ tabs, value, onChange }: { tabs: Readonly
   );
 }
 
-function Sheet({ visible, title, subtitle, onClose, toast, children }: { visible: boolean; title: string; subtitle: string; onClose: () => void; toast: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
+function Sheet({ visible, title, onClose, toast, children }: { visible: boolean; title: string; onClose: () => void; toast: React.ReactNode; children: React.ReactNode }): React.JSX.Element {
   const safeArea = useSafeAreaInsets();
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
@@ -281,7 +281,6 @@ function Sheet({ visible, title, subtitle, onClose, toast, children }: { visible
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHeader}>
             <Text selectable style={styles.sheetTitle}>{title}</Text>
-            <Text selectable style={styles.sheetSub}>{subtitle}</Text>
           </View>
           {children}
         </View>
@@ -616,7 +615,7 @@ type PatchFn = (next: Partial<AiEngineSettings>, okMessage?: string) => void;
 
 function ChatSheet({ toast, visible, tab, onTab, settings, patch, onClose }: { toast: React.ReactNode; visible: boolean; tab: ChatTab; onTab: (tab: ChatTab) => void; settings: AiEngineSettings; patch: PatchFn; onClose: () => void }): React.JSX.Element {
   return (
-    <Sheet toast={toast} visible={visible} title="对话管理" subtitle="AI 怎么替你聊天" onClose={onClose}>
+    <Sheet toast={toast} visible={visible} title="对话管理" onClose={onClose}>
       <SheetTabs tabs={[{ id: "style", name: "风格" }, { id: "rhythm", name: "节奏" }, { id: "perm", name: "权限" }]} value={tab} onChange={onTab} />
       <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.panel}>
         {tab === "style" ? (
@@ -670,7 +669,7 @@ function ImageSheet({ toast, likenessGranted, onGrantLikeness, catalog, catalogE
   };
 
   return (
-    <Sheet toast={toast} visible={visible} title="图片管理" subtitle="场景 · 姿态 · 模型 · 提示词" onClose={onClose}>
+    <Sheet toast={toast} visible={visible} title="图片管理" onClose={onClose}>
       <Text selectable style={styles.notWired}>出图任务还没接上这些设置，现在只保存你的偏好。</Text>
       <SheetTabs
         tabs={[{ id: "model", name: "模型" }, { id: "scene", name: "生成场景" }, { id: "pose", name: "人物姿态" }, { id: "prompt", name: "提示词" }, { id: "param", name: "参数" }]}
@@ -963,7 +962,7 @@ function PostSheet({ toast, visible, settings, patch, onClose }: { toast: React.
     patch({ postTopics: has ? settings.postTopics.filter((item) => item !== topic) : [...settings.postTopics, topic] });
   };
   return (
-    <Sheet toast={toast} visible={visible} title="动态管理" subtitle="AI 替你发什么" onClose={onClose}>
+    <Sheet toast={toast} visible={visible} title="动态管理" onClose={onClose}>
       <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.panel}>
         <GroupTitle first title="发帖节奏" />
         <View style={styles.optionList}>
@@ -1049,7 +1048,6 @@ const styles = StyleSheet.create({
   sheetHandle: { alignSelf: "center", backgroundColor: "#e0e0e0", borderRadius: 2, height: 4, marginBottom: 6, marginTop: 10, width: 36 },
   sheetHeader: { alignItems: "center", borderBottomColor: "#f0f0f0", borderBottomWidth: 1, paddingBottom: 14, paddingHorizontal: 20, paddingTop: 6 },
   sheetTitle: { color: INK, fontSize: 16, fontWeight: "800", marginBottom: 4 },
-  sheetSub: { color: "#888", fontSize: 12, fontWeight: "500" },
   sheetScroll: { flexGrow: 0 },
   tabsWrap: { borderBottomColor: "#f0f0f0", borderBottomWidth: 1 },
   tabs: { gap: 6, paddingHorizontal: 20, paddingTop: 14 },

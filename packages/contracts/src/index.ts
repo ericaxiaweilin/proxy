@@ -1110,7 +1110,9 @@ export const ExperienceMenuItemSchema = z.object({
   id: z.string().min(1),
   icon: z.string().min(1),
   label: z.string().min(1),
-  description: z.string().min(1),
+  // 2026-10-09：`description`（菜单行/磁贴的灰色副文案）整体删除
+  // （用户：「把解释性的废话全部删除」）。它是「这一项里有什么」的解释，
+  // 不是用户需要的信息。schema 是 `.strict()` ⇒ 服务端再下发就是**整包**校验失败。
   accent: z.boolean().optional(),
   action: ExperienceActionSchema
 }).strict();
@@ -1119,7 +1121,6 @@ export type ExperienceMenuItem = z.infer<typeof ExperienceMenuItemSchema>;
 export const ExperienceMenuSectionSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
-  hint: z.string().optional(),
   items: z.array(ExperienceMenuItemSchema)
 }).strict();
 export type ExperienceMenuSection = z.infer<typeof ExperienceMenuSectionSchema>;

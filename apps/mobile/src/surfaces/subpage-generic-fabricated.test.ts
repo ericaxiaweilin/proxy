@@ -51,7 +51,15 @@ describe("SUBPAGE-GENERIC-FABRICATED-001 generic sub-pages never render an inven
     // 这是「表只能经由通用兜底上屏」这个前提本身。
     const projected = meSubPage("members");
     expect(projected).toBeDefined();
-    expect(Object.keys(projected ?? {}).sort()).toEqual(["desc", "icon", "route", "title"]);
+    // 钉的是「投影里没有 sections」（= 表只能经通用兜底上屏这个前提）。
+    // 2026-10-09（ME-NO-DESC-FILLER-001）：原来断言键集合**恰好**是
+    // ["desc","icon","route","title"]。`desc` 改成可选后，没有描述的条目不再带这个键
+    // （`exactOptionalPropertyTypes` 不许显式赋 undefined），所以改成
+    // 「键都落在允许集合内 + 一定没有 sections」—— 钉的意图不变，只是不再依赖
+    // 「每个条目都有 desc」这个已经作废的前提。
+    const keys = Object.keys(projected ?? {});
+    expect(keys).not.toContain("sections");
+    for (const key of keys) expect(["title", "desc", "icon", "route"]).toContain(key);
   });
 
   it("the two pages that really rendered invented rows no longer carry a table", () => {
@@ -69,12 +77,16 @@ describe("SUBPAGE-GENERIC-FABRICATED-001 generic sub-pages never render an inven
 
   it("still describes those pages, so the deletion removed data and not the page", () => {
     // 反向钉：不是把条目整个删掉（那会让菜单点进去什么都不显示），
-    // 而是保留标题/描述/图标，让页面身份还在、内容诚实缺席。
+    // 而是保留标题/图标，让页面身份还在、内容诚实缺席。
+    //
+    // 2026-10-09（ME-NO-DESC-FILLER-001）：这里原来还断言 `desc` 非空。用户要求把
+    // 解释性的废话全部删除，子页头部的 `desc` 随之改为可选，members / outcomehistory
+    // 的描述已删 —— 页面身份现在由 title + icon 承载。删掉这条断言不是放宽门禁：
+    // 「页面被整个删掉」仍然会被 `toBeDefined()` + title/icon 三条咬住。
     for (const route of ["members", "outcomehistory"]) {
       const entry = SUB_PAGE_CONTENT[route];
       expect(entry).toBeDefined();
       expect(entry?.title.length ?? 0).toBeGreaterThan(0);
-      expect(entry?.desc.length ?? 0).toBeGreaterThan(0);
       expect(entry?.icon.length ?? 0).toBeGreaterThan(0);
     }
   });

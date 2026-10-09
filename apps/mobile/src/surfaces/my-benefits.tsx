@@ -157,7 +157,7 @@ export function MyGrowthSurface({
       {(side === "provider" ? summary.benefitsProvider : summary.benefitsClient).map((b) => <BenefitRowCard benefit={b} key={b.name} />)}
 
       {/* 成长任务 */}
-      <SectionTitle hint="订单 + 好评驱动" title="成长任务" />
+      <SectionTitle title="成长任务" />
       {summary.taskGroups.map((group) => (
         <View key={group.label} style={styles.taskGroup}>
           <View style={styles.taskGroupHead}><Text selectable style={styles.taskGroupLabel}>{group.label}</Text><Text selectable style={styles.taskGroupDesc}>{group.desc}</Text></View>
@@ -175,7 +175,7 @@ export function MyGrowthSurface({
       </View>
 
       {/* 等级对比 */}
-      <SectionTitle hint="成长值越高，解锁越多" title="等级对比" />
+      <SectionTitle title="等级对比" />
       <HorizontalSwipeRail contentContainerStyle={styles.tierCompareRail} preserveChildPresses threshold={3}>
         {summary.tierCompare.map((t) => <TierCompareCard key={t.level} tier={t} />)}
       </HorizontalSwipeRail>
@@ -185,12 +185,11 @@ export function MyGrowthSurface({
   );
 }
 
-function SectionTitle({ title, count, hint }: { title: string; count?: string; hint?: string }): React.JSX.Element {
+function SectionTitle({ title, count }: { title: string; count?: string }): React.JSX.Element {
   return (
     <View style={styles.sectionTitle}>
       <Text selectable style={styles.sectionTitleText}>{title}</Text>
       {count ? <Text selectable style={styles.sectionTitleCount}>{count}</Text> : null}
-      {hint ? <Text selectable style={styles.sectionTitleHint}>{hint}</Text> : null}
     </View>
   );
 }
@@ -297,7 +296,6 @@ const styles = StyleSheet.create({
   sectionTitle: { alignItems: "baseline", flexDirection: "row", justifyContent: "space-between", marginBottom: 8, marginTop: 18 },
   sectionTitleText: { color: color.ink, fontSize: 14, fontWeight: "900" },
   sectionTitleCount: { color: color.muted, fontSize: 11, fontWeight: "700" },
-  sectionTitleHint: { color: color.muted, fontSize: 11, fontWeight: "700" },
 
   benefitGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   benefitItem: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, gap: 6, padding: 12, position: "relative", width: "48.5%" },

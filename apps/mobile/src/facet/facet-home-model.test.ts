@@ -257,3 +257,23 @@ describe("FacetHomeSurface 的诚实边界", () => {
     expect(surfaceCode).toContain("payload ? pickDailySuggestion(payload.objects) : undefined");
   });
 });
+
+describe("FACET-NO-PHASE-JARGON-001 屏内不再印内部开发阶段（2026-10-09）", () => {
+  // 用户：「把解释性的废话全部删除 不只这个功能 其它的解释废话移除」。
+  // 这一屏原来有三行灰色小字写的是**内部开发阶段**（「Phase 1.5：…」「后续版本」），
+  // 不是用户需要的信息 —— 跟「我的」页那条被删的分组副标题（「原始设计：发展 builder」）
+  // 是同一种东西：内部说明漏到了用户可见的副标题上。
+  // `surfaceCode` 已剥注释，所以可以直接匹配；注释里保留的 Phase 1.5 不算数。
+  it("没有把内部开发阶段（Phase 1.5）印到屏上", () => {
+    expect(surfaceCode).not.toMatch(/Phase\s*1\.5/);
+    // 反证：上面那条不是因为整个文件读空了 / 被剥光了才过的。
+    expect(surfaceCode.length).toBeGreaterThan(1000);
+    expect(surfaceCode).toContain("FACET");
+  });
+
+  it("随之变死的说明小字样式一并删掉（不留死样式）", () => {
+    for (const key of ["styles.previewFoot", "styles.subPageHint", "styles.scopeFooter", "styles.scopeFooterText"]) {
+      expect(surfaceCode).not.toContain(key);
+    }
+  });
+});

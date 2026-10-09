@@ -77,18 +77,20 @@ type action struct {
 }
 
 type menuItem struct {
-	ID          string `json:"id"`
-	Icon        string `json:"icon"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-	Accent      bool   `json:"accent,omitempty"`
-	Action      action `json:"action"`
+	ID     string `json:"id"`
+	Icon   string `json:"icon"`
+	Label  string `json:"label"`
+	Accent bool   `json:"accent,omitempty"`
+	Action action `json:"action"`
 }
 
+// 2026-10-09：`Hint` 字段整体删除（用户：「把解释性的废话全部删除」）。
+// 那些副标题讲的是设计意图（「原始设计：发展 builder，小美与用户推荐商铺进入体系」），
+// 不是用户需要的信息。契约侧 ExperienceMenuSectionSchema 同步删掉，且是 `.strict()` ——
+// 谁再把 hint 加回来，客户端会**整包校验失败**，不会被静默忽略。
 type menuSection struct {
 	ID    string     `json:"id"`
 	Title string     `json:"title"`
-	Hint  string     `json:"hint,omitempty"`
 	Items []menuItem `json:"items"`
 }
 
@@ -210,8 +212,8 @@ func (s *Service) handleCompileSurface(ctx context.Context, e command.Envelope) 
 			// NO_UI_CHANGE is a valid legal result — ACCEPTED with marker
 			accepted := command.Accepted(e, "ExperienceSurface", intent.IntentID, 1, "NO_UI_CHANGE", nil)
 			accepted.OperationRef = mustMarshal(map[string]any{
-				"result": "NO_UI_CHANGE",
-				"reason": compileErr.Error(),
+				"result":    "NO_UI_CHANGE",
+				"reason":    compileErr.Error(),
 				"intent_id": intent.IntentID,
 			})
 			return accepted
@@ -328,49 +330,46 @@ func manifestFor(contextName string) manifest {
 	if contextName == "REQUESTER" {
 		sections = []menuSection{
 			{
-				ID: "personal_profile", Title: "个人主页", Hint: "你掌控展示方式",
+				ID: "personal_profile", Title: "个人主页",
 				Items: []menuItem{
 					{
-						ID:          "personal_hub",
-						Icon:        "profile-ring",
-						Label:       "个人主页",
-						Description: "名片、关于我、能力、可用时间与对外展示",
-						Accent:      true,
-						Action:      action{Type: "OPEN_REGISTERED_ROUTE", Route: "personalhub"},
+						ID:     "personal_hub",
+						Icon:   "profile-ring",
+						Label:  "个人主页",
+						Accent: true,
+						Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "personalhub"},
 					},
 					{
 						ID: "social_identity", Icon: "arrow-up-right", Label: "社媒与联系",
-						Description: "TikTok、Zalo、Instagram 与可见范围",
-						Action:      action{Type: "OPEN_REGISTERED_ROUTE", Route: "socialidentity"},
+						Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "socialidentity"},
 					},
 					{
 						ID: "social_analytics", Icon: "route", Label: "访问与转化",
-						Description: "渠道 → 主页 → 聊天 → 订单",
-						Action:      action{Type: "OPEN_REGISTERED_ROUTE", Route: "socialanalytics"},
+						Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "socialanalytics"},
 					},
 				},
 			},
 			{
-				ID: "relationships", Title: "关系", Hint: "真人网络 · 个人轻 CRM 关系图",
+				ID: "relationships", Title: "关系",
 				Items: []menuItem{
-					{ID: "friend_relationships", Icon: "target", Label: "好友与关系", Description: "关系图 · 轻 CRM · 标签、备注、来源与互动记录", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "friendcrm"}},
+					{ID: "friend_relationships", Icon: "target", Label: "好友与关系", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "friendcrm"}},
 				},
 			},
 			{
-				ID: "my_market", Title: "我的市场", Hint: "个人资产",
+				ID: "my_market", Title: "我的市场",
 				Items: []menuItem{
-					{ID: "my_orders", Icon: "diamond", Label: "我的订单", Description: "我发布的 / 我参与的订单与交易记录", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "myorders"}},
-					{ID: "availability", Icon: "clock", Label: "能力与可用时间", Description: "能力、主题、区域与空闲时间", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "available"}},
-					{ID: "my_activities", Icon: "ring", Label: "我的活动", Description: "已参加 / 我发起的活动", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "myactivities"}},
-					{ID: "favorites", Icon: "star", Label: "收藏", Description: "商家、Creator、动态与活动", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "favorites"}},
+					{ID: "my_orders", Icon: "diamond", Label: "我的订单", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "myorders"}},
+					{ID: "availability", Icon: "clock", Label: "能力与可用时间", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "available"}},
+					{ID: "my_activities", Icon: "ring", Label: "我的活动", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "myactivities"}},
+					{ID: "favorites", Icon: "star", Label: "收藏", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "favorites"}},
 				},
 			},
 			{
-				ID: "account", Title: "账户", Hint: "安全与结算",
+				ID: "account", Title: "账户",
 				Items: []menuItem{
-					{ID: "wallet", Icon: "coin", Label: "钱包与结算", Description: "付款、收入、退款与记录", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "wallet"}},
-					{ID: "settings", Icon: "gear", Label: "设置与隐私", Description: "推荐、通知、权限与隐私", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "appbehavior"}},
-					{ID: "business_workspace", Icon: "store-lines", Label: "我的企业 / 店铺", Description: "有经营权限时进入 Business Workspace", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "bdash"}},
+					{ID: "wallet", Icon: "coin", Label: "钱包与结算", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "wallet"}},
+					{ID: "settings", Icon: "gear", Label: "设置与隐私", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "appbehavior"}},
+					{ID: "business_workspace", Icon: "store-lines", Label: "我的企业 / 店铺", Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "bdash"}},
 				},
 			},
 			// R15.40.3: FACET 是 ME tab 内的深度模块（不是第 6 个 root）。
@@ -378,9 +377,9 @@ func manifestFor(contextName string) manifest {
 			//   manifestFor REQUESTER 之前没返 — REPLACE 模式把整段覆盖，
 			//   facet 入口在 iPhone 上消失。补回与 mobile persona 同步。
 			{
-				ID: "facet", Title: "对象化运营", Hint: "FACET · 同一份真实素材，按对象重新组织",
+				ID: "facet", Title: "对象化运营",
 				Items: []menuItem{
-					{ID: "facet_home", Icon: "spark", Label: "FACET", Description: "对象列表 · 关系目标 · 缺口判定", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "facet"}},
+					{ID: "facet_home", Icon: "spark", Label: "FACET", Accent: true, Action: action{Type: "OPEN_REGISTERED_ROUTE", Route: "facet"}},
 				},
 			},
 		}

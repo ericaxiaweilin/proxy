@@ -4,6 +4,412 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 360 — 2026-10-09
+
+- **「解释性废话」清扫第三批 —— 商家 Home 的 `sectionHint` 那一层**（把 359 刻意留下的待办做完）。
+  同一判据（标题旁边那行灰字讲「这一块里有什么」而标题已说完 ⇒ 删），清出 4 条：
+
+  | 文件 | 删掉的那行 | 类别 |
+  |---|---|---|
+  | `business-home.tsx` | `实时状态 → 未来状态`（「经营脉搏」旁） | 复述：把面板在讲什么又讲一遍 |
+  | `business-home.tsx` | `Forecast`（「未来需求」旁） | **同一个东西的第二个名字** |
+  | `business-home.tsx` | `Scene Package`（「高价值场景」旁） | **实现期的占位名** —— 本文件第 9 行注释自称 `(Scene Package placeholder for now)` |
+  | `business-home.tsx` | `HOT / COOL menu`（「招牌与在售」旁） | **过期承诺** —— COOL 全仓没有实现 |
+
+- **359 说「哪些算产品词得产品定」，这一轮把它判下来了 —— 判据是「gloss 还是 label」**：
+
+  · **gloss = 给已经有名字的东西再起第二个名字**（`Forecast` 就贴在 `未来需求` 旁边）⇒ **删**；
+  · **label = 那个东西唯一的名字**（`Scene Supply` 是那个信号格的唯一标签、`OPERATING PLAN · 发布前确认`
+    是确认单的抬头）⇒ **留**。
+
+  所以「`Scene` / `Creator` 是产品词」保不住整层 —— `Scene` 是产品词，`Scene Package` 是占位名。
+  三条证据把这件事从口味变成事实：① `docs/design/` 下搜这三句**只命中本 changelog**
+  （一条是 359 自己的待办，一条是 Revision 55 用中文描述版式「HOT/COOL 位」）⇒ **不是设计元素**；
+  ② 本文件注释自称 placeholder；③ `HOT / COOL` 的 COOL 没有 `is_cool`、没有徽章
+  （只有 `is_hot` / 迁移 158 / `HotBadge`）⇒ 它承诺的东西不存在。
+
+- 🔴 **同一轮查出一个钉子自己的缺陷（比这几行文案重要）**：`NO-PAGE-GLOSS-FILLER-001` / `002` 的注释写着
+  「换个写法（**拼字符串**、放进数组）加回来也得红」—— 反向注入实测**这句是假的**。`not.toContain` 是
+  纯子串判定，`{"Fore" + "cast"}` 里根本没有连续的 `Forecast`，钉**照样绿**。三个钉子都已加 `deConcat`
+  （`s.replace(/["'`]\s*\+\s*["'`]/g, "")`：先把拼接黏合处抹掉，再看一遍）。
+  实测证据：001 / 002 的拼接注入**只有 `deConcat` 那条断言能抓到**（报错文案是「被拼接着加回来了」，
+  不是「又回来了」），对照组证实剥注释后的源码里没有连续字面量。残余上限已写进注释 —— 刻意打散成字符数组
+  仍挡不住，但那不是现实里的失败模式。
+
+- **验证**：`tsc --noEmit` 干净；移动端整套 vitest **2768 tests / 2766 passed**（比上轮 +6 = 新增的
+  `NO-PAGE-GLOSS-FILLER-003`），两条红都是既有的（`design-system-r3` 的 11pt 下限、`PLACEHOLDER-002 market`），
+  与本次改动无关。003 的 12 条注入（6 条正向臂 + 4 条拼接臂 + 2 条破坏臂）全部按预期变红，
+  001 / 002 各 1 条拼接臂变红，三个文件按 sha256 逐字还原。
+
+- **刻意保留**（不是漏删）：`近 N 天` / `今天`（期间）、`低置信策略`（置信度披露，删了就是藏）、
+  `只显示本商家动作`（诚实断言，`MERCHANT-R35-OPERATING-FLOW-001` 在钉）、
+  `Scene Supply` / `OPERATING PLAN`（label，见上）。
+
+- 待办（未动，等产品）：`me.tsx` 的 `BUSINESS_ME` fixture `name: "Bonsaidon"`
+  （未关联门店时会不会把这个 fixture 名当用户名字渲染）；`ABILITY_SCHEMAS[].subtitle`。
+
+## Revision 359 — 2026-10-09
+
+- **「解释性废话」清扫第二批**（承接 358）：扫到四个还没碰过的页面，又清出 5 条。这一批有两类，
+  其中一类**比「废话」更严重** —— 是把内部说明印给了用户：
+
+  | 文件 | 删掉的那行 | 类别 |
+  |---|---|---|
+  | `shell/app-shell.tsx` | `P0: 把意图变成可邀请的 Scene — 预算进场景而非买人` | 🔴 **泄漏内部说明**：`P0:` 是排期标记，「预算进场景而非买人」是内部设计原则 |
+  | `facet/FacetHomeSurface.tsx` | 「FACET 当前为每个对象独立判断展示方向」 | 🔴 **泄漏内部代号** `FACET` + 一句设计说明 |
+  | `market.tsx` | 「接单前需要先通过 KYC 认证。」 | 原地复述标题「先完成KYC认证」 |
+  | `friend-crm.tsx` | 「通过二维码、邀请、通讯录、社媒或 Proxy 搜索找到你认识的人。」 | 把下面那 5 个添加方式抄了一遍 |
+  | `friend-crm.tsx` | 「关系状态、互动与下一步动作」 | 页头把下面的内容列了一遍 |
+
+  · 删完四处**死样式一并清**：`sectionNote`（facet）/ `composerSub` / `publishMenuHint` / `sub`。
+  · ⚠️ 本轮修掉一个**自己的编辑事故**：删 `composerSub` 样式时 old/new 写反，把 `composerSub` 与下一行
+    `composerField` **并到了同一行**（JS 仍合法、`tsc` 也过）。是**读 diff** 才发现的 —— 与 Revision 356
+    那条教训同源：**删除类改动必须读 diff，「编译过」不等于「改对了」。**
+
+- **刻意保留（不是漏删，附判据）**：
+  · `friend-crm.tsx` 的 `styles.sectionNote`（「5 种方式」/「N 人 · 本机演示」/「最近 3 条」）是**计数**。
+  · `facet` 的**运营阈值面板**（`opsSliderHint` 那组）—— 那是运营 / 调试面板，`label` 本身就是
+    `priority` / `confidence` / `CollaborationIntent` 这些内部名，hint 是它唯一的说明。
+  · `location-list-picker` 的 `entry.hint`（`${n} 个匹配` / `${n} 个区域`）是**计数**。
+  · 二维码那组 `hint=`（`me.tsx:3039` / `friend-crm.tsx:868` / `merchant-storefront.tsx:1136` /
+    `conversation.tsx:1766`）是**操作说明**（怎么扫、扫出来是什么），与 356 轮的判定一致。
+
+- **钉 `NO-PAGE-GLOSS-FILLER-002`**（`no-page-gloss-filler-002.test.ts`，5 条）：5 条字面量**不带引号**钉
+  （其中「关系状态、互动与下一步动作」在 `friend-crm.tsx` 的注释里还被当**原型引文**复述 ⇒ 断言必须
+  剥注释，否则会被自己的引文喂红）；四处死样式的**元素层与样式层**各钉；**反证臂**守住 `sectionNote`
+  的计数、facet 对象区、composer 字段、KYC 弹层的标题与按钮、friend-crm 的标题。
+  **八条反向注入全部走红且命中预期那条臂，逐字节还原（sha256）**。
+
+- **待办（需产品决定，本轮不动）**：`business-home.tsx` 的 `sectionHint` 那一层是**系统性**的英文名词
+  —— `Forecast` / `Scene Package` / `HOT / COOL menu` / `Scene Supply` / `OPERATING PLAN` /
+  `Creator / Partner`。看着像内部词泄漏，但 `Scene` 与 `Creator` 在本仓是**产品自己的名词**
+  （`scene-shop-directory` / `creator-application`），哪些算产品词、哪些算实现词**得产品定**；
+  且该页有一整套 `MERCHANT-R35-OPERATING-FLOW-001` 的诚实断言（「只显示本商家动作」就在其中）。
+  同层里「实时状态 → 未来状态」/「低置信策略」/「只显示本商家动作」是**筛选 / 置信度披露**，按判据应**留**。
+
+- **验证**：mobile `tsc --noEmit` 干净；整个 mobile vitest 套件 **2760/2762**（本轮新增 5 条）。
+  两条红仍是既有的 `PLACEHOLDER-002 market` 与 `design-system-r3` 的 11pt 底线，**没有为了变绿去修**。
+
+## Revision 358 — 2026-10-09
+
+- **「解释性灰字」清扫扫出「我的」之外的第一批**（承接 Revision 355–357）。用户口径是
+  「把解释性的废话全部删除 不只这个功能 其它的解释废话移除」；前三轮都落在「我的」那一片，
+  这一轮按**同一判据**扫其余页面，又找出**同一种形状**：**标题下面那行灰色解释**。
+
+  判据（与本仓既有三分类一致）：那行字讲「**这一页 / 这个面板里有什么、它在干什么**」，
+  而标题已经把这件事说完了 ⇒ 删；讲「**这个选项是什么、选了会怎样**」⇒ 留。
+
+  删掉 7 条，分布在 3 个文件：
+
+  | 文件 | 删掉的那行 | 为什么是废话 |
+  |---|---|---|
+  | `AIIdentityShowcaseSurface.tsx` | 「图库 · 帖文编排 · 好友运营」 | 「里面有什么」的清单（与上轮删的 `enterpriseQuickDesc` 同类） |
+  | `ai-management.tsx` | Sheet `subtitle`「AI 怎么替你聊天」 | 标题「对话管理」已经说了 |
+  | `ai-management.tsx` | Sheet `subtitle`「场景 · 姿态 · 模型 · 提示词」 | 就是**下面那排 tab 的名字**，把目录抄了一遍 |
+  | `ai-management.tsx` | Sheet `subtitle`「AI 替你发什么」 | 标题「动态管理」已经说了 |
+  | `feed.tsx` | 「选一项作用于这篇帖子」 | 标题「更多操作」已经说了 |
+  | `feed.tsx` | 「选一个最贴近的」 | 标题「举报原因」已经说了 |
+  | `feed.tsx` | 「选一位聊过天的联系人，直接发一条私信」 | 标题「分享给」+ 下面就是联系人列表 |
+
+  · 删掉后三处**死代码一并清**：`Sheet` 的 `subtitle` 参数（类型 + 渲染行）、`sheetSub` 样式、
+    `postMenuStyles.subtitle` 样式。元素删了样式留着 = 下一个人会以为它还在用。
+  · ⚠️ **重名陷阱**：`ai-management.tsx` 自己还有一个 `styles.subtitle` / `subtitleText`，那是
+    AI 分身的**状态行**（「AI 正在替你工作」/「AI 已暂停」/「读取中…」）—— 是状态诚实标记，
+    跟 Sheet 的 `subtitle` 只是**重名**。所以钉里专门留了一条反证臂守着它，不许被连坐删掉。
+
+- **刻意保留（不是漏删）**：
+  · `feed.tsx` 的 `postMenuStyles.rowHint`（「不摘这条，以后少推类似的」「不再看 Ta 的任何内容」）
+    —— 四个动作**名字相近、后果不同**，hint 承担的是**区分**；删了用户就分不清
+    「不感兴趣 / 减少这类内容 / 少看这个人 / 屏蔽作者」。
+  · `ai-management.tsx` 的选项 `desc`（`RHYTHMS` / `CHAT_PERMISSIONS` / `POST_PACES`）、
+    `AI_SCENES[].desc`、`AI_CAMERA_MOVES[].desc` —— 同属「这个选项是什么」，不是「里面有什么」。
+  · `room-create.tsx` 的 `SCENE_OPTIONS[].subtitle`（「+ 拍照」/「+ 聊天」/「狼人杀 / UNO」）
+    —— **有信息**：它和 `title` 拼起来才是完整场景名（`title: "City Walk"` + `subtitle: "+ 拍照"`
+    = `sceneName: "City Walk + 拍照"`），删了 chip 就只剩「City Walk」。
+
+- **钉 `NO-PAGE-GLOSS-FILLER-001`**（`no-page-gloss-filler.test.ts`，6 条）：七条废话**不带引号**
+  地钉（换个写法 —— 拼字符串、放进数组 —— 加回来也得红）；三处死代码（`sheetSub` /
+  `postMenuStyles.subtitle` 的**元素层与样式层**）一并钉；四条**反证臂**证明删的不是整块 ——
+  AI 分身中心的页头、三个 sheet 标题、AI 管理状态行、feed 的 `rowHint` 都还在。
+  **六条反向注入全部走红且命中预期那条臂，逐字节还原（sha256）**。
+
+- **顺带发现（本轮不动，属另一类问题）**：`recommend-fixtures.ts` 的 `SCENE_RECOMMEND[].subtitle`
+  八条（「根据你的位置和偏好，为你推荐合适的人」等）**从来没有被渲染过** —— 唯一消费方
+  `requester-home.tsx` 只读 `title` / `people` / `boundSceneId` / `sceneTag`，全仓没有第二处读它。
+  这是**死 fixture 文案**，不是用户看得见的废话；删它要动 `RecommendFeed` 的类型，
+  属重构不属文案清扫，留给产品定。
+
+- **验证**：mobile `tsc --noEmit` 干净；整个 mobile vitest 套件 **2755/2757**（本轮新增 6 条）。
+  两条红仍是既有的 `PLACEHOLDER-002 market`（`market.tsx` 里 `活动暂无位置坐标` 已不存在；该文件
+  本轮未碰，也不在任何在制品里）与 `design-system-r3` 的 11pt 底线
+  （`weather-chip.tsx` / `treasure-hunt.tsx`），**没有为了变绿去修**。契约、Go 侧本轮未动。
+
+## Revision 357 — 2026-10-09
+
+- **企业 / 店铺资料页的「企业主体」表不再编造主体数据**（`BDASH-SHOP-002`）。
+
+  这是 Revision 356 待办里那条「编造数据，比废话严重」的收口。BDASH-SHOP-001 修过这一页的 **hero**
+  （删掉写死的「Bonsaidon」+ fabricated 的「主体已验证」），但**同一页下面那张表被漏掉了**，四行全写死：
+
+  | 行 | 写死的值 | 后端有字段吗 |
+  |---|---|---|
+  | 主体名称 | `Bonsaidon · 海鲜自助` | 有（`useMerchantIdentity` 的 ACTIVE 账号名） |
+  | 经营城市 | `河内` | **没有**（`MerchantAccount` 只有 `{ id, name }`） |
+  | 经营节点 | `3 个` | **没有** |
+  | 身份验证 | `已认证 · Proxy 商家身份` | **没有** |
+
+  而且这块**无条件渲染** —— 关键是**没有店铺的用户也会看到**：`ContextSwitcherSheet` 的 `options` 里
+  BUSINESS 是任何人都能选的（`onSelect={setContext}`，不校验是否持有店铺）⇒ 没有主体的人打开自己的
+  「我的企业」，看到的是**一家不存在的店 + 一个没人做过的核验**。这是产品红线（「没有数据」必须看起来和
+  「有数据」不一样），不是文案问题。
+
+  · 只留**真有来源**的一行（主体名称 = `liveShopName`，与 hero 同源），**没有主体就整块不画**
+    （`{liveShopName ? … : null}`）。
+  · 「经营城市 / 经营节点 / 身份验证」删掉，而**不是**填 `—`：后端没有对应字段，三行 `—` 是噪声不是信息；
+    该说「未接入」的是**整块不存在**这件事。
+  · 顺带修同一页写死的头像首字母 `B`（Bonsaidon 的首字母）⇒ 从真实名字取
+    `{(liveShopName ?? persona.name).slice(0, 1).toUpperCase()}`。
+
+- **钉 `BDASH-SHOP-002`**（`bdash-entity-honest.test.ts`，4 条）：四条写死的值一条不剩（用**不带引号**的
+  字面量 —— 原来那四条是 `["经营城市", "河内"]` 数组元素，但钉的是「这几个标签不许再出现在这一页」，
+  换个写法加回来也得红）；整块挂在 `liveShopName` 上（配反证臂 `styles.subSectionTitle` 仍在，证明不是
+  「整块连同样式一起消失」才过的）；头像首字母不再是写死的 `B`；数据源仍是 `useMerchantIdentity`
+  （不是又接回 fixture）。**三条反向注入全部走红且命中预期那条臂，逐字节还原（sha256）**。
+
+- **刻意没动（同类问题的另一半，需产品定文案）**：`BUSINESS_ME` persona fixture 自己写着
+  `name: "Bonsaidon"` / `contextLineLabel: "当前使用 · Bonsaidon"` / `avatarText: "B"`，而 hero 的兜底
+  正是 `liveShopName ?? persona.name` ⇒ **没有店铺的 BUSINESS 上下文用户，名字显示为「Bonsaidon」**。
+  BDASH-SHOP-001 的注释把「退回 persona.name」写成既定做法，但那个 `persona.name` 本身就是编的。
+  换掉它要选新的用户可见文案（用户的真名？「尚未创建店铺」？）⇒ 属产品决定，**本轮不动**；
+  也**没有**在钉里断言它存在与否（免得把一个待修的缺陷冻进门禁）。
+
+- **Revision 356 待办第 2 条的结论：`ABILITY_SCHEMAS[].subtitle` 保留**（不是漏删，是判定为
+  **功能**而非废话）。三条是「现实场景陪伴与本地协助」/「消费与日常场景的现场沟通」/「旅行与消费场景的
+  轻量拍摄」，渲染在 `me-profile-components.tsx:64`（**新增能力弹层的表头**）与 `me.tsx:2460`（能力卡片）。
+  判据用的是本仓已有的三分类（见 skill `proxy-regression-tripwire`）：
+  · 删掉的菜单 `desc` 讲的是「**点进去会看到什么**」—— 用户点一下就知道，信息没有损失；
+  · 能力释义讲的是「**这个选项是什么**」，而「同行」在这里是**有歧义的词**（tóngxíng 陪伴 / tóngháng 同业），
+    能力卡片下方那排 chip 只显示**已填的值**、解释不了词义 ⇒ 删了会丢信息。属「功能操作说明」一类。
+  · 如果产品认为该删，改法是一行（去掉 `me.tsx:2460` 那一行 `<Text style={styles.abilitySub}>`），
+    但那是**产品决定**，不在本轮单方面执行。
+
+- **验证**：mobile `tsc --noEmit` 干净；整个 mobile vitest 套件 **2749/2751**（本轮新增 4 条）。
+  两条红仍是既有的 `PLACEHOLDER-002 market` 与 `design-system-r3` 的 11pt 底线，**没有为了变绿去修**。
+
+## Revision 356 — 2026-10-09
+
+- **「解释性灰字」清扫扩到其余渲染层**（承接 Revision 355）。355 清的是「我的」菜单行/磁贴的 `desc`
+  与子页头部副标题；用户随后说「不只这个功能 其它的解释废话移除」，于是把同一种灰字扫到底。
+
+  又扫出**四个渲染层**，355 一个都没覆盖：
+  · `subPageSub` —— **专属子页**头部的副标题（「基本信息、二维码、状态管理都集中在这里。」）。
+    355 删的是 `me-sub-pages.ts` 那张表里的 `desc`，而这条是**写死在专属分支里**的，走的是另一条路径。
+  · `customSectionHint` —— 分区标题下的小字，5 处（「公开主页展示」「保存、复制、放大都在这」
+    「决定你出现在人物发现、机会分发的方式」「预览」「Proxy 商家身份」）。
+  · `enterpriseQuickDesc` —— 卡片里那串「里面有什么」的清单（「照片 / 菜单 / 产品 / 品牌资料」）。
+  · 两处 `QrCard desc` + 两处 `SocialRow desc`（后者在**商家资料卡**上，与菜单行同类）。
+  外加两段「扫码会怎样」的长解释（二维码卡 / 我的二维码页各一段）。
+
+  🔴 **教训（比 355 更具体）：同一个概念在同一个页面里可能有 3–4 个互不相干的实现路径**
+  （数据表 / 专属分支 / 通用组件 prop / 内联 JSX）。所以穷举的判据不是「搜字段名」，而是
+  **「搜渲染形状」**：`desc=`、`desc:`、`Hint`，以及子组件的 prop 名。355 只搜了 `desc:`，于是漏掉四条。
+
+- **顺带清掉「内部词泄漏」**（这不是废话，是把实现词汇印给了用户）：
+  · `我的能力` 标题旁 `{n} 项 · 已接 supply` → `{n} 项`（`同步失败` 这个**诚实错误态**保留）。
+  · `{n} 个 Source Assets` → `{n} 份`。
+  · 企业运营助手「系统只生成 Draft，业务真源始终要由商家确认。」→「系统只生成草稿，最终要由你确认。」
+    （`Draft` / `业务真源` 是内部架构词；「只生成草稿、要你确认」这句**诚实语义一字未减**）。
+
+- **刻意保留（都不是「这一项里有什么」）**：状态/数量（`可编辑` / `已开放` / `未开放` / `可选` /
+  `按需开放` / `N 项` / `当前：…`）、规则说明（「按日例外优先于每周规律；两者都不覆盖时该日不可约。」）、
+  空态前提（「先设置你的个人主页名，才能生成二维码。」—— 删了「我的二维码」页就只剩一个标题）、
+  操作说明（「从之前发布或手机相册选择」）。
+
+- **钉 `ME-NO-DESC-FILLER-001` 扩到 8 条**（`me-no-desc-filler.test.ts`）。新增 4 条臂：
+  · 这一片**不许再有** `desc="` / `desc={` 传参（那是「把一句解释塞进子组件」的唯一入口）；
+  · `subPageSub` / `customSectionHint` / `enterpriseQuickDesc` 在**元素层**与**样式层**双双消失
+    （样式层先剥注释 —— me-styles.ts 里留着一条「为什么删」的注释，复述了这三个名字）；
+  · 两段长解释的**特征串**消失，同时**反证**那条规则说明还在；
+  · 四个内部词消失，同时**反证**换成用户能读的说法后状态/数量还在。
+  **五条反向注入全部走红且命中预期的那条臂，逐字节还原（sha256）**：JSX 传参回来 / `customSectionHint`
+  元素回来 / `已接 supply` 回来 / SocialRow guard 拿掉 / 死样式 `subPageSub` 回到 style 表。
+
+- **⚠️ 本轮踩到并修掉的一个自己的错**：第一版清扫脚本按「从 `<Text` 开始」匹配删除，**把被删行的行首
+  缩进留了下来**，于是缩进被前缀到**下一行**（`<View>` 变成 24 空格、`</Pressable>` 变成 34 空格）。
+  测试与 `tsc` **全绿**（JSX 不在乎缩进），是**读 diff** 才发现的。已整批还原、改成整行锚定
+  （`^[ \t]*<trimmed line>\n`）重做，并加了机械检查：diff 里不许出现「只改缩进」的行、也不许新增纯空白行。
+  **教训：「测试绿」不等于「改对了」—— 删除类改动必须读 diff。**
+
+- **验证**：mobile `tsc --noEmit` 干净；`src/surfaces` + `src/facet` **599/600**。因为改的是
+  `me.tsx` / `me-profile-components.tsx` 这种**被 `src/` 下 20+ 个测试引用的共享表面**，额外跑了
+  **整个 mobile vitest 套件**：**2745/2747**。两条红都是**既有且与本轮无关**的，**没有为了变绿去修**：
+  · `PLACEHOLDER-002 market` —— `market.tsx` 里 `活动暂无位置坐标` 已不存在，该文件本轮未碰；
+  · `design-system-r3` 的 11pt 底线 —— `weather-chip.tsx:87` 的 `attribution: fontSize: 10`（气象署名，
+    就是法律要求必须显示的那行）与 `treasure-hunt.tsx:486` 的 `north: fontSize: 10`（罗盘 N 字，属装饰）。
+    两个文件 `git status` 干净、**本轮未改**，且该断言的上下文窗口**只在单文件内** ⇒ 这两条红在 HEAD 上
+    同样成立。修法是进 R2 装饰白名单或提到 11pt，属设计决定，留待处理。
+  契约与 Go 侧本轮未动。
+
+- **待办（未处理，需产品决定）**：
+  · `me.tsx:3296-3300` 商家资料卡「企业主体」表仍是**写死的**（`Bonsaidon · 海鲜自助` / `3 个` /
+    `已认证 · Proxy 商家身份`）—— 编造数据，比废话严重，是接真数据还是换成诚实空态，得产品定。
+  · `ABILITY_SCHEMAS[].subtitle`（`me-types.ts:142`，渲染在 `me-profile-components.tsx:64`）——
+    三条能力释义（「现实场景陪伴与本地协助」等），判断上属「这个能力是什么」，保留待确认。
+
+## Revision 355 — 2026-10-09
+
+- **「我的」页每一行/每个磁贴的灰色副文案（`desc`）整体删除**（用户原话：「我看了 还有很多解释废话没有
+  删除 比如我的权益 钱包与结算...」）。
+
+  这一条是 Revision 354 的**续集，也是它的修正**：354 删的是**分组副标题**（`hint`），我据此回报「废话已
+  清」，被用户驳回 —— 他们指的是菜单**每一行下面那一行灰字**。点名两条正是 `desc`：「我的权益」→
+  「等级、成长值、成长任务与可领取的活动权益」、「钱包与结算」→「付款、收入、退款与记录」。
+
+  🔴 **教训：「删废话」不是一个字段，是一串渲染层。** 至少四层：① 分组副标题 `hint`；② 行/磁贴的 `desc`；
+  ③ 子页头部副标题（`me-sub-pages.ts`）；④ 组件内联写死的解释行（如 `SectionTitle hint`）。删之前要先
+  穷举三样：候选字面量 + **字段的类型定义**（required→optional，否则删不掉）+ **所有渲染点**
+  （加 `{x ? <Text/> : null}` guard，不然会画一行空的）。
+
+  · **契约**：`ExperienceMenuItemSchema` 删掉 `description`。`.strict()` ⇒ 服务端再下发就是**整包**校验
+    失败（客户端 `ExperienceManifestSchema.safeParse` 抛协议错 ⇒ **菜单静默降级**）。新增双边测试：
+    无 `description` 必须 parse 成功，加回来必须 parse 失败。
+  · **服务端**：`internal/experience/service.go` 的 `menuItem.Description` 删除 + 12 处值删除。
+  · **移动端**：`me-types.ts` 三处 `desc` 改可选；`me.tsx` 删 27 处 `desc:`（菜单行 + 磁贴）+
+    `toManagedMenuSections` 里的 `desc: item.description` + 3 个渲染点加 guard + 1 行内联废话；
+    `me-profile-components.tsx` 行渲染加 guard；`me-sub-pages.ts` 删 42 处、3 处收敛为口径诚实声明；
+    `my-benefits.tsx` 删 2 处 `SectionTitle hint` + 变死的 `sectionTitleHint` 样式。
+  · **`exactOptionalPropertyTypes` 的坑**：`desc?: string` 之后**不许显式赋 `undefined`**，三处构造点
+    （`me-sub-pages.ts` 的 `meSubPage`、`me.tsx` 的 `pressTile` / `pressRow` 兜底）必须改成条件展开
+    `...(x !== undefined ? { desc: x } : {})`。缺席就真的不写这个键 —— 不补空串（空串会读成「有描述但为空」）。
+  · **钉**：`ME-NO-DESC-FILLER-001`（`me-no-desc-filler.test.ts`）—— 白名单**相等**，不是「一个都没有」
+    （任何新的解释性 `desc` 都会红，想加就得先改白名单）；源码一律先剥注释。反向注入两条全验过
+    （加回「我的权益」那句 → 1 红；拿掉 `me-profile-components` 的 guard → 1 红），逐字节还原（sha256 核对）。
+    服务端侧把序列化形状钉在 `TestRequesterManifest`：每个 item 不许带 `description`（**空串也算** ——
+    空串同样过不了 `.strict()`），反向注入验过（`section 0 item 0 still carries a description`）。
+
+- **刻意保留（不是漏删）**：三类**不许当废话删**的东西，已写进白名单。
+  · 状态诚实标记：`功能预览 · 实时数据待接入`（那一项的后端还没有，删了等于假装做完了）。
+  · 口径诚实声明：`收入口径未接入前不编造数字。` / `口径未接入前不编数。` / `归因口径未接入前不编数。`
+    （`placeholder-honest-actions.test.ts` 钉着最后那条 —— 这里是**收敛**，不是删除）。
+  · 身份行（渲染在身份卡上的**数据**，不是菜单副文案）：`河内 · 个人身份` /
+    `Business Principal · 当前你有经营权限`。
+
+- **被迫同步改的旧钉（两处，都不是放宽门禁）**：
+  · `subpage-generic-fabricated.test.ts`：原来断言 `meSubPage` 的键**恰好**是
+    `["desc","icon","route","title"]`，且 `entry.desc` 非空。`desc` 可选后这两条前提作废 —— 改成「键都
+    落在允许集合内 + 一定没有 `sections`」（钉的意图是「表只能经通用兜底上屏」，不变），页面身份改由
+    `title + icon` 承载（`toBeDefined()` 还在，页面被整个删掉仍会红）。
+  · `store-section-tiles.test.ts`：磁贴断言收敛到不变量（`icon` / `label` / `route`），不再钉已删的 `desc`。
+
+- **验证**：mobile `tsc --noEmit` 干净；`src/surfaces` + `src/facet` **599/600** 通过（唯一红是**既有**的
+  `PLACEHOLDER-002 market`「活动暂无位置坐标」—— `market.tsx` 本次没碰，该字符串确实不在里面）；
+  `@proxy/contracts` 222/222；`go test ./internal/experience/...` ok；`go build ./...` ok；gofmt 干净。
+
+- **重启 dev API 并验到线上**：运行中的二进制构建于 15:47，而改动落在 16:15 ⇒ 它**还在下发
+  `description`**，而新客户端契约会**整包拒收**（菜单静默降级 —— 这正是不重启就会踩的坑）。重启后
+  （新二进制 16:15:37，cwd 正确）用**真实命令链路**验：`CreateAnonymousSession` → `GetExperienceManifest`，
+  线上 payload 里 `description` **0** 处、`hint` **0** 处，section 的键恰好 `["id","items","title"]`。
+
+- **顺带发现（未处理，待产品点头）**：同一种「解释性灰字」在**别的表面**还在，本次**故意没动** ——
+  它们混着状态/功能/诚实信息，且有一处在**商家侧**（用户侧/商家侧上次被搞混过）：
+  · `me.tsx:3311/3317` `SocialRow desc`（商家资料卡：「顾客扫码先看到这家店的公开信息与信誉」等）—— 与菜单行同类。
+  · `me.tsx:2577/2596/2614/3009/3310` `customSectionHint`（「公开主页展示」「保存、复制、放大都在这」等）。
+  · `me.tsx:2597/3284` `QrCard desc`；`me-profile-components.tsx:184-188` 的**选项说明**
+    （「当天按规律时段之外整天开放」= 「这个选项是什么」，属功能而非废话）；`availabilitySub`
+    「这是市场状态，不是身份切换。」。
+  · `me.tsx:2452`「{n} 项 · 已接 supply」/ `3092`「{n} 个 Source Assets」—— 这两条不只是废话，
+    还把**内部词**（`supply`、`Source Assets`）印给了用户。
+  · `me.tsx:3296-3300` 商家资料卡的「企业主体」表是**写死的**（`Bonsaidon · 海鲜自助` / `3 个` /
+    `已认证 · Proxy 商家身份`）—— 这是编造数据，比废话严重，另案。
+
+## Revision 354 — 2026-10-09
+
+- **「我的」页的分组副标题（`hint`）整体删除**（用户原话：「这种废话不需要 把解释性的废话全部删除
+  不只这个功能 其它的解释废话移除」）。这一条收掉了 Revision 353 里那个 ⚠️ 遗留。
+
+  那条副标题渲染成分组标题旁边的一行小字，写的是**设计意图**而不是用户需要的信息 —— 最刺眼的一条
+  是「经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）」：既跟着旧组名
+  走（跟「场景推荐」打架），又是内部设计说明漏到了用户可见的副标题上。
+
+  · **契约**：`ExperienceMenuSectionSchema` 删掉 `hint`。它是 `.strict()` ⇒ 服务端再下发 `hint` 会让
+    客户端**整包校验失败**，不会被静默忽略。`experience-manifest.test.ts` 加了一条**双边**测试：
+    无 `hint` 的 payload 必须 parse 成功（否则「带 hint 就失败」可能是别的原因造成的假绿），同一个
+    payload 加回 `hint` 必须 parse 失败。
+  · **服务端**：`internal/experience/service.go` 的 `menuSection.Hint` 删除，5 处 `Hint:` 值删除。
+  · **移动端**：`me-types.ts` 的 `MenuSection.hint`、`me.tsx` 的 7 处 `hint:` + `hint: section.hint ?? ""`
+    + `<Text style={styles.sectionHint}>` 渲染、`me-styles.ts` 的 `sectionHint` 全部删除。
+  · **钉**：`ME-NO-HINTS-001`（`me-section-hints.test.ts`）—— 类型里没有 `hint` 字段 / 分组定义里没有
+    `hint:` 键 / 渲染与样式里的 `sectionHint` 一并消失。反向注入三条全验过（加回类型字段 → 1 红；加回
+    `hint:` 键 → 1 红；拿掉二维码那条 `hint={...}` 反证锚 → 1 红），逐字节还原。
+
+- **同类清扫：FACET 首屏的三行「Phase 1.5：…」说明小字删除**（`FACET-NO-PHASE-JARGON-001`）。
+  它们跟上面那条是同一种东西 —— 把**内部开发阶段**（「Phase 1.5」「后续版本」）印在用户可见的灰色小字里。
+  随元素一起删掉了变死的 4 条 style（`previewFoot` / `subPageHint` / `scopeFooter` / `scopeFooterText`）。
+  反向注入验过（加回一行 → 2 红），逐字节还原。
+
+- **刻意保留（不是漏删）**：
+  · `me.tsx` 里二维码放大 sheet 的 `hint={...}`（「把屏幕朝向对方即可扫描」）是**操作说明**，不是解释性
+    废话；`ME-NO-HINTS-001` 拿它当反证锚（证明「没有 `hint:` 键」不是因为整个文件都不含 hint）。
+  · 状态 / 诚实标记一律不动：`尚未接入` / `未接入` / `即将上线` / `占位候选` / `—` 这类「这里没有数据」
+    的标记是**产品红线**（「没有数据」必须看起来和「有数据」不一样），删了才是回归。
+  · `FacetHomeSurface` 内容库里那两行 `— · 本地上传待后续版本` / `— · 审核队列待后续版本` 仍被门禁
+    `STATIC-COUNT-001` 钉着，保持原样。
+
+- **顺带发现（未处理）**：`apps/mobile/src/surfaces/coming-soon.tsx` **全仓没有任何 import** —— 它的占位卡
+  （含那句内部流程文案「属于 R15 冻结的稳定 Surface 名单，能力将按组件注册表排期实现」）当前渲染不到。
+  是死代码，不是「漏接线的通道」；留待产品确认是删还是接回来。
+
+## Revision 353 — 2026-10-09
+
+- **「我的」页分组标题改名：「企业 / 店铺」→「场景推荐」**（`STORE-TILES-003`，用户原话：
+  「把用户侧 我的-企业/店铺 改为 场景推荐」）。
+
+  这是 Revision 351（`STORE-TILES-002`）那条抱怨的另一半：磁贴名改了，但**组名**还读作商家侧
+  的经营模块（「企业 / 店铺」），而并排的磁贴就叫「我的店铺」—— 两行叠在一起更像商家工作台。
+
+  · 只动 `title`：`"企业 / 店铺"` → `"场景推荐"`（`me.tsx` 的 `biz` 组，用户侧 persona）。
+  · **id 仍是 `"biz"`** —— `effectiveSections` 按 id 把服务端下发的 managed rows 合并进本地
+    分组（`managedSections.find((m) => m.id === pSection.id)`）。改标题安全；改 id 会让那一路
+    **静默**断掉：页面看不出异常，只是服务端加的入口凭空消失。
+  · 两个磁贴（我的店铺 → `bdash` / 店铺推荐 → `storerecmanage`）与四个路由分支一字未动。
+  · 钉：`store-section-tiles.test.ts` 新增 `STORE-TILES-003`（组标题是新名 / 旧名不再作为任何
+    组的 `title` / id 仍是 `biz` 且合并那一路还在 / 两个磁贴与路由未动）。反向注入两条都验过
+    （标题改回旧名 → 2 条红；id 改成 `bizx` → 5 条红），逐字节还原。
+
+  ⚠️ **遗留一处自相矛盾，未擅自改（改文案是产品决定）**：这一组的 `hint` 仍是
+  「经营与体系共建 · 独立模块（原始设计：发展 builder，小美与用户推荐商铺进入体系）」——
+  它跟着旧组名走，现在和新标题打架；而且「原始设计：发展 builder」本来就是内部说明漏到了
+  用户可见的副标题上。要么换掉整句，要么至少删掉那半句内部注记。
+
+## Revision 351 — 2026-10-09
+
+- **「我的 → 企业 / 店铺」第二个磁贴改名：「推荐管理」→「店铺推荐」**（`STORE-TILES-002`，
+  用户原话：「用户侧-我的店铺 推荐管理你是不是搞错了 搞混了和商家侧 如果容易搞混
+  就改名 店铺推荐」）。
+
+  改的是**名字，不是位置**。这一屏本来就是**用户侧**的（「推荐商铺进体系」+「我推荐的店」，
+  运营队列只是页脚一个入口），但「管理」二字读起来是运营 / 商家侧的动作，又和并排的
+  「我的店铺」（企业 · 经营 · 工作台）撞在一起 ⇒ 看起来像商家侧的功能。这个名字是
+  Revision 315 按产品稿定的，本轮由产品本人改掉。
+
+  用户可见的**四处**一起改：磁贴 `label`（`me.tsx`）、子页标题（`me.tsx`）、
+  `me-sub-pages.ts` 的 `storerecmanage.title`、`store-recommendation-manage-model.ts` 的
+  `REC_TIP`（「……（在「店铺推荐」里建）……」）。路由 `storerecmanage` 与四个目的地
+  **一字未动** —— 改名不是迁移。
+
+  钉：`store-section-tiles.test.ts` 新增 `STORE-TILES-002`（四处必须同名 + 剥注释后旧名
+  一处不剩）；`store-hub-nav.test.ts` 里那条「hub 零出现」从只守旧名改成**新旧两名都守**
+  （只守旧名会变成守着一个已经没人用的字符串）。五处反向注入逐条验证会红：磁贴 label /
+  子页标题 / `SUB_PAGE_CONTENT.title` / `REC_TIP` / hub 里塞回新名。
+
+- **顺带修掉同一混淆的另一半：一条过期承诺。** `me-sub-pages.ts` 里 `bdash`（我的店铺）
+  的 `desc` 还写着「合作店铺 · 接单数据 · **推荐管理**」—— STORE-HUB-003（2026-09-25
+  产品决定）之后「我的店铺」里已经没有它了，这句却一直留在注册表里。本轮把那段删掉
+  （`desc` 变成「合作店铺 · 接单数据。」）—— 这是**删掉一个不成立的承诺，不是新写一句
+  文案**；要把这段文案写成别的，仍是产品决定。注：bdash 有专属分支，这条 `desc` 走不到
+  渲染路径（`meSubPage("bdash")` 的消费方也各自渲染自己的头），所以它是一句**没人读的
+  承诺**，不是屏幕上的一处错字。
+
 ## Revision 350 — 2026-10-06
 
 - **市场 tab 的 logo 换成宝石轮廓**（`MARKET-TAB-GEM-OUTLINE-001`，用户原话：「自己做个

@@ -449,7 +449,6 @@ export function BusinessHome({
 
       <View style={styles.sectionHead}>
         <Text selectable style={styles.sectionTitle}>经营脉搏</Text>
-        <Text selectable style={styles.sectionHint}>实时状态 → 未来状态</Text>
       </View>
       <View style={styles.balanceCard} testID="merchant-demand-supply">
         <View style={styles.balanceHead}><Text selectable style={styles.balanceTitle}>需求 × 供给</Text><Text selectable style={styles.unknownPill}>{demandSupplyStateLabel(operatingHome?.demandSupply.state)}</Text></View>
@@ -490,7 +489,6 @@ export function BusinessHome({
 
       <View style={styles.sectionHead}>
         <Text selectable style={styles.sectionTitle}>未来需求</Text>
-        <Text selectable style={styles.sectionHint}>Forecast</Text>
       </View>
       <View style={styles.forecastEmpty} testID="merchant-future-demand">
         <Text selectable style={styles.forecastTitle}>{operatingHome?.forecast.status === "AVAILABLE" ? `未来容量 ${operatingHome.sceneSupply?.forecastCapacityPct ?? "—"}%` : "预测暂不可用"}</Text>
@@ -499,7 +497,6 @@ export function BusinessHome({
 
       <View style={styles.sectionHead}>
         <Text selectable style={styles.sectionTitle}>高价值场景</Text>
-        <Text selectable style={styles.sectionHint}>Scene Package</Text>
       </View>
       {showLoading ? <ProxyLoading tone="muted" /> : null}
       {scenePackages.length === 0 && !showLoading ? (
@@ -537,7 +534,6 @@ export function BusinessHome({
 
       <View style={styles.sectionHead}>
         <Text selectable style={styles.sectionTitle}>招牌与在售</Text>
-        <Text selectable style={styles.sectionHint}>HOT / COOL menu</Text>
       </View>
       {menuItems.length === 0 ? (
         <Pressable onPress={() => onOpenMe()} style={styles.actionCard}>

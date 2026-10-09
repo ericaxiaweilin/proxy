@@ -747,7 +747,6 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
         <Pressable onPress={handleBack} style={styles.backRow}><ProxyBackGlyph label={backText} /></Pressable>
         <Text selectable style={styles.title}>添加好友</Text>
-        <Text selectable style={styles.sub}>通过二维码、邀请、通讯录、社媒或 Proxy 搜索找到你认识的人。</Text>
 
         <View style={styles.sectionHead}><Text selectable style={styles.sectionTitle}>选择添加方式</Text><Text selectable style={styles.sectionNote}>5 种方式</Text></View>
         <View style={styles.methodGrid}>
@@ -942,7 +941,6 @@ export function FriendCrmSurface({ relationship, onOpenConversation, onBack, ini
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
 <Pressable onPress={onBack} style={styles.backRow}><ProxyBackGlyph /></Pressable>
         <Text selectable style={styles.title}>好友关系</Text>
-      <Text selectable style={styles.sub}>关系状态、互动与下一步动作</Text>
       {/*
         ADD-FRIEND-ENTRY-002: 这个"添加好友"按钮曾经是 ADD_FRIEND 唯一的
         入口（见旧注释 ADD-FRIEND-ENTRY-001）。现在消息模块顶栏已经有扫码
@@ -1263,7 +1261,6 @@ const styles = StyleSheet.create({
   // backText 样式已删：字形和标签都由公共组件 ProxyBackGlyph 画（BACK-GLYPH-001）。
   // （上面那个同名局部变量 backText 是**标签文案**，不是这个样式。）
   title: { color: color.ink, fontSize: 26, fontWeight: "900", lineHeight: 34, marginTop: 6 },
-  sub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 4 },
   sectionHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 8, marginTop: 18 },
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "900" },
   sectionNote: { color: color.muted, fontSize: 11 },

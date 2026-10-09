@@ -442,7 +442,6 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
               <Text selectable style={styles.sectionCardHint}>仅 {previewObject.displayName} 在“合作方副空间”看到这个池子，不会进入主空间 feed</Text>
             </View>
           ) : null}
-          <Text selectable style={styles.previewFoot}>Phase 1.5：预览为本地组织逻辑演示，后续接入真实素材分发</Text>
         </ScrollView>
       </View>
       <SideSpaceAddModal
@@ -480,7 +479,6 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
               <SubRow label="新鲜素材" value={`${payload.freshAssets} 个`} />
               <SubRow label="草稿" value="— · 本地上传待后续版本" />
               <SubRow label="备选" value="— · 审核队列待后续版本" />
-              <Text selectable style={styles.subPageHint}>Phase 1.5：内容库为统计视图，上传与审核在后续版本</Text>
             </View>
           ) : null}
           {view === "OBJECTS" && payload ? (
@@ -621,7 +619,6 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
         {phase === "READY" && payload ? (
           <View style={styles.objectsSection}>
             <Text selectable style={styles.sectionTitle}>对象</Text>
-            <Text selectable style={styles.sectionNote}>FACET 当前为每个对象独立判断展示方向</Text>
             <View style={styles.objectsList}>
               {payload.objects.length === 0 ? (
                 <ProxyEmptyState title="还没有对象" sub="创建首个对象后，这里会显示关系与缺口" />
@@ -648,11 +645,6 @@ export function FacetHomeSurface({ client, onBack, onComingSoon, onOpenAiIdentit
           </View>
         ) : null}
 
-        <View style={styles.scopeFooter}>
-          <Text selectable style={styles.scopeFooterText}>
-            Phase 1.5：列表 + 预览 + 内容库/分组/运营视图。真实图片与规则引擎在后续版本。
-          </Text>
-        </View>
       </ScrollView>
     </View>
   );
@@ -789,7 +781,6 @@ const styles = StyleSheet.create({
 
   objectsSection: { marginTop: 18 },
   sectionTitle: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  sectionNote: { color: color.muted, fontSize: 11, marginTop: 3 },
   objectsList: { gap: 14, marginTop: 10 },
 
   // 按关系分组（原型 .group-label）—— label + 计数 + 一条撑满的细线。
@@ -822,8 +813,6 @@ const styles = StyleSheet.create({
   objectDetailBtn: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, marginTop: 8, paddingVertical: 10 },
   objectDetailBtnText: { color: color.magenta, fontSize: 11, fontWeight: "700" },
 
-  scopeFooter: { marginTop: 18, paddingTop: 12 },
-  scopeFooterText: { color: color.muted, fontSize: 11, lineHeight: 15, textAlign: "center" },
 
   // Preview / subpage —— 深色 hero 对齐原型 .detail-hero（深色渐变 + 头像 + 关系 pill）。
   previewHero: { borderRadius: 18, marginTop: 10, overflow: "hidden", padding: 16 },
@@ -847,7 +836,6 @@ const styles = StyleSheet.create({
   previewFeedItem: { backgroundColor: color.surface, borderRadius: 12, padding: 10 },
   previewFeedLabel: { color: color.ink, fontSize: 11, fontWeight: "800" },
   previewFeedText: { color: color.muted, fontSize: 11, marginTop: 4 },
-  previewFoot: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 14, textAlign: "center" },
   // R15.43 副空间样式
   sideSpaceHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   sideSpaceCountChip: { backgroundColor: "rgba(139, 92, 246, 0.18)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
@@ -904,7 +892,6 @@ const styles = StyleSheet.create({
   subRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8 },
   subRowLabel: { color: color.muted, fontSize: 11, fontWeight: "700" },
   subRowValue: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  subPageHint: { color: color.muted, fontSize: 11, lineHeight: 15, marginTop: 8 },
   groupBlock: { marginTop: 8 },
   groupTitle: { color: color.ink, fontSize: 11, fontWeight: "800", marginBottom: 6 },
   groupRow: { alignItems: "center", borderTopColor: color.line, borderTopWidth: 1, flexDirection: "row", gap: 10, paddingVertical: 8 },
