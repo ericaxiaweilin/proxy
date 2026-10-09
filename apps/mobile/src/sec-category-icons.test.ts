@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { EXPLORE_SECTION_TITLES } from "./coffee-scenes-model";
 
 // SEC-CATEGORY-ICONS-001（2026-09-26，用户：「模拟器的 推荐 关注还没有 logo 原型我给你了」）：
 //
@@ -209,17 +208,11 @@ describe("SEC-CATEGORY-ICONS-001 推荐 / 关注 挂上原型 02 的分类字形
     );
     // 和同屏那三行同一套字形系统：32 栅格 / 描边 1.9。
     expect(body, "探索字形没走 32 栅格").toContain("canvas32");
-    // 改名要一路改到用户看得见的地方：分段控件下面那一层 —— CoffeeScenesHub 那一页。
-    // EXPLORE-REAL-001（2026-10-08）之后这一页整屏换成真数据，原先那个带「返回探索」
-    // 按钮的「全部店铺」子视图 —— 连同它那七个筛不动的假 chip —— 一起没了。所以这条臂
-    // 改钉**新现实**：旧名任何一处都不许回来，而这一页挂的确实是那三段真数据
-    // （三段标题的文案在 coffee-scenes-model 里，这里读那一份，不在 .tsx 里抄一遍）。
+    // 改名要一路改到用户看得见的地方：分段控件下面那一层 —— CoffeeScenesHub 的
+    // 「全部店铺」子视图 —— 的返回标签也写着这一格的名字，别只改分段控件、
+    // 留下「探索 里写着 返回咖啡场景」这种半截接线。
     const coffee = stripComments(read("./surfaces/coffee-scenes.tsx"));
+    expect(coffee, "探索 里面的返回标签没跟着改名").toContain("返回探索");
     expect(coffee, "探索 里面又出现了旧名「咖啡场景」").not.toContain("咖啡场景");
-    expect(coffee, "探索 里面的返回标签又退回「返回咖啡场景」了").not.toContain("返回咖啡场景");
-    expect(Object.values(EXPLORE_SECTION_TITLES), "探索 这一页的三段标题不是这三段").toEqual(["此刻", "咖啡店", "活动"]);
-    for (const key of Object.keys(EXPLORE_SECTION_TITLES)) {
-      expect(coffee, `探索 这一页没挂上第 ${key} 段`).toContain(`title={EXPLORE_SECTION_TITLES.${key}}`);
-    }
   });
 });

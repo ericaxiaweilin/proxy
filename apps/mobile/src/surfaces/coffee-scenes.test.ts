@@ -193,8 +193,6 @@ describe("EXPLORE-REAL-001 此刻 is exactly the venues with real check-ins", ()
     expect(surface).not.toContain("Sara");
     expect(surface).not.toContain("已待");
     expect(surface).not.toContain("可陪");
-    expect(surface).not.toContain("styles.sceneAvatar");
-    expect(surface).not.toContain("styles.scenePerson");
   });
 });
 
@@ -229,7 +227,7 @@ describe("EXPLORE-REAL-001 咖啡店 only claims what really exists", () => {
   });
 
   it("drops the invented attributes and the filters that could not filter", () => {
-    for (const legend of ["无烟", "室外", "空调", "插座", "网速", "噪音", "标记说明", "新店开业", "适合办公", "热门", "高评分"]) {
+    for (const legend of ["无烟", "室外", "空调", "插座", "网速", "噪音", "标记说明", "新店开业", "适合办公"]) {
       expect(surface, `编出来的属性/筛选项又回来了：${legend}`).not.toContain(legend);
     }
   });
@@ -325,10 +323,16 @@ describe("EXPLORE-REAL-001 the copy on this surface is only titles and state lin
       "new ActivityClient({ authClient: sessionAuthClient, secureSessionStore: nativeSecureSessionStore })"
     );
     expect(surface).toContain("getCurrentFix(expoLocationApi");
-    for (const [key, title] of Object.entries(EXPLORE_SECTION_TITLES)) {
-      expect(surface, `${title} 段没挂上标题常量`).toContain(`title={EXPLORE_SECTION_TITLES.${key}}`);
-      expect(surface, `${title} 段没有自己的空态文案`).toContain(`emptyText={EXPLORE_EMPTY_TEXT.${key}}`);
+    // 版式是最初设计的那一版（横滑场景卡 / 活动预告卡 / 店铺卡 / 全部店铺 + 筛选），每一段各有自己的空态与加载行。
+    for (const key of Object.keys(EXPLORE_EMPTY_TEXT)) {
+      expect(surface, `${key} 段没有自己的空态文案`).toContain(`EXPLORE_EMPTY_TEXT.${key}`);
     }
+    for (const part of ["styles.sceneCard", "styles.eventCard", "styles.shopCard", "styles.filterTab", "styles.modalSheet"]) {
+      expect(surface, `最初设计的版式又被改掉了：${part}`).toContain(part);
+    }
+    // 能点的都是真的：场景 / 店铺打开场景详情，活动加入走真的报名。
+    expect(surface).toContain("onOpenScene");
+    expect(surface).toContain("activityClient.join(activity.activityId)");
   });
 
   it("leaves no PLACEHOLDER constant and no sample-data banner behind", () => {

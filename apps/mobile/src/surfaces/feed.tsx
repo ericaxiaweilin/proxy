@@ -2028,7 +2028,7 @@ export function FeedSurface({
       ) : null}
 
       {section === "CAFE" ? (
-        <CoffeeScenesHub />
+        <CoffeeScenesHub onOpenScene={onOpenRealityScene} />
       ) : (
       <>
       {selectedCustomFeed ? (
