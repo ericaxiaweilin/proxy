@@ -78,7 +78,7 @@ var (
 	ErrBenefitNeeded = errors.New("incentive: a benefit reward needs campaignId and benefitId")
 	ErrBadPoints     = errors.New("incentive: points must be 1..1000")
 	ErrActorNeeded   = errors.New("incentive: the operator must be identified")
-	ErrBadAudience   = errors.New("incentive: audience must be USER, PROVIDER or MERCHANT")
+	ErrBadAudience   = errors.New("incentive: audience must be USER or PROVIDER (merchants get no in-app incentives)")
 	ErrBadWindow     = errors.New("incentive: the window must end after it starts")
 	ErrScoreNeeded   = errors.New("incentive: a SCORE_REACHED campaign needs minPoints > 0")
 )

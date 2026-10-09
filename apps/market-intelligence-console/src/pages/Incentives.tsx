@@ -27,7 +27,7 @@ const GROWTH_POINTS = "GROWTH_POINTS";
 const TRIGGER: Record<string, string> = {
   FIRST_POST: "首次发帖", FIRST_DEMAND: "首次发需求", FIRST_ACTIVITY: "首次参加活动", SCORE_REACHED: "积分达到门槛",
 };
-const AUDIENCE: Record<string, string> = { USER: "用户", PROVIDER: "小美", MERCHANT: "商家" };
+const AUDIENCE: Record<string, string> = { USER: "用户", PROVIDER: "小美", MERCHANT: "商家（1–5 星）" };
 const toLocalInput = (iso?: string): string => {
   if (!iso) return "";
   const d = new Date(iso);
@@ -210,7 +210,7 @@ function RuleForm({ triggers, rewardKinds, maxPoints, rule, onDone }: {
       ) : null}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
         <select value={audience} onChange={(e) => setAudience(e.target.value)} style={{ padding: 8 }}>
-          {Object.entries(AUDIENCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.entries(AUDIENCE).filter(([k]) => k !== "MERCHANT").map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         {trigger === "SCORE_REACHED" ? (
           <input value={minPoints} onChange={(e) => setMinPoints(e.target.value)} type="number" min={1} placeholder="积分门槛" style={{ width: 120, padding: 8 }} />

@@ -31,7 +31,7 @@ type Step struct {
 	Min   int    `json:"min"` // 到这一级需要的积分
 }
 
-// 三个身份共用同一条阶梯：4 档 × 3 星 = 12 级，每档起点和「我的权益」原来的档位一致（0 / 500 / 1000 / 2000）。
+// 用户 / 小美共用同一条阶梯：4 档 × 3 星 = 12 级，每档起点和「我的权益」原来的档位一致（0 / 500 / 1000 / 2000）。
 var ladder = []Step{
 	{"BRONZE", "铜", 1, 0}, {"BRONZE", "铜", 2, 150}, {"BRONZE", "铜", 3, 300},
 	{"SILVER", "银", 1, 500}, {"SILVER", "银", 2, 650}, {"SILVER", "银", 3, 800},
@@ -39,7 +39,19 @@ var ladder = []Step{
 	{"PLATINUM", "铂", 1, 2000}, {"PLATINUM", "铂", 2, 2500}, {"PLATINUM", "铂", 3, 3000},
 }
 
-func Ladder(k Kind) []Step { return append([]Step(nil), ladder...) }
+// 商家：我们对商家不抽成，软件里也不给商家发激励。商家如果要有等级，就是 1–5 星，
+// 每一星的积分门槛按指数拉开（×3），奖励在线下（比如以后按资格邀请参加公司聚餐），不在软件里发。
+// 积分怎么赚（核销 / 办活动 / 评价…）还没定，EarnRules(Merchant) 为空——不编。
+var merchantLadder = []Step{
+	{"STAR", "星", 1, 0}, {"STAR", "星", 2, 100}, {"STAR", "星", 3, 300}, {"STAR", "星", 4, 900}, {"STAR", "星", 5, 2700},
+}
+
+func Ladder(k Kind) []Step {
+	if k == Merchant {
+		return append([]Step(nil), merchantLadder...)
+	}
+	return append([]Step(nil), ladder...)
+}
 
 type Level struct {
 	Step

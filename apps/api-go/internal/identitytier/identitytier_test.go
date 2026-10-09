@@ -35,3 +35,24 @@ func TestLadderIsStrictlyIncreasingAndOnlyUsersEarnTodayWithoutInventedRules(t *
 		t.Fatal("kinds")
 	}
 }
+
+func TestMerchantLadderIsFiveStarsWithExponentialDifficulty(t *testing.T) {
+	l := Ladder(Merchant)
+	if len(l) != 5 {
+		t.Fatalf("1-5 stars: %d", len(l))
+	}
+	for i := 2; i < len(l); i++ {
+		if (l[i].Min - l[i-1].Min) <= (l[i-1].Min - l[i-2].Min) {
+			t.Fatalf("each star must be harder than the last: %+v", l)
+		}
+	}
+	if r := Resolve(Merchant, 899); r.Stars != 3 || r.Tier != "STAR" {
+		t.Fatalf("899 = 3 stars: %+v", r)
+	}
+	if r := Resolve(Merchant, 5000); r.Stars != 5 || !r.Highest {
+		t.Fatalf("top star: %+v", r)
+	}
+	if Resolve(User, 5000).Tier != "PLATINUM" {
+		t.Fatal("users keep the bronze..platinum ladder")
+	}
+}
