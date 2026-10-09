@@ -2,7 +2,6 @@
 // R4 决策：移除“体验上架”以保护小美身价；订单由客户单向发布，小美报名/报价。
 // 视觉：沿用项目 R3 token（magenta/violet/ink/muted/line/surface），仅复用 R4 的卡片结构与价格可见性，
 // 不引入原型暖黄 #F3A61D 作为主色，保持 Proxy 紫粉基线。
-// R15.x: MAP 视图换成 react-native-maps 真地图 + expo-location GPS。
 //   - 初始 region = 当前 user location（未授权时用机会 centroid）
 //   - pin 位置 = 服务端下发的真 lat/lng（OPP-REAL-COORDS-001），无坐标才跳过
 //   - “热门地点” = MARKER 显式声明的探索点 (VENDOR_SPOT) — 重要但仅是探索，不会被默认高亮
@@ -11,7 +10,6 @@ import { useOnTabActivated } from "../shell/tab-active";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { usePullToRefresh } from "../components/pull-to-refresh";
-import MapView, { Circle, Marker, type Region } from "react-native-maps";
 import * as Location from "expo-location";
 import { useModuleBackHandler } from "../components/module-back";
 import { useScrollChrome } from "../shell/scroll-chrome";
@@ -39,12 +37,13 @@ import {  OPPORTUNITY_LENS_LABEL,
   type MarketTab,
   type OpportunityLens
 } from "../market-fixtures";
-import { gridToLatLng } from "../components/location-options";
 import { clusterPins } from "../cluster-pins";
 import { ProxyIcon } from "../components/proxy-icon";
 import { ProxyBackGlyph, ProxyLoading, ProxyTabs } from "../components/proxy-foundation";
 import { sessionAuthClient } from "../native-clients";
 import { WeatherChip } from "../components/weather-chip";
+import { getCurrentFix } from "../device-location";
+import { expoLocationApi } from "../device-location-native";
 import { fetchProviderApplication } from "../provider-application-client";
 import { PaginatedModuleShell, tabsToPagerPages } from "../architecture/paginated-module";
 import { color, shadows } from "../theme";
@@ -89,7 +88,8 @@ const SEEDED_EXPLORER_SPOTS: ReadonlyArray<{ id: string; name: string; lat: numb
 // 字面量 `21.0285, 105.8542`，和真实坐标在代码里长得一样。提成具名常量。
 const HANOI_VIEWPORT_FALLBACK = { latitude: 21.0285, longitude: 105.8542 } as const;
 
-export type MarketViewMode = "LIST" | "MAP";
+// 市场只有列表（订单 / 活动）。地图入口已移除（MARKET-MAP-REMOVED-001）；类型保留给外壳的 openMarket 入参。
+export type MarketViewMode = "LIST";
 type OpportunityStatusFilter = "ALL" | "APPLIED" | "CREATED" | "EXECUTING";
 
 const OPPORTUNITY_STATUS_FILTERS: ReadonlyArray<{ id: OpportunityStatusFilter; label: string; icon: "storeLines" | "check" | "plus" | "clock" }> = [
@@ -198,8 +198,6 @@ export function MarketSurface({
   const normalized = normalizeTab(initialTab);
   const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
   const [pagerPage, setPagerPage] = useState<number | undefined>(undefined);
-  const [view, setView] = useState<MarketViewMode>("LIST");
-  const [lens, setLens] = useState<OpportunityLens>("NOW");
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("RECOMMENDED");
   const [search, setSearch] = useState("");
   const [activityPhase, setActivityPhase] = useState<"LOADING" | "READY" | "ERROR">(cachedMarketActivities.length > 0 ? "READY" : "LOADING");
@@ -212,7 +210,18 @@ export function MarketSurface({
   // LIST view's NEARBY/RECOMMEND sort uses it to ask the server
   // to recompute Travel via haversine. We never persist this
   // across app launches — foreground GPS only.
-  const [userFix, setUserFix] = useState<{ lat: number; lng: number } | undefined>(undefined);
+  const [userFix, setUserFix] = useState<{ lat: number; lng: number } | undefined>(userCenter);
+  // MARKET-MAP-REMOVED-001：地图入口移除后，设备定位不再由地图带出来 —— 这里直接取一次前台定位，
+  // 给列表的「附近」排序、城市标签与天气用。取不到就没有（不编位置）。
+  useEffect(() => {
+    if (userFix) return undefined;
+    let cancelled = false;
+    void getCurrentFix(expoLocationApi, { requestPermission: true }).then((fix) => {
+      if (!cancelled && fix) setUserFix({ lat: fix.latitude, lng: fix.longitude });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // R15.x (P1 market 附近): when the viewer has shared a fix,
   // surface a real-world city label rather than the editor's
   // hard-coded "河内". Falls back to the prop (which is also
@@ -483,7 +492,6 @@ export function MarketSurface({
     return true;
   });
 
-  const remoteLens = lens === "REMOTE";
 
   function openDemandWizard(): void {
     setPublishMenuOpen(false);
@@ -510,7 +518,7 @@ export function MarketSurface({
         （横向 padding 清零）之前只给订单 tab，活动 tab 缩进 18，
         同一块 MarketMap 一边顶边一边有缝。地图视图不分 tab 全顶边；
         列表视图保持原样（订单沿用 contentFlat，活动保留 18 padding）。 */}
-    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }, wizardMapOpen && styles.contentMapPick]} onScroll={onMarketScroll} scrollEventThrottle={16}>
+    <ScrollView refreshControl={<RefreshControl refreshing={marketPull.refreshing} onRefresh={marketPull.onRefresh} />} style={styles.root} contentContainerStyle={[styles.content, pageTab === "OPPORTUNITY" ? styles.contentFlat : null, { paddingBottom: bottomPad }, wizardMapOpen && styles.contentMapPick]} onScroll={onMarketScroll} scrollEventThrottle={16}>
       {/* 全页选地点时市场头部 + tabs + offer 全部让位，地图拉满。 */}
       {wizardMapOpen ? null : (
       <>
@@ -520,12 +528,6 @@ export function MarketSurface({
           <WeatherChip city={effectiveMarketLabel} lat={userFix?.lat} lng={userFix?.lng} />
         </View>
         <View style={styles.headActions}>
-          <Pressable onPress={() => setView(view === "MAP" ? "LIST" : "MAP")} style={[styles.viewToggle, view === "MAP" && styles.viewToggleOn]}>
-            {/* MAP-FOOTPRINT-LOGO-001：去地图用原型「折叠地图」logo，不再用通用 route。
-                48 栅格原画占盒比例比 24 栅格小一圈 —— mapFold 用 26，比旁边的
-                + 号（18）大一圈；storeLines 保持 18。 */}
-            <ProxyIcon color={view === "MAP" ? color.white : color.ink} name={view === "MAP" ? "storeLines" : "mapFold"} size={view === "MAP" ? 18 : 26} />
-          </Pressable>
           <Pressable onPress={() => setPublishMenuOpen(true)} style={styles.plusBtn}>
             <ProxyIcon color={color.white} name="plus" size={18} />
           </Pressable>
@@ -583,21 +585,6 @@ export function MarketSurface({
         />
       ) : selectOpp ? (
         <SelectWorkbench marketplace={marketplace} fulfillment={fulfillment} profileClient={profileClient} opportunity={selectOpp} onBack={() => setSelectOpp(null)} />
-      ) : view === "MAP" ? (
-        <MarketMap
-          tab={pageTab}
-          opportunities={opportunityItems}
-          lens={lens}
-          remoteLens={remoteLens}
-          marketLabel={effectiveMarketLabel}
-          onOpenExperience={onOpenExperience}
-          onOpenOpportunity={(id) => {
-            const found = opportunityItems.find((x) => x.id === id);
-            if (found) setOppDetail(found);
-          }}
-          onUserFix={setUserFix}
-          userCenter={userCenter}
-        />
       ) : pageTab === "OPPORTUNITY" ? (
         oppDetail ? (
           <OpportunityDetail
@@ -1959,337 +1946,6 @@ function SelectWorkbench({ marketplace, fulfillment, profileClient, opportunity,
   );
 }
 
-function MarketMap({
-  tab,
-  opportunities,
-  lens,
-  remoteLens,
-  marketLabel,
-  onOpenExperience,
-  onOpenOpportunity,
-  onUserFix,
-  userCenter
-}: {
-  tab: "OPPORTUNITY" | "ACTIVITY";
-  opportunities: MarketOpportunity[];
-  lens: OpportunityLens;
-  remoteLens: boolean;
-  marketLabel: string;
-  onOpenExperience?: ((experienceId: string) => void) | undefined;
-  onOpenOpportunity: (id: string) => void;
-  // R15.x (P1 market 附近): parent passes a callback that the
-  // map invokes whenever a foreground-location fix is obtained
-  // (or refreshed). Parent uses this to (a) re-sort the LIST view
-  // by haversine distance via server, and (b) re-render the map's
-  // blue dot.
-  onUserFix: (fix: { lat: number; lng: number } | undefined) => void;
-  // MARKET-MAP-USER-CENTER-001: 壳的人位（设备跟随/CUSTOM/DEVICE），
-  // 由 MarketSurface 透传；初开以人为中心，晚到补飞。
-  userCenter?: { lat: number; lng: number } | undefined;
-}): React.JSX.Element {
-  // 机会的本地集：跳过“远程”不显示。图钉坐标走服务端下发的真 lat/lng
-  //（OPP-REAL-COORDS-001）；grid 投影只留兼容（当前没有任何来源再写 coord）。
-  const localOpportunities = useMemo(
-    () => opportunities.filter((o) => o.location !== "远程"),
-    [opportunities]
-  );
-  const opportunityPins = useMemo(
-    () =>
-      localOpportunities
-        .map((o, i) => {
-          if (typeof o.lat === "number" && typeof o.lng === "number"
-            && Number.isFinite(o.lat) && Number.isFinite(o.lng)) {
-            return { id: o.id, label: String(i + 1), title: o.shortTitle, lat: o.lat, lng: o.lng, responses: o.responses };
-          }
-          if (!o.coord) return null;
-          const { lat, lng } = gridToLatLng(marketLabel, o.coord[0], o.coord[1]);
-          return { id: o.id, label: String(i + 1), title: o.shortTitle, lat, lng, responses: o.responses };
-        })
-        .filter(
-          (p): p is { id: string; label: string; title: string; lat: number; lng: number; responses: number } => p !== null
-        ),
-    [localOpportunities, marketLabel]
-  );
-  // 图钉聚合输入：订单钉（仅订单 tab，活动 tab 不渲染订单钉——点开串详情，
-  // 沿用旧语义）+ 探索点统一进 clusterPins（见下 mapBody）。
-  // 探索点颜色语义保留（HOT/EXPLORE），只在单点渲染时用。
-  type MarketPinInput = { id: string; lat: number; lng: number; title: string } & (
-    | { kind: "opp" }
-    | { kind: "spot"; tag: "HOT" | "EXPLORE" }
-  );
-  const pinInputs = useMemo<MarketPinInput[]>(
-    () => [
-      ...(tab === "OPPORTUNITY"
-        ? opportunityPins.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, title: p.title, kind: "opp" as const }))
-        : []),
-      ...SEEDED_EXPLORER_SPOTS.map((spot) => ({ id: `spot:${spot.id}`, lat: spot.lat, lng: spot.lng, title: spot.name, kind: "spot" as const, tag: spot.tag })),
-    ],
-    [opportunityPins, tab]
-  );
-  // 默认 region: 有人位先以人为中心；都没有才退回订单 centroid / 河内。
-  // （MARKET-MAP-USER-CENTER-001：初开摆河内、非要点按钮，用户不在河内时就是错的。）
-  const fallbackRegion: Region = useMemo(() => {
-    if (userCenter) {
-      return { latitude: userCenter.lat, longitude: userCenter.lng, latitudeDelta: 0.08, longitudeDelta: 0.08 };
-    }
-    if (opportunityPins.length === 0) {
-      return { latitude: HANOI_VIEWPORT_FALLBACK.latitude, longitude: HANOI_VIEWPORT_FALLBACK.longitude, latitudeDelta: 0.12, longitudeDelta: 0.12 };
-    }
-    const avgLat = opportunityPins.reduce((s, p) => s + p.lat, 0) / opportunityPins.length;
-    const avgLng = opportunityPins.reduce((s, p) => s + p.lng, 0) / opportunityPins.length;
-    return { latitude: avgLat, longitude: avgLng, latitudeDelta: 0.08, longitudeDelta: 0.08 };
-  }, [opportunityPins, userCenter]);
-  const mapRef = useRef<MapView | null>(null);
-  const [userRegion, setUserRegion] = useState<Region | null>(null);
-  const [locBusy, setLocBusy] = useState(false);
-  const [locError, setLocError] = useState<string | null>(null);
-  const [locGranted, setLocGranted] = useState(false);
-  // MAP-FULLSCREEN-001: 全屏看地图。fullscreen 翻转时 mapBody（单 MapView
-  // 实例）在内联卡与全屏 Modal 里二选一挂载，定位态/图钉/granted 全是同一份
-  // state，只是容器从高 330 卡换成 flex:1 全屏；remount 用 userRegion 保住视角。
-  const [fullscreen, setFullscreen] = useState(false);
-  const insets = useSafeAreaInsets();
-  // 聚合跟随缩放：手势结束回写当前跨度，簇自动散开/收拢。
-  const [zoom, setZoom] = useState({ latitudeDelta: 0.08, longitudeDelta: 0.08 });
-  const clusters = useMemo(
-    () => clusterPins(pinInputs, zoom.latitudeDelta, zoom.longitudeDelta),
-    [pinInputs, zoom.latitudeDelta, zoom.longitudeDelta]
-  );
-  function zoomToCluster(latitude: number, longitude: number): void {
-    mapRef.current?.animateToRegion(
-      {
-        latitude,
-        longitude,
-        latitudeDelta: Math.max(zoom.latitudeDelta / 4, 0.005),
-        longitudeDelta: Math.max(zoom.longitudeDelta / 4, 0.005)
-      },
-      300
-    );
-  }
-  // 全屏切换 remount 地图，视角回到 userRegion ?? fallbackRegion，聚合跨度同步复位。
-  function setFullscreenAndZoom(next: boolean): void {
-    const base = userRegion ?? fallbackRegion;
-    setZoom({ latitudeDelta: base.latitudeDelta, longitudeDelta: base.longitudeDelta });
-    setFullscreen(next);
-  }
-  useModuleBackHandler(fullscreen ? () => { setFullscreenAndZoom(false); return true; } : undefined);
-  // 以 ~2km delta 跟 map-canvas.tsx 一致：用户看到的是“附近”的街景。
-  const userRegionDelta = { latitudeDelta: 0.02, longitudeDelta: 0.02 };
-  async function useMyLocation(): Promise<void> {
-    if (locBusy) return;
-    setLocError(null);
-    setLocBusy(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        setLocError("未授权定位 — iOS: 设置 → Proxy → 位置");
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = pos.coords;
-      const region: Region = { latitude, longitude, ...userRegionDelta };
-      setUserRegion(region);
-      setLocGranted(true);
-      // R15.x (P1 market 附近): also propagate up so LIST view can
-      // re-sort via server haversine.
-      onUserFix({ lat: latitude, lng: longitude });
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(region, 350);
-      }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "获取位置失败";
-      setLocError(msg);
-    } finally {
-      setLocBusy(false);
-    }
-  }
-  // 壳的人位可能是异步落定的（存档恢复/GPS 首 fix）—— 地图已挂载才来，
-  // 就补飞过去；用户自己点过按钮（userRegion）的不抢。
-  useEffect(() => {
-    if (!userCenter || userRegion) return;
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(
-        { latitude: userCenter.lat, longitude: userCenter.lng, ...userRegionDelta },
-        350
-      );
-    }
-  }, [userCenter, userRegion]);
-  const isOpportunity = tab === "OPPORTUNITY";
-  const titleText = isOpportunity ? "订单地图" : "活动地图";
-  const subText =
-    locGranted && userRegion
-      ? "以您当前位置为中心 — 蓝点是您"
-      : userCenter
-        ? "以您当前位置为中心 — 点右下角“用我当前位置”显示蓝点"
-        : isOpportunity
-          ? "默认以订单分布为中心 — 需点击右下角“用我当前位置”"
-          : "活动暂无位置坐标 — 只显示探索点与你的位置";
-  // 活动没有坐标（Activity 契约无 lat/lng），活动 Tab 不渲染机会图钉：
-  // 之前把机会 id 强转成 Activity 传进详情，点开是坏页面。
-  const onPinPress = (id: string): void => onOpenOpportunity(id);
-  // 需热：报名数 >0 的订单按报名量画圈（真聚合），0 报名不渲染。
-  // Circle 本体不可点，详情走图钉模式或列表；只在订单 tab 生效。
-  const [heat, setHeat] = useState(false);
-  const heatCircles = (
-    <>
-      {opportunityPins
-        .filter((p) => p.responses > 0)
-        .map((p) => (
-          <Circle
-            key={p.id}
-            center={{ latitude: p.lat, longitude: p.lng }}
-            radius={200 + Math.min(p.responses, 12) * 60}
-            strokeColor="rgba(11,122,115,0.45)"
-            fillColor="rgba(11,122,115,0.10)"
-          />
-        ))}
-    </>
-  );
-  const mapBody = (
-    <>
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFill}
-        initialRegion={userRegion ?? fallbackRegion}
-        onRegionChangeComplete={(region) =>
-          setZoom({ latitudeDelta: region.latitudeDelta, longitudeDelta: region.longitudeDelta })
-        }
-          // 跟场景页对齐：壳有人位（拿它必已授权）进门就亮蓝点，不必再点一次按钮；
-          // iOS 无授权时置 true 也不渲染、不弹框，所以不撒谎。
-          showsUserLocation={locGranted || !!userCenter}
-        showsMyLocationButton={false}
-        showsCompass
-        provider={Platform.OS === "ios" ? undefined : "google"}
-        testID="market-map-view"
-      >
-        {heat && isOpportunity ? heatCircles : clusters.map((c) => {
-          if (c.count > 1) {
-            return (
-              <Marker
-                key={c.key}
-                coordinate={{ latitude: c.latitude, longitude: c.longitude }}
-                title={`${c.count} 个地点`}
-                description="点放大散开"
-                onPress={() => zoomToCluster(c.latitude, c.longitude)}
-                testID="market-map-cluster"
-              >
-                <View style={styles.clusterBubble}>
-                  <Text selectable style={styles.clusterText}>{c.count}</Text>
-                </View>
-              </Marker>
-            );
-          }
-          const m = c.members[0]!;
-          if (m.kind === "opp") {
-            return (
-              <Marker
-                key={m.id}
-                coordinate={{ latitude: m.lat, longitude: m.lng }}
-                title={m.title}
-                description="可点开查看订单详情"
-                onPress={() => onPinPress(m.id)}
-                pinColor="#0B7A73"
-              />
-            );
-          }
-          return (
-            <Marker
-              key={m.id}
-              coordinate={{ latitude: m.lat, longitude: m.lng }}
-              title={m.title}
-              description={m.tag === "HOT" ? "种子探索点 · 非实时热度" : "种子探索点"}
-              pinColor={m.tag === "HOT" ? "#7A2DC7" : "#9A8AB5"}
-            />
-          );
-        })}
-        {/* 您当前位置的覆盖圈：准确可视、但隐私级别仍然是“粗粒度” */}
-        {userRegion ? (
-          <Circle
-            center={{ latitude: userRegion.latitude, longitude: userRegion.longitude }}
-            radius={250}
-            strokeColor="rgba(11,122,115,0.45)"
-            fillColor="rgba(11,122,115,0.10)"
-          />
-        ) : null}
-      </MapView>
-        <Pressable
-          style={[styles.geoLocateBtn, locGranted && styles.geoLocateBtnOn]}
-          onPress={useMyLocation}
-          disabled={locBusy}
-          testID="market-map-locate"
-          accessibilityLabel={locGranted ? "已使用我的位置" : "用我当前位置"}
-        >
-          {locBusy ? (
-            <ProxyLoading tone={locGranted ? "onDark" : "onLight"} size="small" />
-          ) : (
-            <ProxyIcon color={locGranted ? color.white : color.ink} name="route" size={14} />
-          )}
-        </Pressable>
-      {locError ? (
-        <View style={styles.geoLocateError}>
-          <Text selectable style={styles.geoLocateErrorText}>{locError}</Text>
-        </View>
-      ) : null}
-      {/* 需热开关：左上 ◉（只在订单 tab 出现，活动无坐标本就无热力），
-          放 mapBody 里以便全屏共用。 */}
-      {isOpportunity ? (
-        <Pressable
-          style={[styles.heatToggle, heat && styles.heatToggleOn]}
-          onPress={() => setHeat((h) => !h)}
-          testID="market-map-heat"
-          accessibilityLabel="热力图"
-        >
-          <Text selectable style={heat ? styles.heatToggleTextOn : styles.heatToggleText}>◉</Text>
-        </Pressable>
-      ) : null}
-    </>
-  );
-  return (
-    <View style={styles.mapWrap}>
-      <View style={styles.mapLegend}>
-          <Text selectable style={styles.mapLegendTitle}>{titleText}</Text>
-          <Text selectable style={styles.mapLegendTitle}>{titleText}</Text>
-          <Text selectable numberOfLines={2} style={styles.mapLegendSub}>{subText}</Text>
-      </View>
-      <View style={styles.geoMap}>
-        {fullscreen ? null : mapBody}
-        {/* MAP-FULLSCREEN-001: 右上全屏入口，跟定位钮同白色 pill 语言。 */}
-        <Pressable
-          style={styles.geoExpandBtn}
-          onPress={() => setFullscreenAndZoom(true)}
-          testID="market-map-expand"
-          accessibilityLabel="全屏显示地图"
-        >
-          <Text selectable style={styles.geoLocateBtnText}>⛶</Text>
-        </Pressable>
-      </View>
-      {remoteLens ? (
-        <View style={styles.mapRemote}>
-          <Text selectable style={styles.mapRemoteText}>远程订单不依赖地理位置。{"\n"}地图仅保留可定位的本地订单；远程订单请切回列表查看完整结果。</Text>
-        </View>
-      ) : null}
-      {fullscreen ? (
-        <Modal visible animationType="slide" onRequestClose={() => setFullscreenAndZoom(false)}>
-          <View style={[styles.mapFullscreen, { paddingTop: Math.max(insets.top, 8), paddingBottom: Math.max(insets.bottom, 8) }]}>
-            <View style={styles.mapFsHead}>
-              <Text selectable style={styles.mapFsTitle}>{titleText}</Text>
-              <Pressable
-                onPress={() => setFullscreenAndZoom(false)}
-                testID="market-map-collapse"
-                accessibilityLabel="退出全屏地图"
-                style={styles.mapFsClose}
-              >
-                <Text selectable style={styles.mapFsCloseText}>✕</Text>
-              </Pressable>
-            </View>
-            <View style={styles.mapFsBody}>{mapBody}</View>
-          </View>
-        </Modal>
-      ) : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   marketPage: { backgroundColor: color.offWhite, flex: 1 },
   root: { backgroundColor: color.offWhite, flex: 1 },
@@ -2301,10 +1957,6 @@ const styles = StyleSheet.create({
   marketTitle: { color: color.ink, fontSize: 30, fontWeight: "800", lineHeight: 36 },
   marketSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 3 },
   headActions: { alignItems: "center", flexDirection: "row", gap: 6 },
-  viewToggle: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1, height: 44, justifyContent: "center", width: 44, ...shadows.card },
-  viewToggleOn: { backgroundColor: color.ink, borderColor: color.ink },
-  viewToggleText: { color: color.ink, fontSize: 15, fontWeight: "800" },
-  viewToggleTextOn: { color: color.white },
   plusBtn: { alignItems: "center", backgroundColor: color.ink, borderRadius: 13, height: 44, justifyContent: "center", width: 44 },
   plusBtnText: { color: color.white, fontSize: 22, fontWeight: "700" },
   publishMenuBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(20,19,26,0.32)", paddingHorizontal: 14 },
@@ -2519,7 +2171,7 @@ const styles = StyleSheet.create({
   geoPinText: { color: color.white, fontSize: 11, fontWeight: "900" },
   geoLocateBtn: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1, bottom: 10, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 7, position: "absolute", right: 10, ...shadows.card },
   geoLocateBtnText: { color: color.ink, fontSize: 11, fontWeight: "700" },
-  // 定位已生效时按钮反转为 ink 底白图标（跟 viewToggleOn 同语言）——
+  // 定位已生效时按钮反转为 ink 底白图标——
   // 之前白底上压白字，定位完按钮像被空白层盖住一样看不见。
   geoLocateBtnOn: { backgroundColor: color.ink, borderColor: color.ink },
   // MAP-FULLSCREEN-001: 右上全屏入口（跟定位钮同白色 pill 语言）+ 全屏容器

@@ -48,34 +48,6 @@ describe("MAP-CONTAINER-PARITY-001", () => {
     expect(picker).toContain("MAP-CONTAINER-PARITY-001");
   });
 
-  it("market map toggle uses the 折叠地图 logo, map canvas keeps generic route", () => {
-    // MAP-FOOTPRINT-LOGO-001：市场头部去地图的切换按钮用原型折叠地图，
-    // 不再用通用 route；定位按钮（map-canvas 内）保持 route 不动。
-    expect(market).toContain('name={view === "MAP" ? "storeLines" : "mapFold"}');
-    // 48 栅格原画显小一圈：mapFold 用 26，比旁边的 + 号（18）大一圈。
-    expect(market).toContain('size={view === "MAP" ? 18 : 26}');
-    expect(canvas).toContain('name="route"');
-    const icon = readFileSync(
-      fileURLToPath(new URL("./components/proxy-icon.tsx", import.meta.url)),
-      "utf8",
-    );
-    // 原型 deepseek_html_20260923_5c4a22.html 几何原样移植：三折外轮廓 +
-    // 两条折痕 + 右上苹果绿状态点；场景足迹：镜头圈 + 轨迹 + 起终点。
-    expect(icon).toContain('case "mapFold"');
-    expect(icon).toContain("M14 18 L22 12 L30 18 L36 15 L36 32 L28 38 L20 32 L14 35 Z");
-    expect(icon).toContain("#34C759");
-    expect(icon).toContain('case "footprint"');
-    expect(icon).toContain("M11 26C16 19 24 33 37 22");
-  });
-
-  it("locate buttons are icon-only with no explanatory text", () => {
-    const locateBtn = market.match(/testID="market-map-locate"[\s\S]*?<\/Pressable>/)?.[0] ?? "";
-    expect(locateBtn).toContain("ProxyIcon");
-    expect(locateBtn).not.toContain("<Text");
-    expect(canvas).toContain('name="route"');
-    expect(canvas).not.toMatch(/<Text style=\{styles\.locButtonText\}>/);
-  });
-
   it("granted locate state stays visible (no white-on-white)", () => {
     // 白字只许出现在 ink 底上：白底按钮 + 白字/白图标就是之前的隐形 bug。
     expect(market).not.toContain("geoLocateBtnTextOn");
@@ -85,45 +57,6 @@ describe("MAP-CONTAINER-PARITY-001", () => {
   it("market map shows the map only, no explanatory card below", () => {
     expect(market).not.toContain("geoPrivacy");
     expect(market).not.toContain("地址粒度");
-  });
-
-  it("market pins cluster and spread on tap", () => {
-    // 图钉多了重叠点不了：订单钉 + 探索点统一进 clusterPins，簇点放大散开；
-    // 活动 tab 仍不渲染订单钉（点开串详情，沿用旧语义）。
-    expect(market).toContain("clusterPins(pinInputs");
-    expect(market).toContain('testID="market-map-cluster"');
-    expect(market).toContain("zoomToCluster");
-    expect(market).toContain("onRegionChangeComplete");
-    expect(market).toContain('tab === "OPPORTUNITY"');
-  });
-
-  it("opportunity pins prefer server lat/lng over grid projection", () => {
-    // OPP-REAL-COORDS-001: 服务端下发真坐标（种子是真实 venue 点），地图之前
-    // 只认从没人写的 o.coord，订单钉一个都渲染不出来。真坐标优先 + 有限值守卫，
-    // grid 投影只留兼容。
-    expect(market).toContain("OPP-REAL-COORDS-001");
-    expect(market).toMatch(/typeof o\.lat === "number" && typeof o\.lng === "number"/);
-    expect(market).toContain("Number.isFinite(o.lat) && Number.isFinite(o.lng)");
-  });
-
-  it("market map supports fullscreen with a single shared map instance", () => {
-    // MAP-FULLSCREEN-001: 右上全屏入口 + 全屏 Modal（标题 + 收起）；
-    // mapBody 单实例在内联/全屏二选一挂载，定位态不断。
-    expect(market).toContain('testID="market-map-expand"');
-    expect(market).toContain('testID="market-map-collapse"');
-    expect(market).toContain("MAP-FULLSCREEN-001");
-    expect(market).toContain("{fullscreen ? null : mapBody}");
-    expect(market).toMatch(/mapFsBody:\s*\{[^}]*flex:\s*1[^}]*\}/);
-    const fsBody = market.match(/mapFsBody:\s*\{[^}]*\}/)?.[0] ?? "";
-    expect(fsBody).not.toContain("height: 330");
-    // 全屏/收起钮只留图标，不挂解释性文字。
-    expect(market).not.toContain("⛶ 全屏");
-    expect(market).not.toContain("✕ 收起");
-  });
-
-  it("market map view is full-bleed on both tabs (no side gap)", () => {
-    // 根因：contentFlat（横向 padding 清零）只给订单 tab，活动 tab 缩进 18。
-    expect(market).toContain('view === "MAP" || pageTab === "OPPORTUNITY" ? styles.contentFlat : null');
   });
 
   it("no map container carries a side gap", () => {
@@ -155,13 +88,6 @@ describe("MAP-CONTAINER-PARITY-001", () => {
     expect(scene).toContain('testID="scene-map-heat"');
     expect(scene).toContain("sceneHeatScore(scene)");
     expect(scene).toContain("if (score <= 0) return null;");
-  });
-
-  it("market map renders demand heat from real applicant counts", () => {
-    // 需热：报名数 >0 的订单按量画圈，点圈进详情；只在订单 tab 生效。
-    expect(market).toContain('testID="market-map-heat"');
-    expect(market).toContain("heat && isOpportunity ? heatCircles");
-    expect(market).toContain(".filter((p) => p.responses > 0)");
   });
 
   it("scene detail auto-marks footprint within 300m", () => {
