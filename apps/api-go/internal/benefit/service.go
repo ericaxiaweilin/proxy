@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/command"
@@ -770,4 +771,54 @@ func generateClaimToken() string {
 // logging helper
 func logWarn(msg string, args ...any) {
 	slog.Warn(msg, args...)
+}
+
+// CouponSpec 描述一张「立等可领」的券（寻宝奖品用）：一个场景、一个福利、固定数量。
+type CouponSpec struct {
+	OwnerType        string // "proxy" | "merchant"
+	OwnerID          string
+	SceneID          string
+	Label            string // 「免费美式一杯」
+	Kind             BenefitKind
+	RetailValueMinor int64
+	Quota            int
+	ValidDays        int
+}
+
+// ProvisionCoupon 建一个已经生效的活动 + 福利定义 + 容量池，返回 (campaignId, benefitId)。
+// 领取 / 核销 / 结算走福利服务原有的链路（资格、容量、商家核销归属都照旧）；
+// 这里只负责把「一张券」需要的三样东西一次建齐，运营不用再手工拼三步。
+func (s *Service) ProvisionCoupon(ctx context.Context, spec CouponSpec) (string, string, error) {
+	if spec.OwnerType == "" || spec.OwnerID == "" || spec.SceneID == "" || strings.TrimSpace(spec.Label) == "" || spec.Quota <= 0 || spec.Quota > 10000 {
+		return "", "", errors.New("benefit: coupon needs owner, scene, label and a quota in 1..10000")
+	}
+	if spec.Kind == "" {
+		spec.Kind = FreeDrink
+	}
+	if spec.ValidDays <= 0 {
+		spec.ValidDays = 30
+	}
+	now := s.clock.Now()
+	camp := &Campaign{
+		ID: newID("camp_"), Type: CampaignMerchant, Status: CampaignActive, OwnerType: spec.OwnerType, OwnerID: spec.OwnerID,
+		SceneIDs: []string{spec.SceneID}, Goal: spec.Label, BudgetMinor: spec.RetailValueMinor * int64(spec.Quota), Currency: "VND",
+		StartAt: now.Add(-time.Minute), EndAt: now.Add(time.Duration(spec.ValidDays) * 24 * time.Hour), CreatedAt: now, UpdatedAt: now, Version: 1,
+	}
+	if err := s.repo.CreateCampaign(ctx, camp); err != nil {
+		return "", "", err
+	}
+	def := &BenefitDefinition{
+		ID: newID("ben_"), CampaignID: camp.ID, Kind: spec.Kind, Label: strings.TrimSpace(spec.Label),
+		RetailValueMinor: spec.RetailValueMinor, UserPayMinor: 0, Currency: "VND", CreatedAt: now,
+	}
+	if err := s.repo.CreateBenefitDefinition(ctx, def); err != nil {
+		return "", "", err
+	}
+	if err := s.repo.UpsertCapacityPool(ctx, &CapacityPool{
+		ID: newID("pool_"), CampaignID: camp.ID, TotalCapacity: spec.Quota, CreatedAt: now, UpdatedAt: now, Version: 1,
+	}); err != nil {
+		return "", "", err
+	}
+	s.appendEvent(ctx, camp.ID, "CampaignCreated", spec.OwnerID, map[string]any{"type": camp.Type, "coupon": def.Label})
+	return camp.ID, def.ID, nil
 }

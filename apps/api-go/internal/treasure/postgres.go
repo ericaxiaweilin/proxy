@@ -2,8 +2,10 @@ package treasure
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,14 +41,19 @@ func (p *Postgres) Spawn(ctx context.Context, now time.Time) (int, error) {
 	if room <= 0 {
 		return 0, nil
 	}
+	// 有奖品的场景，箱子带券位（最多 PrizeSlotsPerChest 个，不超过奖品剩余数量）和更高的分数；没有奖品的只给成长值。
 	tag, err := p.pool.Exec(ctx, `
-		INSERT INTO treasure.chests (id, scene_id, points, capacity, created_at, expires_at)
-		SELECT 'tc_' || md5(sc.id || clock_timestamp()::text), sc.id, $1, $2, $3, $4
+		INSERT INTO treasure.chests (id, scene_id, points, capacity, created_at, expires_at, prize_id, prize_slots)
+		SELECT 'tc_' || md5(sc.id || clock_timestamp()::text), sc.id,
+		       CASE WHEN pr.id IS NOT NULL THEN $6 ELSE $1 END, $2, $3, $4,
+		       COALESCE(pr.id, ''), COALESCE(LEAST($7, pr.quota - pr.awarded - COALESCE(held.slots, 0)), 0)
 		  FROM reality.scenes sc
+		  LEFT JOIN treasure.prizes pr ON pr.scene_id = sc.id AND pr.status = 'ACTIVE' AND pr.awarded < pr.quota
+		  LEFT JOIN LATERAL (SELECT COALESCE(SUM(c2.prize_slots),0) AS slots FROM treasure.chests c2 WHERE c2.prize_id = pr.id AND c2.status = 'ACTIVE') held ON TRUE
 		 WHERE sc.status = 'ACTIVE' AND sc.type LIKE '咖啡%'
 		   AND NOT EXISTS (SELECT 1 FROM treasure.chests c WHERE c.scene_id = sc.id AND c.status = 'ACTIVE')
 		 ORDER BY sc.id LIMIT $5
-		ON CONFLICT DO NOTHING`, SoloPoints, SoloCapacity, now.UTC(), now.Add(ChestTTL).UTC(), room)
+		ON CONFLICT DO NOTHING`, SoloPoints, SoloCapacity, now.UTC(), now.Add(ChestTTL).UTC(), room, PrizePoints, PrizeSlotsPerChest)
 	return int(tag.RowsAffected()), err
 }
 
@@ -64,6 +71,9 @@ type Chest struct {
 	Remaining  int       `json:"remaining"`
 	ExpiresAt  time.Time `json:"expiresAt"`
 	OpenedByMe bool      `json:"openedByMe"`
+	// 奖品：这个箱子里有券位时给出（金色箱）。slots = 还没被抽走的券位数。
+	PrizeLabel string `json:"prizeLabel,omitempty"`
+	PrizeSlots int    `json:"prizeSlots,omitempty"`
 }
 
 type Booking struct {
@@ -77,6 +87,7 @@ type Booking struct {
 	DistanceM   int     `json:"distanceM"`
 	Points      int     `json:"points"`
 	WithVoucher bool    `json:"withVoucher"`
+	PrizeLabel  string  `json:"prizeLabel,omitempty"` // 这家店当前的奖品（同行加成必出）
 }
 
 type Nearby struct {
@@ -90,32 +101,15 @@ type Nearby struct {
 
 const nearbyLimitM = 5000
 
-func (p *Postgres) voucherConfigured(ctx context.Context) (campaign, benefit string) {
-	rows, err := p.pool.Query(ctx, `SELECT key, value FROM treasure.settings WHERE key IN ('companion_campaign_id','companion_benefit_id')`)
-	if err != nil {
-		return "", ""
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var k, v string
-		if rows.Scan(&k, &v) == nil {
-			if k == "companion_campaign_id" {
-				campaign = v
-			} else {
-				benefit = v
-			}
-		}
-	}
-	return
-}
-
 // Nearby：5 公里内的活箱子（含我是否开过），以及我现在可以凭它开同行箱的订单。
 func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, now time.Time) (Nearby, error) {
 	out := Nearby{Chests: []Chest{}, Bookings: []Booking{}, DailyCap: DailySoloCap, RadiusM: int(RadiusM)}
 	rows, err := p.pool.Query(ctx, `
 		SELECT c.id, c.scene_id, sc.name, sc.area, sc.latitude, sc.longitude, c.points, c.capacity - c.opened, c.expires_at,
-		       EXISTS (SELECT 1 FROM treasure.opens o WHERE o.user_id = $1 AND o.chest_id = c.id AND o.kind = 'SOLO')
+		       EXISTS (SELECT 1 FROM treasure.opens o WHERE o.user_id = $1 AND o.chest_id = c.id AND o.kind = 'SOLO'),
+		       COALESCE(pr.label, ''), c.prize_slots
 		  FROM treasure.chests c JOIN reality.scenes sc ON sc.id = c.scene_id
+		  LEFT JOIN treasure.prizes pr ON pr.id = c.prize_id AND c.prize_slots > 0
 		 WHERE c.status = 'ACTIVE' AND c.expires_at > $2 AND c.opened < c.capacity`, userID, now.UTC())
 	if err != nil {
 		return out, err
@@ -123,7 +117,7 @@ func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, 
 	for rows.Next() {
 		var c Chest
 		var slat, slng float64
-		if err := rows.Scan(&c.ID, &c.SceneID, &c.Name, &c.Area, &slat, &slng, &c.Points, &c.Remaining, &c.ExpiresAt, &c.OpenedByMe); err != nil {
+		if err := rows.Scan(&c.ID, &c.SceneID, &c.Name, &c.Area, &slat, &slng, &c.Points, &c.Remaining, &c.ExpiresAt, &c.OpenedByMe, &c.PrizeLabel, &c.PrizeSlots); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -137,13 +131,12 @@ func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, 
 	rows.Close()
 	sortChests(out.Chests)
 
-	campaign, benefit := p.voucherConfigured(ctx)
-	withVoucher := campaign != "" && benefit != "" && p.Claimer != nil
 	brows, err := p.pool.Query(ctx, `
-		SELECT pt.activity_id, pt.companion_id, COALESCE(a.payload->>'title',''), sc.id, sc.name, sc.latitude, sc.longitude
+		SELECT pt.activity_id, pt.companion_id, COALESCE(a.payload->>'title',''), sc.id, sc.name, sc.latitude, sc.longitude, COALESCE(pr.label, '')
 		  FROM activity.participants pt
 		  JOIN activity.activities a ON a.id = pt.activity_id
 		  JOIN reality.scenes sc ON sc.id = a.payload->>'realitySceneId' AND sc.status = 'ACTIVE'
+		  LEFT JOIN treasure.prizes pr ON pr.scene_id = sc.id AND pr.status = 'ACTIVE' AND pr.awarded < pr.quota
 		 WHERE pt.actor_id = $1 AND pt.companion_id <> '' AND pt.state IN ('CONFIRMED','ATTENDED')
 		   AND ( ((a.payload->>'startsAt') IS NOT NULL AND (a.payload->>'startsAt')::timestamptz >= $2::timestamptz - $3::interval
 		                                              AND (a.payload->>'startsAt')::timestamptz <  $2::timestamptz + $4::interval)
@@ -157,12 +150,12 @@ func (p *Postgres) Nearby(ctx context.Context, userID string, lat, lng float64, 
 	for brows.Next() {
 		var b Booking
 		var slat, slng float64
-		if err := brows.Scan(&b.ActivityID, &b.CompanionID, &b.Title, &b.SceneID, &b.Name, &slat, &slng); err != nil {
+		if err := brows.Scan(&b.ActivityID, &b.CompanionID, &b.Title, &b.SceneID, &b.Name, &slat, &slng, &b.PrizeLabel); err != nil {
 			brows.Close()
 			return out, err
 		}
 		b.DistanceM, b.Lat, b.Lng = int(matching.DistanceMeters(lat, lng, slat, slng)), slat, slng
-		b.Points, b.WithVoucher = CompanionPts, withVoucher
+		b.Points, b.WithVoucher = CompanionPts, b.PrizeLabel != "" && p.Claimer != nil
 		out.Bookings = append(out.Bookings, b)
 	}
 	brows.Close()
@@ -184,12 +177,13 @@ func sortChests(c []Chest) {
 // ---------------------------------------------------------------- 开箱
 
 type Result struct {
-	Kind      string `json:"kind"`
-	Points    int    `json:"points"`
-	SceneName string `json:"sceneName"`
-	DistanceM int    `json:"distanceM"`
-	ClaimID   string `json:"claimId,omitempty"` // 带出了咖啡券
-	Total     int    `json:"totalPoints"`       // 开完之后账本里的积分合计（用户）
+	Kind       string `json:"kind"`
+	Points     int    `json:"points"`
+	SceneName  string `json:"sceneName"`
+	DistanceM  int    `json:"distanceM"`
+	ClaimID    string `json:"claimId,omitempty"`    // 带出了券（福利领取记录）
+	PrizeLabel string `json:"prizeLabel,omitempty"` // 券的名字，例如「免费美式一杯」
+	Total      int    `json:"totalPoints"`          // 开完之后账本里的积分合计（用户）
 }
 
 func newOpenID(userID string, now time.Time, ref string) string {
@@ -233,13 +227,13 @@ func (p *Postgres) OpenSolo(ctx context.Context, userID, chestID string, loc Loc
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var sceneID, sceneName string
 	var slat, slng float64
-	var points, capacity, opened int
-	var status string
+	var points, capacity, opened, prizeSlots int
+	var status, prizeID string
 	var expires time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT c.scene_id, sc.name, sc.latitude, sc.longitude, c.points, c.capacity, c.opened, c.status, c.expires_at
+		SELECT c.scene_id, sc.name, sc.latitude, sc.longitude, c.points, c.capacity, c.opened, c.status, c.expires_at, c.prize_id, c.prize_slots
 		  FROM treasure.chests c JOIN reality.scenes sc ON sc.id = c.scene_id WHERE c.id = $1 FOR UPDATE OF c`, chestID).
-		Scan(&sceneID, &sceneName, &slat, &slng, &points, &capacity, &opened, &status, &expires)
+		Scan(&sceneID, &sceneName, &slat, &slng, &points, &capacity, &opened, &status, &expires, &prizeID, &prizeSlots)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Result{}, ErrChestGone
 	}
@@ -279,17 +273,68 @@ func (p *Postgres) OpenSolo(ctx context.Context, userID, chestID string, loc Loc
 		VALUES ($1,$2,'SOLO',$3,$4,$5,$6,$7,$8)`, newOpenID(userID, now, chestID), userID, chestID, sceneID, points, dist, int(loc.AccuracyM), now.UTC()); err != nil {
 		return Result{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE treasure.chests SET opened = opened + 1 WHERE id = $1`, chestID); err != nil {
+	// 抽奖：券位 / 剩余开箱名额 的概率（券位 ≥ 剩余名额就必中）。先在事务里占住券位和奖品名额，领券失败再退回。
+	won := false
+	var prizeLabel, campaignID, benefitID string
+	if prizeID != "" && prizeSlots > 0 && p.Claimer != nil && Roll(prizeSlots, capacity-opened) {
+		err := tx.QueryRow(ctx, `
+			UPDATE treasure.prizes SET awarded = awarded + 1 WHERE id = $1 AND status = 'ACTIVE' AND awarded < quota
+			RETURNING label, campaign_id, benefit_id`, prizeID).Scan(&prizeLabel, &campaignID, &benefitID)
+		if err == nil {
+			won = true
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return Result{}, err
+		}
+	}
+	slotsAfter := prizeSlots
+	if won {
+		slotsAfter--
+	}
+	if _, err := tx.Exec(ctx, `UPDATE treasure.chests SET opened = opened + 1, prize_slots = $2 WHERE id = $1`, chestID, slotsAfter); err != nil {
 		return Result{}, err
 	}
 	if err := p.credit(ctx, tx, userID, "TREASURE_SOLO", chestID, points, now); err != nil {
 		return Result{}, err
 	}
+	openID := newOpenID(userID, now, chestID)
 	res := Result{Kind: "SOLO", Points: points, SceneName: sceneName, DistanceM: dist, Total: p.total(ctx, tx, userID)}
 	if err := tx.Commit(ctx); err != nil {
 		return Result{}, err
 	}
+	if won {
+		p.awardPrize(ctx, userID, openID, chestID, prizeID, prizeLabel, campaignID, benefitID, &res)
+	}
 	return res, nil
+}
+
+// Roll：slots 个券位分给 remaining 个开箱名额，这一次抽中的概率 = slots / remaining（≥ 1 必中）。用密码学随机数。
+func Roll(slots, remaining int) bool {
+	if slots <= 0 || remaining <= 0 {
+		return false
+	}
+	if slots >= remaining {
+		return true
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(remaining)))
+	if err != nil {
+		return false
+	}
+	return int(n.Int64()) < slots
+}
+
+// awardPrize 在事务外领券（福利服务有自己的资格 / 容量检查）。领不到就把占住的奖品名额和券位退回，成长值不受影响。
+func (p *Postgres) awardPrize(ctx context.Context, userID, openID, chestID, prizeID, label, campaignID, benefitID string, res *Result) {
+	_ = userID
+	claimID, err := p.Claimer.Claim(ctx, userID, campaignID, benefitID)
+	if err != nil || claimID == "" {
+		_, _ = p.pool.Exec(ctx, `UPDATE treasure.prizes SET awarded = GREATEST(awarded - 1, 0) WHERE id = $1`, prizeID)
+		if chestID != "" {
+			_, _ = p.pool.Exec(ctx, `UPDATE treasure.chests SET prize_slots = prize_slots + 1 WHERE id = $1`, chestID)
+		}
+		return
+	}
+	res.ClaimID, res.PrizeLabel = claimID, label
+	_, _ = p.pool.Exec(ctx, `UPDATE treasure.opens SET claim_id = $2, prize_label = $3 WHERE id = $1`, openID, claimID, label)
 }
 
 // OpenCompanion：凭一单「带小美的活动报名」开同行加成箱（到店 100 米内、窗口内、每单一次）。
@@ -356,28 +401,81 @@ func (p *Postgres) OpenCompanion(ctx context.Context, userID, activityID, compan
 	if err := tx.Commit(ctx); err != nil {
 		return Result{}, err
 	}
-	// 咖啡券：事务之外领（福利有自己的名额和资格）；领不到不影响已经开出的成长值。
-	if campaign, benefit := p.voucherConfigured(ctx); campaign != "" && benefit != "" && p.Claimer != nil {
-		if claimID, err := p.Claimer.Claim(ctx, userID, campaign, benefit); err == nil && claimID != "" {
-			res.ClaimID = claimID
-			_, _ = p.pool.Exec(ctx, `UPDATE treasure.opens SET claim_id = $2 WHERE id = $1`, openID, claimID)
+	// 同行加成必出券：这家店的奖品还有余量就占一个名额，事务外领券；领不到退回名额。
+	if p.Claimer != nil {
+		var prizeID, label, campaignID, benefitID string
+		err := p.pool.QueryRow(ctx, `
+			UPDATE treasure.prizes SET awarded = awarded + 1
+			 WHERE scene_id = $1 AND status = 'ACTIVE' AND awarded < quota
+			RETURNING id, label, campaign_id, benefit_id`, sceneID).Scan(&prizeID, &label, &campaignID, &benefitID)
+		if err == nil {
+			claimID, cerr := p.Claimer.Claim(ctx, userID, campaignID, benefitID)
+			if cerr != nil || claimID == "" {
+				_, _ = p.pool.Exec(ctx, `UPDATE treasure.prizes SET awarded = GREATEST(awarded - 1, 0) WHERE id = $1`, prizeID)
+			} else {
+				res.ClaimID, res.PrizeLabel = claimID, label
+				_, _ = p.pool.Exec(ctx, `UPDATE treasure.opens SET claim_id = $2, prize_label = $3 WHERE id = $1`, openID, claimID, label)
+			}
 		}
 	}
 	return res, nil
 }
 
-// SetCompanionReward：运营配置同行箱带的咖啡券；两个都空 = 清除（只给成长值）。
-func (p *Postgres) SetCompanionReward(ctx context.Context, campaignID, benefitID string, now time.Time) error {
-	for k, v := range map[string]string{"companion_campaign_id": campaignID, "companion_benefit_id": benefitID} {
-		if v == "" {
-			if _, err := p.pool.Exec(ctx, `DELETE FROM treasure.settings WHERE key = $1`, k); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err := p.pool.Exec(ctx, `INSERT INTO treasure.settings (key, value, updated_at) VALUES ($1,$2,$3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`, k, v, now.UTC()); err != nil {
-			return err
-		}
+// ---------------------------------------------------------------- 奖品（运营）
+
+type Prize struct {
+	ID         string    `json:"id"`
+	SceneID    string    `json:"sceneId"`
+	SceneName  string    `json:"sceneName"`
+	CampaignID string    `json:"campaignId"`
+	BenefitID  string    `json:"benefitId"`
+	Label      string    `json:"label"`
+	Quota      int       `json:"quota"`
+	Awarded    int       `json:"awarded"`
+	Status     string    `json:"status"`
+	CreatedBy  string    `json:"createdBy"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+func (p *Postgres) ListPrizes(ctx context.Context) ([]Prize, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT pr.id, pr.scene_id, COALESCE(sc.name, pr.scene_id), pr.campaign_id, pr.benefit_id, pr.label, pr.quota, pr.awarded, pr.status, pr.created_by, pr.created_at
+		  FROM treasure.prizes pr LEFT JOIN reality.scenes sc ON sc.id = pr.scene_id ORDER BY pr.created_at DESC LIMIT 200`)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	defer rows.Close()
+	out := []Prize{}
+	for rows.Next() {
+		var x Prize
+		if err := rows.Scan(&x.ID, &x.SceneID, &x.SceneName, &x.CampaignID, &x.BenefitID, &x.Label, &x.Quota, &x.Awarded, &x.Status, &x.CreatedBy, &x.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+var ErrPrizeExists = errors.New("PRIZE_EXISTS")
+
+// CreatePrize 记一个已建好券的奖品。一个场景同时只有一个生效奖品（唯一索引挡住第二个）。
+func (p *Postgres) CreatePrize(ctx context.Context, sceneID, campaignID, benefitID, label string, quota int, by string, now time.Time) (string, error) {
+	id := "tp_" + fmt.Sprintf("%x", fmt.Sprintf("%s|%d", sceneID, now.UnixNano()))
+	_, err := p.pool.Exec(ctx, `INSERT INTO treasure.prizes (id, scene_id, campaign_id, benefit_id, label, quota, created_by, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		id, sceneID, campaignID, benefitID, label, quota, by, now.UTC())
+	if err != nil && (err.Error() != "" && containsUnique(err)) {
+		return "", ErrPrizeExists
+	}
+	return id, err
+}
+
+func containsUnique(err error) bool {
+	var pgErr interface{ SQLState() string }
+	return errors.As(err, &pgErr) && pgErr.SQLState() == "23505"
+}
+
+// EndPrize 结束一个奖品：不再往新箱子上放；已领出的券不受影响。
+func (p *Postgres) EndPrize(ctx context.Context, id string) (bool, error) {
+	tag, err := p.pool.Exec(ctx, `UPDATE treasure.prizes SET status = 'ENDED' WHERE id = $1 AND status = 'ACTIVE'`, id)
+	return tag.RowsAffected() == 1, err
 }

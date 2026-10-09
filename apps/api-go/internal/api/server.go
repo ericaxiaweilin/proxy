@@ -341,6 +341,14 @@ func (s *Server) Handler() http.Handler {
 		s.operatorConsoleGated(http.MethodPost, ScopePayments, s.operatorIncentiveUpsert)(w, r)
 	})
 	mux.HandleFunc("/v1/operator/incentives/active", s.operatorConsoleGated(http.MethodPost, ScopePayments, s.operatorIncentiveActive))
+	mux.HandleFunc("/v1/operator/treasure/prizes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			s.operatorConsoleGated(http.MethodPost, ScopePayments, s.operatorTreasurePrizeCreate)(w, r)
+			return
+		}
+		s.operatorConsoleGated(http.MethodGet, ScopePayments, s.operatorTreasurePrizes)(w, r)
+	})
+	mux.HandleFunc("/v1/operator/treasure/prizes/end", s.operatorConsoleGated(http.MethodPost, ScopePayments, s.operatorTreasurePrizeEnd))
 	mux.HandleFunc("/v1/operator/restrictions", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			s.operatorConsoleGated(http.MethodGet, ScopeModeration, s.operatorRestrictions)(w, r)

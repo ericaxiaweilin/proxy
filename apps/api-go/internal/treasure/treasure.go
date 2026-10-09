@@ -25,6 +25,9 @@ const (
 	DailySoloCap  = 10 // 每人每天最多开几个普通箱
 	CompanionPts  = 30
 	MaxSpawnTotal = 30 // 同时活着的箱子总数上限
+	// 带奖品（咖啡券）的金色箱：分数更高，每个箱子最多 2 个券位。
+	PrizePoints        = 20
+	PrizeSlotsPerChest = 2
 )
 
 // 开不了的原因码（客户端按它说人话；不用文案当协议）。

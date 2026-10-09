@@ -505,3 +505,116 @@ func TestTreasureSoloAndCompanionOpensOnRealDB(t *testing.T) {
 		t.Fatalf("someone else's booking is not mine: %v", err)
 	}
 }
+
+type fakeClaimer struct {
+	n    int
+	fail bool
+}
+
+func (f *fakeClaimer) Claim(_ context.Context, userID, campaignID, benefitID string) (string, error) {
+	if f.fail {
+		return "", fmt.Errorf("capacity")
+	}
+	f.n++
+	return fmt.Sprintf("clm_%d_%s", f.n, userID), nil
+}
+
+// TREASURE-002：有奖品的场景，箱子带券位，开箱抽中咖啡券；同行加成必出券；领券失败要把名额退回。
+func TestTreasurePrizesDropCoffeeVouchers(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	scene := "sc_tp_" + stamp
+	users := []string{"u_tp_a_" + stamp, "u_tp_b_" + stamp, "u_tp_c_" + stamp}
+	act := "act_tp_" + stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM treasure.opens WHERE user_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM treasure.chests WHERE scene_id = $1`, scene)
+		_, _ = pool.Exec(bg, `DELETE FROM treasure.prizes WHERE scene_id = $1`, scene)
+		_, _ = pool.Exec(bg, `DELETE FROM activity.participants WHERE activity_id = $1`, act)
+		_, _ = pool.Exec(bg, `DELETE FROM activity.activities WHERE id = $1`, act)
+		_, _ = pool.Exec(bg, `DELETE FROM reality.scenes WHERE id = $1`, scene)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	const lat, lng = 21.3, 106.1
+	exec(`INSERT INTO reality.scenes (id, name, area, type, latitude, longitude, best) VALUES ($1,'Tp Cafe','a','咖啡 · 店招',$2,$3,'')`, scene, lat, lng)
+	tr := treasure.NewPostgres(pool)
+	claimer := &fakeClaimer{}
+	tr.Claimer = claimer
+	here := treasure.Location{Lat: lat, Lng: lng, AccuracyM: 8}
+
+	// 没有奖品：箱子只给成长值。
+	if _, err := tr.Spawn(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	var slots int
+	_ = pool.QueryRow(ctx, `SELECT prize_slots FROM treasure.chests WHERE scene_id = $1 AND status = 'ACTIVE'`, scene).Scan(&slots)
+	if slots != 0 {
+		t.Fatalf("no prize, no voucher slots: %d", slots)
+	}
+	exec(`UPDATE treasure.chests SET status = 'EXPIRED' WHERE scene_id = $1`, scene)
+
+	// 有奖品（总量 3）：新箱子带 2 个券位、分数更高；容量改成 2，开两个人必出两张。
+	if _, err := tr.CreatePrize(ctx, scene, "camp_x", "ben_x", "免费美式一杯", 3, "op", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.CreatePrize(ctx, scene, "camp_y", "ben_y", "第二个", 3, "op", now); err != treasure.ErrPrizeExists {
+		t.Fatalf("one live prize per scene: %v", err)
+	}
+	if _, err := tr.Spawn(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	var chestID string
+	var pts int
+	if err := pool.QueryRow(ctx, `SELECT id, prize_slots, points FROM treasure.chests WHERE scene_id = $1 AND status = 'ACTIVE'`, scene).Scan(&chestID, &slots, &pts); err != nil {
+		t.Fatal(err)
+	}
+	if slots != treasure.PrizeSlotsPerChest || pts != treasure.PrizePoints {
+		t.Fatalf("a prize chest is gold: slots=%d points=%d", slots, pts)
+	}
+	exec(`UPDATE treasure.chests SET capacity = 2 WHERE id = $1`, chestID)
+	nb, _ := tr.Nearby(ctx, users[0], lat, lng, now)
+	if len(nb.Chests) == 0 || nb.Chests[0].PrizeLabel != "免费美式一杯" || nb.Chests[0].PrizeSlots != 2 {
+		t.Fatalf("the chest advertises its prize: %+v", nb.Chests)
+	}
+	r1, err := tr.OpenSolo(ctx, users[0], chestID, here, now)
+	if err != nil || r1.ClaimID == "" || r1.PrizeLabel != "免费美式一杯" || r1.Points != treasure.PrizePoints {
+		t.Fatalf("first opener gets the coffee voucher (slots>=remaining): %+v %v", r1, err)
+	}
+	r2, err := tr.OpenSolo(ctx, users[1], chestID, here, now)
+	if err != nil || r2.ClaimID == "" {
+		t.Fatalf("second opener too: %+v %v", r2, err)
+	}
+	var awarded int
+	_ = pool.QueryRow(ctx, `SELECT awarded FROM treasure.prizes WHERE scene_id = $1`, scene).Scan(&awarded)
+	if awarded != 2 {
+		t.Fatalf("the prize pool counts what was handed out: %d", awarded)
+	}
+
+	// 同行加成：奖品还剩 1 个 → 必出；再来一次领券失败 → 名额退回、成长值照给。
+	exec(`INSERT INTO activity.activities (id, payload) VALUES ($1, $2::jsonb)`, act, fmt.Sprintf(`{"activityId":"%s","title":"周六咖啡","status":"PUBLISHED","realitySceneId":"%s","startsAt":"%s"}`, act, scene, now.Add(20*time.Minute).Format(time.RFC3339)))
+	exec(`INSERT INTO activity.participants (activity_id, actor_id, state, companion_id) VALUES ($1,$2,'CONFIRMED','xm_1'),($1,$3,'CONFIRMED','xm_2')`, act, users[2], users[0])
+	c1, err := tr.OpenCompanion(ctx, users[2], act, "xm_1", here, now)
+	if err != nil || c1.ClaimID == "" || c1.PrizeLabel != "免费美式一杯" {
+		t.Fatalf("a booking with a 小美 always gets the voucher while stock lasts: %+v %v", c1, err)
+	}
+	tr.Claimer = &fakeClaimer{fail: true}
+	exec(`UPDATE treasure.prizes SET quota = quota + 2 WHERE scene_id = $1`, scene)
+	before := awarded + 1
+	c2, err := tr.OpenCompanion(ctx, users[0], act, "xm_2", here, now.Add(time.Minute))
+	if err != nil || c2.ClaimID != "" || c2.Points != treasure.CompanionPts {
+		t.Fatalf("a failed claim still pays the points and hands out no voucher: %+v %v", c2, err)
+	}
+	_ = pool.QueryRow(ctx, `SELECT awarded FROM treasure.prizes WHERE scene_id = $1`, scene).Scan(&awarded)
+	if awarded != before {
+		t.Fatalf("the reserved prize was given back: awarded=%d want %d", awarded, before)
+	}
+}

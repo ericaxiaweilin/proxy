@@ -52,3 +52,22 @@ func TestCompanionWindowAndLocalDay(t *testing.T) {
 		t.Fatalf("local day starts at 00:00 ICT: %v", got)
 	}
 }
+
+// 抽奖：券位 >= 剩余名额必中；没有券位不中；概率大致等于 券位 / 剩余名额。
+func TestRollGuaranteesThePrizeByTheLastOpeners(t *testing.T) {
+	if !Roll(2, 2) || !Roll(3, 2) {
+		t.Fatal("slots >= remaining always wins")
+	}
+	if Roll(0, 8) || Roll(2, 0) {
+		t.Fatal("no slots / no capacity never wins")
+	}
+	wins := 0
+	for i := 0; i < 4000; i++ {
+		if Roll(2, 8) {
+			wins++
+		}
+	}
+	if wins < 800 || wins > 1200 { // 期望 1000
+		t.Fatalf("2 slots over 8 openers is ~25%%: %d/4000", wins)
+	}
+}
