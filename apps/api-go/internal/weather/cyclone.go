@@ -3,12 +3,11 @@ package weather
 import (
 	"bytes"
 	"context"
-	"encoding/xml"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -23,29 +22,28 @@ type CycloneSource interface {
 	Active(ctx context.Context) ([]Center, error)
 }
 
-// GDACS 读联合国 / 欧委会的灾害预警系统公开 RSS（public domain）里 eventtype=TC 且 iscurrent=true 的条目。
+// GDACS 读联合国 / 欧委会灾害预警系统（GDACS，公开数据）的热带气旋事件列表：近 7 天里 iscurrent=true 的现行气旋，
+// 取中心坐标。用事件列表（JSON，几 KB，几秒）而不是整份 RSS（几百 KB，慢到常常超时）。
 type GDACS struct {
 	Client *http.Client
-	URL    string
-}
-
-type gdacsFeed struct {
-	Items []struct {
-		EventType string `xml:"eventtype"`
-		IsCurrent string `xml:"iscurrent"`
-		Lat       string `xml:"Point>lat"`
-		Lng       string `xml:"Point>long"`
-	} `xml:"channel>item"`
+	// URL 为空时按今天往前 7 天拼；测试可以直接给一个地址。
+	URL string
+	Now func() time.Time
 }
 
 func (g GDACS) Active(ctx context.Context) ([]Center, error) {
 	url := g.URL
 	if url == "" {
-		url = "https://www.gdacs.org/xml/rss.xml"
+		now := time.Now()
+		if g.Now != nil {
+			now = g.Now()
+		}
+		url = fmt.Sprintf("https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=TC&fromDate=%s&toDate=%s&alertlevel=Green;Orange;Red",
+			now.AddDate(0, 0, -7).UTC().Format("2006-01-02"), now.AddDate(0, 0, 1).UTC().Format("2006-01-02"))
 	}
 	client := g.Client
 	if client == nil {
-		client = &http.Client{Timeout: 20 * time.Second}
+		client = &http.Client{Timeout: 25 * time.Second}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -62,29 +60,34 @@ func (g GDACS) Active(ctx context.Context) ([]Center, error) {
 	return ParseGDACS(resp.Body)
 }
 
-// ParseGDACS 从 RSS 里取现行热带气旋的中心。坐标缺 / 解析不了的条目跳过，不猜。
+// ParseGDACS 从事件列表（GeoJSON）里取现行热带气旋的中心。iscurrent 不是 true / 坐标不是点的条目跳过，不猜。
 func ParseGDACS(r io.Reader) ([]Center, error) {
-	raw, err := io.ReadAll(io.LimitReader(r, 8<<20))
+	raw, err := io.ReadAll(io.LimitReader(r, 4<<20))
 	if err != nil {
 		return nil, err
 	}
-	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // 线上的 RSS 以 UTF-8 BOM 开头
-	var feed gdacsFeed
-	dec := xml.NewDecoder(bytes.NewReader(raw))
-	dec.Strict = false
-	if err := dec.Decode(&feed); err != nil {
+	var body struct {
+		Features []struct {
+			Geometry struct {
+				Type        string    `json:"type"`
+				Coordinates []float64 `json:"coordinates"`
+			} `json:"geometry"`
+			Properties struct {
+				EventType string `json:"eventtype"`
+				IsCurrent string `json:"iscurrent"`
+			} `json:"properties"`
+		} `json:"features"`
+	}
+	if err := json.Unmarshal(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")), &body); err != nil {
 		return nil, err
 	}
 	out := []Center{}
-	for _, it := range feed.Items {
-		if strings.TrimSpace(it.EventType) != "TC" || strings.TrimSpace(it.IsCurrent) != "true" {
+	for _, f := range body.Features {
+		if f.Properties.EventType != "TC" || f.Properties.IsCurrent != "true" || f.Geometry.Type != "Point" || len(f.Geometry.Coordinates) < 2 {
 			continue
 		}
-		var lat, lng float64
-		if _, err := fmt.Sscanf(strings.TrimSpace(it.Lat), "%f", &lat); err != nil {
-			continue
-		}
-		if _, err := fmt.Sscanf(strings.TrimSpace(it.Lng), "%f", &lng); err != nil {
+		lng, lat := f.Geometry.Coordinates[0], f.Geometry.Coordinates[1]
+		if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
 			continue
 		}
 		out = append(out, Center{Lat: lat, Lng: lng})

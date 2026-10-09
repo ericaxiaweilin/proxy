@@ -101,12 +101,13 @@ type provFunc func(lat, lng float64) (Report, error)
 
 func (f provFunc) Fetch(_ context.Context, lat, lng float64) (Report, error) { return f(lat, lng) }
 
-const gdacsSample = `<?xml version="1.0"?><rss xmlns:gdacs="http://www.gdacs.org" xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#"><channel>
-<item><gdacs:eventtype>TC</gdacs:eventtype><gdacs:iscurrent>true</gdacs:iscurrent><geo:Point><geo:lat>18.3</geo:lat><geo:long>112.6</geo:long></geo:Point></item>
-<item><gdacs:eventtype>TC</gdacs:eventtype><gdacs:iscurrent>false</gdacs:iscurrent><geo:Point><geo:lat>21.0</geo:lat><geo:long>105.8</geo:long></geo:Point></item>
-<item><gdacs:eventtype>EQ</gdacs:eventtype><gdacs:iscurrent>true</gdacs:iscurrent><geo:Point><geo:lat>21.0</geo:lat><geo:long>105.8</geo:long></geo:Point></item>
-<item><gdacs:eventtype>TC</gdacs:eventtype><gdacs:iscurrent>true</gdacs:iscurrent><geo:Point><geo:lat>x</geo:lat><geo:long>y</geo:long></geo:Point></item>
-</channel></rss>`
+const gdacsSample = `{"type":"FeatureCollection","features":[
+{"geometry":{"type":"Point","coordinates":[112.6,18.3]},"properties":{"eventtype":"TC","iscurrent":"true"}},
+{"geometry":{"type":"Point","coordinates":[105.8,21.0]},"properties":{"eventtype":"TC","iscurrent":"false"}},
+{"geometry":{"type":"Point","coordinates":[105.8,21.0]},"properties":{"eventtype":"EQ","iscurrent":"true"}},
+{"geometry":{"type":"Polygon","coordinates":[]},"properties":{"eventtype":"TC","iscurrent":"true"}},
+{"geometry":{"type":"Point","coordinates":[999,18]},"properties":{"eventtype":"TC","iscurrent":"true"}}
+]}`
 
 // 台风 = 公共气象数据（GDACS 现行热带气旋）里有一个中心离用户 500 公里以内。只认 TC、现行、坐标可解析的。
 func TestTyphoonComesFromActiveCyclonesNearTheUser(t *testing.T) {
@@ -161,7 +162,7 @@ func TestServiceMarksTyphoonOnlyNearAnActiveCycloneAndNeverOnAFailedLookup(t *te
 	}
 }
 
-// 线上的 GDACS RSS 以 UTF-8 BOM 开头：带 BOM 也要能解析（实测踩过：不处理就一个气旋都读不出来）。
+// 带 BOM 的响应也要能解析。
 func TestParseGDACSAcceptsTheByteOrderMark(t *testing.T) {
 	centers, err := ParseGDACS(strings.NewReader("\ufeff" + gdacsSample))
 	if err != nil || len(centers) != 1 {
