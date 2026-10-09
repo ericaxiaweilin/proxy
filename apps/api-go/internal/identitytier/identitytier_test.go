@@ -28,8 +28,8 @@ func TestLadderIsStrictlyIncreasingAndOnlyUsersEarnTodayWithoutInventedRules(t *
 			t.Fatalf("ladder must increase: %+v", l)
 		}
 	}
-	if len(EarnRules(User)) == 0 || len(EarnRules(Provider)) != 0 || len(EarnRules(Merchant)) != 1 {
-		t.Fatal("providers have no ledger rules yet; merchants earn one point per hosted order")
+	if len(EarnRules(User)) == 0 || len(EarnRules(Provider)) != 3 || len(EarnRules(Merchant)) != 1 {
+		t.Fatal("providers earn from orders served / satisfaction / repeat clients; merchants one point per hosted order")
 	}
 	if Valid("X") || !Valid(Merchant) {
 		t.Fatal("kinds")

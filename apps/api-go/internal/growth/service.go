@@ -314,7 +314,23 @@ type ledgerReader interface {
 	Points(ctx context.Context, k identitytier.Kind, id string) (int, error)
 }
 
-// SetLedger 接上积分账本：「我的权益」的成长值 = 订单积分 + 账本积分，等级由合计算。
+// ledgerTotal：用户 + 小美两个身份下的账本积分合计；任何一个读不出来就整体当作读不出来。
+func (s *Service) ledgerTotal(ctx context.Context, actorID string) (int, bool) {
+	if s.ledger == nil {
+		return 0, false
+	}
+	total := 0
+	for _, k := range []identitytier.Kind{identitytier.User, identitytier.Provider} {
+		n, err := s.ledger.Points(ctx, k, actorID)
+		if err != nil {
+			return 0, false
+		}
+		total += n
+	}
+	return total, true
+}
+
+// SetLedger 接上积分账本：「我的权益」的成长值 = 账本积分（含订单积分），等级由它算。
 func (s *Service) SetLedger(l ledgerReader) { s.ledger = l }
 
 func New(repo orderReader) *Service {
@@ -342,16 +358,14 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if err != nil {
 			return command.Rejected(e, "GROWTH_SUMMARY_FAILED", "INTERNAL", "SAFE_RETRY", "growth.summary_failed", nil)
 		}
-		bonus := 0
-		if s.ledger != nil {
-			// 读不出来就只算订单积分（宁可少算，不编）。
-			for _, k := range []identitytier.Kind{identitytier.User, identitytier.Provider} {
-				if n, err := s.ledger.Points(ctx, k, e.Actor.ID); err == nil {
-					bonus += n
-				}
-			}
+		var summary Summary
+		if total, ok := s.ledgerTotal(ctx, e.Actor.ID); ok {
+			// 成长值 = 账本（订单积分由收集器写进账本：完成 / 满意 / 回头客，加上用户行为和奖励活动）。
+			summary = BuildSummaryWithPoints(orders, e.Actor.ID, s.clock.Now(), total)
+		} else {
+			// 没接账本（或读不出来）：退回按订单实时算，宁可少算，不编。
+			summary = BuildSummary(orders, e.Actor.ID, s.clock.Now())
 		}
-		summary := BuildSummaryWithBonus(orders, e.Actor.ID, s.clock.Now(), bonus)
 		result := command.Accepted(e, "GrowthSummary", e.Actor.ID, 1, "READY", nil)
 		result.Body = map[string]any{"summary": summary}
 		return result
@@ -369,6 +383,15 @@ func BuildSummary(all []fulfillment.Order, actorID string, now time.Time) Summar
 
 // BuildSummaryWithBonus：bonus 是账本里的积分（订单之外赚的），并进成长值再算等级。
 func BuildSummaryWithBonus(all []fulfillment.Order, actorID string, now time.Time, bonus int) Summary {
+	return buildSummary(all, actorID, now, nil, bonus)
+}
+
+// BuildSummaryWithPoints：成长值直接取账本积分（订单积分已经由收集器写进账本，不再重复算一遍）。
+func BuildSummaryWithPoints(all []fulfillment.Order, actorID string, now time.Time, points int) Summary {
+	return buildSummary(all, actorID, now, &points, 0)
+}
+
+func buildSummary(all []fulfillment.Order, actorID string, now time.Time, pointsOverride *int, bonus int) Summary {
 	mine := agentOrders(all, actorID)
 	completed := completedOrders(mine)
 
@@ -387,6 +410,9 @@ func BuildSummaryWithBonus(all []fulfillment.Order, actorID string, now time.Tim
 	settlementConfirmedToday := settlementConfirmedSince(completed, dayStart)
 
 	points := len(completed)*pointsPerCompletedOrder + satFull*pointsPerFullSatisfaction + repeatCustomers*pointsPerRepeatCustomer + bonus
+	if pointsOverride != nil {
+		points = *pointsOverride
+	}
 	tier := resolveTier(points)
 
 	stats := Stats{

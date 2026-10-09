@@ -146,3 +146,37 @@ func (p *Postgres) CollectMerchant(ctx context.Context, now time.Time) (int, err
 		ON CONFLICT (subject_kind, subject_id, reason, ref) DO NOTHING`, points, now.UTC())
 	return int(tag.RowsAffected()), err
 }
+
+// CollectProvider：小美的订单积分写进账本（口径与「我的权益」原来的实时算法一致）：
+//   - 完成一笔订单 +50（ORDER_SERVED，每单一次）；
+//   - 该订单得到完全满意 +30（SATISFACTION_FULL，每单一次）；
+//   - 一位客户在她这里完成过 2 单以上 +100（REPEAT_CLIENT，每位客户一次）。
+//
+// 幂等，可每轮重跑；不设时间窗（要把历史订单一次折进来），subject 是订单上的 agent_id（= 她的账号 id）。
+func (p *Postgres) CollectProvider(ctx context.Context, now time.Time) (int, error) {
+	pts := map[string]int{}
+	for _, r := range EarnRules(Provider) {
+		pts[r.Reason] = r.Points
+	}
+	total := 0
+	run := func(sql string, args ...any) error {
+		tag, err := p.pool.Exec(ctx, sql, args...)
+		total += int(tag.RowsAffected())
+		return err
+	}
+	const ins = `INSERT INTO growth.point_ledger (id, subject_kind, subject_id, delta, reason, ref, created_at)
+		SELECT 'pl_' || md5('PROVIDER|' || uid || '|' || $1 || '|' || ref), 'PROVIDER', uid, $2, $1, ref, $3 FROM (`
+	const tail = `) x ON CONFLICT (subject_kind, subject_id, reason, ref) DO NOTHING`
+	if err := run(ins+`SELECT o.agent_id AS uid, o.id AS ref FROM fulfillment.orders o WHERE o.lifecycle = 'COMPLETED'`+tail, "ORDER_SERVED", pts["ORDER_SERVED"], now.UTC()); err != nil {
+		return total, err
+	}
+	if err := run(ins+`SELECT o.agent_id AS uid, o.id AS ref FROM fulfillment.orders o
+		WHERE o.lifecycle = 'COMPLETED' AND o.outcome->'satisfaction'->>'resolved' = 'FULL'`+tail, "SATISFACTION_FULL", pts["SATISFACTION_FULL"], now.UTC()); err != nil {
+		return total, err
+	}
+	if err := run(ins+`SELECT o.agent_id AS uid, o.requester_id AS ref FROM fulfillment.orders o
+		WHERE o.lifecycle = 'COMPLETED' GROUP BY o.agent_id, o.requester_id HAVING COUNT(*) >= 2`+tail, "REPEAT_CLIENT", pts["REPEAT_CLIENT"], now.UTC()); err != nil {
+		return total, err
+	}
+	return total, nil
+}

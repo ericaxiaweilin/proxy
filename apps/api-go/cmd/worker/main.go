@@ -707,6 +707,11 @@ func main() {
 	runWeather()
 	runIncentives := func() {
 		// 先把用户已经做成的事折成积分（固定规则，幂等），再按分数发奖励活动。
+		if n, err := tierStore.CollectProvider(ctx, time.Now().UTC()); err != nil {
+			log.Printf("provider points failed: %v", err)
+		} else if n > 0 {
+			log.Printf("provider points: credited=%d", n)
+		}
 		if n, err := tierStore.CollectMerchant(ctx, time.Now().UTC()); err != nil {
 			log.Printf("merchant points failed: %v", err)
 		} else if n > 0 {

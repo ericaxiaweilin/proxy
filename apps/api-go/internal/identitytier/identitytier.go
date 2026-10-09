@@ -96,8 +96,16 @@ func EarnRules(k Kind) []EarnRule {
 	if k == Merchant {
 		return []EarnRule{{"ORDER_HOSTED", "接待一单（订单归因到本店）", 1}}
 	}
+	if k == Provider {
+		// 沿用「我的权益」原来的订单积分口径（50 / 30 / 100），现在由收集器写进账本。
+		return []EarnRule{
+			{"ORDER_SERVED", "完成一笔订单", 50},
+			{"SATISFACTION_FULL", "一笔订单得到完全满意", 30},
+			{"REPEAT_CLIENT", "一位客户回头再下单（每位客户一次）", 100},
+		}
+	}
 	if k != User {
-		return []EarnRule{} // 小美的赚分规则（订单积分在「我的权益」里实时算）还没写进账本，不编
+		return []EarnRule{}
 	}
 	return []EarnRule{
 		{"PROFILE_COMPLETE", "完善资料（头像 + 昵称）", 30},

@@ -238,3 +238,42 @@ func TestWeatherWatchUpcomingFindsOnlyStructuredPublishedActivities(t *testing.T
 		t.Fatalf("the structured, in-window activity with host + guest: %+v", found)
 	}
 }
+
+// 小美订单积分写进账本，口径与「我的权益」原来的实时算法一致：完成 50 / 完全满意 30 / 回头客 100（每位客户一次）。
+func TestProviderOrderPointsMatchTheLiveFormulaAndCountOnce(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	agent, c1, c2 := "ag_pp_"+stamp, "cl1_pp_"+stamp, "cl2_pp_"+stamp
+	orders := []string{"o_pp1_" + stamp, "o_pp2_" + stamp, "o_pp3_" + stamp}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = $1`, agent)
+		_, _ = pool.Exec(bg, `DELETE FROM fulfillment.orders WHERE id = ANY($1)`, orders)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	order := func(id, client, outcome string) {
+		exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at) VALUES ($1,$2,$3,'n','CONFIRMED','{}'::jsonb,$4,$4)`, id, client, agent, now)
+		exec(`UPDATE fulfillment.orders SET lifecycle = 'EXECUTING', version = version + 1 WHERE id = $1`, id)
+		exec(`UPDATE fulfillment.orders SET lifecycle = 'COMPLETED', version = version + 1, outcome = $2::jsonb WHERE id = $1`, id, outcome)
+	}
+	order(orders[0], c1, `{"satisfaction":{"resolved":"FULL"}}`)
+	order(orders[1], c1, `{"satisfaction":{"resolved":"PARTIAL"}}`)
+	order(orders[2], c2, `{}`)
+	st := identitytier.NewPostgres(pool)
+	for i := 0; i < 2; i++ {
+		if _, err := st.CollectProvider(ctx, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 3 单 ×50 + 1 个完全满意 ×30 + 1 位回头客 ×100 = 280
+	if pts, _ := st.Points(ctx, identitytier.Provider, agent); pts != 280 {
+		t.Fatalf("3*50 + 1*30 + 1*100 = 280, once each: %d", pts)
+	}
+}

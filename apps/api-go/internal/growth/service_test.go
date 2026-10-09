@@ -264,3 +264,19 @@ func TestSummaryAddsLedgerPointsAndShowsStars(t *testing.T) {
 		t.Fatalf("no points is bronze 1 star, honestly zero: %+v", got.Tier)
 	}
 }
+
+// 成长值取账本：订单积分已经在账本里，不再重复叠加订单实时算的那一份。
+func TestSummaryFromLedgerDoesNotDoubleCountOrderPoints(t *testing.T) {
+	orders := []fulfillment.Order{completedOrder("agent_1", "client_a", fixedNow)}
+	fromOrders := BuildSummary(orders, "agent_1", fixedNow)
+	if fromOrders.Tier.CurrentPoints != pointsPerCompletedOrder {
+		t.Fatalf("one order = %d points when computed live: %d", pointsPerCompletedOrder, fromOrders.Tier.CurrentPoints)
+	}
+	fromLedger := BuildSummaryWithPoints(orders, "agent_1", fixedNow, 120)
+	if fromLedger.Tier.CurrentPoints != 120 {
+		t.Fatalf("the ledger is the source of the points: %d", fromLedger.Tier.CurrentPoints)
+	}
+	if fromLedger.Stats.CompletedOrders != 1 {
+		t.Fatalf("order stats still come from the orders: %+v", fromLedger.Stats)
+	}
+}
