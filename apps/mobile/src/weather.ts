@@ -15,7 +15,7 @@ export type WeatherAdvice = {
   suggestions: string[]; // ISO，离原时间由近到远
 };
 
-export type WeatherReport = { now: WeatherNow; advice?: WeatherAdvice };
+export type WeatherReport = { now: WeatherNow; advice?: WeatherAdvice; attribution?: string };
 
 const LABEL: Record<WeatherCondition, string> = {
   clear: "晴", cloudy: "多云", fog: "雾", drizzle: "小雨", rain: "雨", heavy_rain: "暴雨", storm: "雷暴", typhoon: "台风"

@@ -62,6 +62,8 @@ export function WeatherAdviceBanner({ lat, lng, at, hours, onPickSlot, onPickAt 
   return (
     <View style={[styles.banner, msg.tone === "warn" ? styles.bannerWarn : null]} testID="weather-advice">
       <Text selectable style={styles.bannerText}>{msg.text}</Text>
+      {/* 数据来源署名（挪威气象局 CC BY 4.0 要求）。 */}
+      {report?.attribution ? <Text selectable style={styles.attribution}>{report.attribution}</Text> : null}
       {msg.options.some((o) => (onPickAt ? true : o.slot)) ? (
         <View style={styles.options}>
           {msg.options.filter((o) => (onPickAt ? true : o.slot)).map((o) => (
@@ -82,6 +84,7 @@ const styles = StyleSheet.create({
   chip: { color: color.muted, fontSize: 12, lineHeight: 17 },
   banner: { backgroundColor: color.warnBannerBg, borderColor: color.warnBannerBorder, borderRadius: 10, borderWidth: 1, gap: 8, marginHorizontal: 16, marginVertical: 8, padding: 10 },
   bannerWarn: { borderColor: "#BD3434" },
+  attribution: { color: color.muted, fontSize: 10 },
   bannerText: { color: color.warnBannerText, fontSize: 13, lineHeight: 18 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   option: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 5 },

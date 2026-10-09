@@ -36,7 +36,7 @@ func (s *Server) publicWeather(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "weather_unavailable"})
 		return
 	}
-	out := map[string]any{"now": rep.Now, "fetchedAt": rep.FetchedAt}
+	out := map[string]any{"now": rep.Now, "fetchedAt": rep.FetchedAt, "attribution": weather.Attribution}
 	if raw := q.Get("at"); raw != "" {
 		at, err := time.Parse(time.RFC3339, raw)
 		if err != nil {

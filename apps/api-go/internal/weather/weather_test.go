@@ -169,3 +169,42 @@ func TestParseGDACSAcceptsTheByteOrderMark(t *testing.T) {
 		t.Fatalf("BOM-prefixed feed: %+v %v", centers, err)
 	}
 }
+
+// MET Norway symbol_code → 我们的状态：带雷暴算暴雨档，小雨 / 雨 / 暴雨各归各，晴和多云不夸大。
+func TestMETSymbolsMapToTheFourPlainStates(t *testing.T) {
+	for code, want := range map[string]string{
+		"clearsky_day": Clear, "fair_night": Clear, "partlycloudy_day": Cloudy, "cloudy": Cloudy, "fog": Fog,
+		"lightrain": Drizzle, "lightrainshowers_day": Drizzle, "rain": Rain, "rainshowers_night": Rain,
+		"heavyrain": HeavyRain, "heavyrainshowers_day": HeavyRain,
+		"rainandthunder": Storm, "heavyrainandthunder": Storm, "lightrainshowersandthunder_day": Storm,
+		"snow": Rain, "something_new": Clear,
+	} {
+		if got := ConditionFromSymbol(code); got != want {
+			t.Fatalf("%s -> %s want %s", code, got, want)
+		}
+	}
+}
+
+const metSample = `{"properties":{"timeseries":[
+{"time":"2026-10-09T04:00:00Z","data":{"instant":{"details":{"air_temperature":28.6}},"next_1_hours":{"summary":{"symbol_code":"heavyrainandthunder_day"}}}},
+{"time":"2026-10-09T05:00:00Z","data":{"instant":{"details":{"air_temperature":27}},"next_1_hours":{"summary":{"symbol_code":"rain"}}}},
+{"time":"2026-10-09T12:00:00Z","data":{"instant":{"details":{"air_temperature":25}},"next_6_hours":{"summary":{"symbol_code":"clearsky_night"}}}},
+{"time":"bad","data":{}},
+{"time":"2026-10-10T00:00:00Z","data":{"instant":{"details":{"air_temperature":24}}}}
+]}}`
+
+func TestParseMETGivesNowAndHourlyAndSpreadsSixHourBlocks(t *testing.T) {
+	rep, err := ParseMET(strings.NewReader(metSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Now.Condition != Storm || rep.Now.TempC != 29 {
+		t.Fatalf("now is the first entry: %+v", rep.Now)
+	}
+	if len(rep.Hours) != 2+6 || rep.Hours[1].Condition != Rain || rep.Hours[2].Condition != Clear || rep.Hours[7].At.Hour() != 17 {
+		t.Fatalf("hourly + a 6h block spread over 6 hours, unreadable entries skipped: %d %+v", len(rep.Hours), rep.Hours)
+	}
+	if _, err := ParseMET(strings.NewReader(`{"properties":{"timeseries":[]}}`)); err == nil {
+		t.Fatal("an empty forecast is an error, not 'sunny'")
+	}
+}

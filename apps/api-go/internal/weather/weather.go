@@ -8,9 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -176,26 +179,70 @@ func (s *Service) forecastBase(ctx context.Context, lat, lng float64) (Report, e
 	return rep, nil
 }
 
-// OpenMeteo 是真实上游。
-type OpenMeteo struct {
+// METNorway 是真实上游：挪威气象局 Locationforecast（免费，**允许商用**，CC BY 4.0）。
+// 条件（api.met.no/doc/TermsOfService）：请求带能识别应用并含联系方式的 User-Agent；署名；缓存响应；每应用 ≤ 20 请求/秒；
+// 坐标最多 4 位小数。我们按 0.1° 网格取整、缓存 30 分钟，都满足。
+// （之前用的 Open-Meteo 免费接口**只许非商用**，商用要付费订阅，所以换掉了。）
+type METNorway struct {
 	Client  *http.Client
 	BaseURL string
+	// UserAgent 必须带联系方式（公司邮箱或网址）。部署时用环境变量 PROXY_WEATHER_CONTACT 配。
+	UserAgent string
 }
 
-func (o OpenMeteo) Fetch(ctx context.Context, lat, lng float64) (Report, error) {
-	base := o.BaseURL
+// Attribution 是 CC BY 4.0 要求的署名，随天气接口一起返回，界面要显示。
+const Attribution = "天气数据：挪威气象局 MET Norway（CC BY 4.0）"
+
+// UserAgentFromEnv：MET 要求 User-Agent 带联系方式。联系方式由环境变量 PROXY_WEATHER_CONTACT 给（公司邮箱或网址）。
+func UserAgentFromEnv() string {
+	contact := strings.TrimSpace(os.Getenv("PROXY_WEATHER_CONTACT"))
+	if contact == "" {
+		return "Proxy/1.0 (PROXY_WEATHER_CONTACT not set)"
+	}
+	return "Proxy/1.0 (" + contact + ")"
+}
+
+// ConditionFromSymbol 把 MET 的 symbol_code（clearsky_day / lightrain / heavyrainandthunder …）归到我们的状态。
+// 带雷暴一律算 Storm（暴雨档，要提示）；雪等越南没有的状态按雨处理。
+func ConditionFromSymbol(code string) string {
+	code = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(code, "_day"), "_night"), "_polartwilight")
+	switch {
+	case strings.Contains(code, "thunder"):
+		return Storm
+	case strings.HasPrefix(code, "heavyrain"):
+		return HeavyRain
+	case strings.HasPrefix(code, "lightrain") || strings.HasPrefix(code, "lightsleet"):
+		return Drizzle
+	case strings.HasPrefix(code, "rain") || strings.HasPrefix(code, "sleet") || strings.Contains(code, "snow"):
+		return Rain
+	case code == "fog":
+		return Fog
+	case code == "cloudy" || code == "partlycloudy":
+		return Cloudy
+	default: // clearsky / fair / 不认识的：不夸大，按晴
+		return Clear
+	}
+}
+
+func (m METNorway) Fetch(ctx context.Context, lat, lng float64) (Report, error) {
+	base := m.BaseURL
 	if base == "" {
-		base = "https://api.open-meteo.com"
+		base = "https://api.met.no"
 	}
-	client := o.Client
+	client := m.Client
 	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
+		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	url := fmt.Sprintf("%s/v1/forecast?latitude=%.1f&longitude=%.1f&current=temperature_2m,weather_code&hourly=precipitation_probability,weather_code&forecast_days=3&timeformat=unixtime&timezone=auto", base, lat, lng)
+	ua := m.UserAgent
+	if ua == "" {
+		ua = "Proxy/1.0 (set PROXY_WEATHER_CONTACT)"
+	}
+	url := fmt.Sprintf("%s/weatherapi/locationforecast/2.0/compact?lat=%.2f&lon=%.2f", base, lat, lng)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Report{}, err
 	}
+	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
 		return Report{}, err
@@ -204,26 +251,69 @@ func (o OpenMeteo) Fetch(ctx context.Context, lat, lng float64) (Report, error) 
 	if resp.StatusCode != http.StatusOK {
 		return Report{}, fmt.Errorf("weather upstream status %d", resp.StatusCode)
 	}
+	return ParseMET(resp.Body)
+}
+
+// ParseMET 解析 Locationforecast compact：当前（第一条）和之后每小时的状态。
+// 超过前 60 小时后上游改成 6 小时一条，这里把那一条铺成 6 个小时。读不出来的条目跳过，不补。
+func ParseMET(r io.Reader) (Report, error) {
 	var body struct {
-		Current struct {
-			Temp float64 `json:"temperature_2m"`
-			Code int     `json:"weather_code"`
-		} `json:"current"`
-		Hourly struct {
-			Time []int64    `json:"time"`
-			Prob []*float64 `json:"precipitation_probability"`
-			Code []*int     `json:"weather_code"`
-		} `json:"hourly"`
+		Properties struct {
+			Timeseries []struct {
+				Time string `json:"time"`
+				Data struct {
+					Instant struct {
+						Details struct {
+							Temp *float64 `json:"air_temperature"`
+						} `json:"details"`
+					} `json:"instant"`
+					Next1 *struct {
+						Summary struct {
+							Symbol string `json:"symbol_code"`
+						} `json:"summary"`
+					} `json:"next_1_hours"`
+					Next6 *struct {
+						Summary struct {
+							Symbol string `json:"symbol_code"`
+						} `json:"summary"`
+					} `json:"next_6_hours"`
+				} `json:"data"`
+			} `json:"timeseries"`
+		} `json:"properties"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r, 4<<20)).Decode(&body); err != nil {
 		return Report{}, err
 	}
-	rep := Report{Now: Now{TempC: math.Round(body.Current.Temp), Condition: ConditionFromWMO(body.Current.Code)}}
-	for i, ts := range body.Hourly.Time {
-		if i >= len(body.Hourly.Prob) || i >= len(body.Hourly.Code) || body.Hourly.Prob[i] == nil || body.Hourly.Code[i] == nil {
-			continue // 缺的小时不补
+	var rep Report
+	for i, ts := range body.Properties.Timeseries {
+		at, err := time.Parse(time.RFC3339, ts.Time)
+		if err != nil {
+			continue
 		}
-		rep.Hours = append(rep.Hours, Hour{At: time.Unix(ts, 0).UTC(), PrecipProb: int(*body.Hourly.Prob[i]), Condition: ConditionFromWMO(*body.Hourly.Code[i])})
+		var symbol string
+		span := 1
+		switch {
+		case ts.Data.Next1 != nil && ts.Data.Next1.Summary.Symbol != "":
+			symbol = ts.Data.Next1.Summary.Symbol
+		case ts.Data.Next6 != nil && ts.Data.Next6.Summary.Symbol != "":
+			symbol, span = ts.Data.Next6.Summary.Symbol, 6
+		default:
+			continue
+		}
+		cond := ConditionFromSymbol(symbol)
+		if i == 0 {
+			temp := 0.0
+			if ts.Data.Instant.Details.Temp != nil {
+				temp = math.Round(*ts.Data.Instant.Details.Temp)
+			}
+			rep.Now = Now{TempC: temp, Condition: cond}
+		}
+		for k := 0; k < span; k++ {
+			rep.Hours = append(rep.Hours, Hour{At: at.Add(time.Duration(k) * time.Hour).UTC(), Condition: cond})
+		}
+	}
+	if len(rep.Hours) == 0 {
+		return Report{}, fmt.Errorf("weather upstream returned no usable forecast")
 	}
 	return rep, nil
 }

@@ -693,7 +693,7 @@ func main() {
 	defer incentiveTicker.Stop()
 	tierStore := identitytier.NewPostgres(pool)
 	// WEATHER-001：见面前一天遇雨提醒（每 30 分钟一轮；同一场活动同一个人只提醒一次）。
-	weatherSvc := &weather.Service{Provider: weather.OpenMeteo{}, Cyclones: weather.GDACS{}}
+	weatherSvc := &weather.Service{Provider: weather.METNorway{UserAgent: weather.UserAgentFromEnv()}, Cyclones: weather.GDACS{}}
 	weatherSource := weatherwatch.NewPostgres(pool)
 	weatherTicker := time.NewTicker(30 * time.Minute)
 	defer weatherTicker.Stop()
