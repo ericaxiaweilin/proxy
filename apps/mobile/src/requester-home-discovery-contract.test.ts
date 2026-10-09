@@ -122,7 +122,8 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     expect(source).toContain('styles.peopleSub}>{t("hotScenesSub")}</Text>');
     expect(source).not.toContain("hotTitle:");
     expect(source).not.toContain("hotSub:");
-    expect(source).not.toContain("paddingHorizontal: 16, paddingVertical: 10");
+    // 头部容器不自带 paddingHorizontal（只查 hotSectionHead 那一行；别处的按钮样式有同样的数字是另一回事）。
+    expect(source.match(/hotSectionHead: \{[^\n]*\}/)?.[0] ?? "").not.toContain("paddingHorizontal");
     // 「更多」= 灰字 + › 的可点链接（同 filterTrigger 的灰），不是黑药丸。
     expect(source).toContain('hotMoreText: { color: color.muted, fontSize: 13, fontWeight: "600" }');
     expect(source).toContain("hotMoreChevron");
@@ -232,10 +233,11 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
   });
 
   it("reuses the approved Scene action logo registry in the compact Home action rail", () => {
-    expect(source).toContain("SCENE_ACTIONS.find");
-    expect(source).toContain('modeId === "PHOTO" ? "photo"');
-    expect(source).toContain('modeId === "COMPANION" ? "city-walk"');
-    expect(source).not.toContain('modeId === "PHOTO" ? "camera"');
+    // HOME-MODE-RAIL-REMOVED-001（用户 2026-10-09）：推荐人上方那排「拍照 / 同行…」模式图标行已整行移除
+    // （场景有了，真人也不需要它）。SCENE_ACTIONS 的 logo 仍由首页场景入口（SceneActivityDiscovery）使用。
+    expect(source).not.toContain("testPrefix=\"推荐人模式\"");
+    expect(source).not.toContain('modeId === "PHOTO" ? "photo"');
+    expect(source).toContain("<SceneActivityDiscovery");
   });
 
   it("keeps the AI profile entry off home and alive from the scene map", () => {

@@ -422,7 +422,8 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
   // R15.34: 推荐人模式。当前选中的 mode (e.g. PHOTO) 决定
   // SCENE_RECOMMEND 里取哪份推荐列表。默认走 PHOTO — 首页打开就
   // 看到摄影好搭子。
-  const [recommendMode, setRecommendMode] = useState<string>(RECOMMEND_MODE_ORDER[0]!);
+  // 模式切换行已移除（HOME-MODE-RAIL-REMOVED-001）：推荐固定走默认模式。
+  const recommendMode: string = RECOMMEND_MODE_ORDER[0]!;
   // R15.34: 筛选 sheet 开 / 关 + 已选 chip。空数组 = "全部"。
   const [filterSheetOpen, setFilterSheetOpen] = useState<boolean>(false);
   // HOME-MORE-ROOMS-001（2026-09-23，原型 deepseek_html_20260923_2308b7.html）：
@@ -2194,31 +2195,8 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
           用户已看 chrome 顶部 LocationContext，进来就看到 mode chips，
           不需要再加一层 招呼。直接让 mode chips 成为第一个交互点。 */}
 
-      {/* R15.34: 推荐人 mode 切换 — 单行路由。
-          6 个 SCENE_TOOLS + 2 个用户列出的额外场景（翻译、陪诊）。
-          默认走 PHOTO。点切 mode 会重置 activeFilters (筛选跟模式走)。 */}
-      <View style={styles.recommendModes}>
-        <FilterChipRail
-          items={RECOMMEND_MODE_ORDER.map((modeId) => {
-            const feed = SCENE_RECOMMEND[modeId];
-            const actionIconId = modeId === "PHOTO" ? "photo" : modeId === "COMPANION" ? "city-walk" : modeId === "COFFEE_MEAL" ? "dining" : modeId === "ACTIVITY" ? "music" : modeId === "TRIP" ? "travel" : modeId === "CREATOR" ? "explore-store" : modeId === "TRANSLATE" || modeId === "HOSPITAL" ? "translation" : modeId === "MEDICAL" ? "urban-support" : "city-walk";
-            return {
-              id: modeId,
-              assetIcon: SCENE_ACTIONS.find((action) => action.id === actionIconId)!.icon,
-              label: feed ? (
-                modeId === "PHOTO" ? t("modePhoto") : modeId === "COMPANION" ? t("modeCompanion") : modeId === "COFFEE_MEAL" ? t("modeMeal") : modeId === "ACTIVITY" ? t("modeActivity") : modeId === "TRIP" ? t("modeTrip") : modeId === "CREATOR" ? t("modeCreator") : modeId === "TRANSLATE" ? t("modeTranslate") : t("modeMedical")
-              ) : modeId
-            };
-          })}
-          activeId={recommendMode}
-          onChange={(id) => {
-            setRecommendMode(id);
-            setActiveFilters([]);
-          }}
-          marginBottom={4}
-          testPrefix="推荐人模式"
-        />
-      </View>
+      {/* HOME-MODE-RAIL-REMOVED-001（用户 2026-10-09：「真人推荐上方拍照 / 同行… 那排没有意义了，场景有了，真人也不需要这个」）：
+          推荐人上方的模式图标行整行移除；推荐按默认模式（RECOMMEND_MODE_ORDER[0]）出，不再让用户切模式。 */}
 
       {/* R15.34: 推荐人 section — 标题 + stories 横滑 + cards 横滑。
           stories 是小圆形 avatar (首字母 + online 指示点 + 共同好友/场景
@@ -3111,7 +3089,6 @@ const styles = StyleSheet.create({
   //   走共享 FilterChipRail (见 components/filter-chip-rail.tsx)。
   //   这里只保留外层 marginTop。FilterChipRail 内部已带 PanResponder
   //   隔离外层 PAGE_SEQUENCE 切页。
-  recommendModes: { marginTop: 4 },
 
   // R15.34: 推荐人 section 头
   peopleHead: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginTop: 18, marginBottom: 12 },
