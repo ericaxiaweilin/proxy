@@ -111,6 +111,7 @@ func TestMerchantPointsCountHostedOrdersOnce(t *testing.T) {
 		_, _ = pool.Exec(bg, `DELETE FROM fulfillment.orders WHERE id = ANY($1)`, orders)
 		_, _ = pool.Exec(bg, `DELETE FROM business.stores WHERE id = $1`, store)
 		_, _ = pool.Exec(bg, `DELETE FROM business.accounts WHERE id = $1`, biz)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.user_accounts WHERE id = $1`, "owner_"+biz)
 	})
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -119,7 +120,8 @@ func TestMerchantPointsCountHostedOrdersOnce(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	exec(`INSERT INTO business.accounts (id, owner_user_id, name, status, created_at) VALUES ($1,'owner_x','t','ACTIVE',$2)`, biz, now)
+	exec(`INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'ACTIVE',$2,$2)`, "owner_"+biz, now)
+	exec(`INSERT INTO business.accounts (id, owner_user_id, name, status, created_at) VALUES ($1,$3,'t','ACTIVE',$2)`, biz, now, "owner_"+biz)
 	exec(`INSERT INTO business.stores (id, business_id, name, address, status, created_at) VALUES ($1,$2,'s','a','ACTIVE',$3)`, store, biz, now)
 	order := func(id, lifecycle, storeID string) {
 		exec(`INSERT INTO fulfillment.orders (id, requester_id, agent_id, need_id, lifecycle, snapshot, created_at, updated_at, store_id) VALUES ($1,'r','a','n',$2,'{}'::jsonb,$3,$3,$4)`, id, lifecycle, now, storeID)
