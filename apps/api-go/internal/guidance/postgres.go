@@ -30,7 +30,7 @@ func (p *Postgres) Candidates(ctx context.Context, now time.Time, minAge, maxAge
 	}
 	rows, err := p.pool.Query(ctx, `
 		SELECT id FROM identity.user_accounts
-		 WHERE status = 'ACTIVE' AND created_at <= $1 AND created_at >= $2
+		 WHERE status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED') AND created_at <= $1 AND created_at >= $2
 		   AND NOT EXISTS (SELECT 1 FROM notification.nudge_optouts o WHERE o.user_account_id = identity.user_accounts.id)
 		 ORDER BY created_at LIMIT $3`, now.Add(-minAge), now.Add(-maxAge), limit)
 	if err != nil {

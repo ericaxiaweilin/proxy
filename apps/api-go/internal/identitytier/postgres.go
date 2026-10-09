@@ -59,24 +59,24 @@ func (p *Postgres) collectUser(ctx context.Context, now time.Time, only string) 
 	// 完善资料。
 	if err := run(ins+`SELECT u.id AS uid, ''::text AS ref FROM identity.user_accounts u
 		JOIN identity.profiles pr ON pr.user_account_id = u.id AND btrim(pr.name) <> '' AND pr.avatar_path <> ''
-		WHERE u.status = 'ACTIVE'`+tail, "PROFILE_COMPLETE", rules["PROFILE_COMPLETE"], now.UTC(), since, only); err != nil {
+		WHERE u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED')`+tail, "PROFILE_COMPLETE", rules["PROFILE_COMPLETE"], now.UTC(), since, only); err != nil {
 		return total, err
 	}
 	// 发帖：每人每天最多算 3 条（越南时区的自然日）。
 	if err := run(ins+`SELECT author_id AS uid, id AS ref FROM (
 			SELECT po.author_id, po.id, row_number() OVER (PARTITION BY po.author_id, (po.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date ORDER BY po.created_at, po.id) AS rn
-			  FROM localnet.posts po JOIN identity.user_accounts u ON u.id = po.author_id AND u.status = 'ACTIVE'
+			  FROM localnet.posts po JOIN identity.user_accounts u ON u.id = po.author_id AND u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED')
 			 WHERE po.author_type = 'USER' AND po.status = 'PUBLISHED' AND po.created_at >= $4) ranked WHERE rn <= 3`+tail, "POST_PUBLISHED", rules["POST_PUBLISHED"], now.UTC(), since, only); err != nil {
 		return total, err
 	}
 	// 参加活动。
 	if err := run(ins+`SELECT pt.actor_id AS uid, pt.activity_id AS ref FROM activity.participants pt
-		JOIN identity.user_accounts u ON u.id = pt.actor_id AND u.status = 'ACTIVE' WHERE pt.joined_at >= $4`+tail, "ACTIVITY_JOINED", rules["ACTIVITY_JOINED"], now.UTC(), since, only); err != nil {
+		JOIN identity.user_accounts u ON u.id = pt.actor_id AND u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED') WHERE pt.joined_at >= $4`+tail, "ACTIVITY_JOINED", rules["ACTIVITY_JOINED"], now.UTC(), since, only); err != nil {
 		return total, err
 	}
 	// 完成订单（作为下单方）。
 	if err := run(ins+`SELECT o.requester_id AS uid, o.id AS ref FROM fulfillment.orders o
-		JOIN identity.user_accounts u ON u.id = o.requester_id AND u.status = 'ACTIVE' WHERE o.lifecycle = 'COMPLETED' AND o.updated_at >= $4`+tail, "ORDER_COMPLETED", rules["ORDER_COMPLETED"], now.UTC(), since, only); err != nil {
+		JOIN identity.user_accounts u ON u.id = o.requester_id AND u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED') WHERE o.lifecycle = 'COMPLETED' AND o.updated_at >= $4`+tail, "ORDER_COMPLETED", rules["ORDER_COMPLETED"], now.UTC(), since, only); err != nil {
 		return total, err
 	}
 	return total, nil

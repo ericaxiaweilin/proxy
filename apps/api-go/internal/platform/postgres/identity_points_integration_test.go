@@ -395,7 +395,8 @@ func TestCollectUserForOnlyCreditsThatUserAndNeverDoubleCounts(t *testing.T) {
 	})
 	now := time.Now().UTC()
 	for _, u := range users {
-		if _, err := pool.Exec(ctx, `INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'ACTIVE',$2,$2)`, u, now.Add(-72*time.Hour)); err != nil {
+		// 真实注册出来的账号状态是 REGISTERED（不是 ACTIVE）：收集器必须认它，否则真实用户永远 0 分。
+		if _, err := pool.Exec(ctx, `INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'REGISTERED',$2,$2)`, u, now.Add(-72*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO identity.profiles (user_account_id, name, handle, city, avatar_path, updated_at) VALUES ($1,'N','h_`+u+`','HN','assets/x',$2)`, u, now); err != nil {

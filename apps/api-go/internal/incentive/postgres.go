@@ -75,7 +75,7 @@ func (p *Postgres) Candidates(ctx context.Context, r Rule, now time.Time, limit 
 	}
 	rows, err := p.pool.Query(ctx, `
 		SELECT u.id FROM identity.user_accounts u
-		 WHERE u.status = 'ACTIVE'
+		 WHERE u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED')
 		   AND u.created_at <= $1::timestamptz - make_interval(hours => $2)
 		   AND EXISTS (SELECT 1 FROM identity.profiles pr WHERE pr.user_account_id = u.id AND btrim(pr.name) <> '' AND pr.avatar_path <> '')
 		   AND `+achieved+` >= $3
@@ -108,7 +108,7 @@ func orUser(a string) string {
 func (p *Postgres) scoreCandidates(ctx context.Context, r Rule, now time.Time, limit int) ([]string, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT u.id FROM identity.user_accounts u
-		 WHERE u.status = 'ACTIVE'
+		 WHERE u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED')
 		   AND u.created_at <= $1::timestamptz - make_interval(hours => $2)
 		   AND EXISTS (SELECT 1 FROM identity.profiles pr WHERE pr.user_account_id = u.id AND btrim(pr.name) <> '' AND pr.avatar_path <> '')
 		   AND (SELECT COALESCE(SUM(delta), 0) FROM growth.point_ledger l WHERE l.subject_kind = $3 AND l.subject_id = u.id) >= $4
