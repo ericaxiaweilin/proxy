@@ -229,6 +229,12 @@ func inboxForEvent(e event.DomainEvent) (recipient, title, body, deepLink string
 	}
 
 	switch e.EventType {
+	case "SessionCreated":
+		// 登录欢迎（每个账号只发一次，去重键见 dedupeKeyFor）。收件人是这个账号本人。
+		if who := payloadString("userAccountId"); who != "" {
+			return who, "欢迎来到 Proxy", "先完善头像和昵称，就可以发动态、发布需求了。", "", true
+		}
+		return "", "", "", "", false
 	case "TaskPublished":
 		return fallbackRecipient(""), "需求已发布", "你的需求已进入撮合", "/tasks/" + e.AggregateID, true
 	case "TaskSlotsCreated":
@@ -952,6 +958,9 @@ func socialInteractionInbox(e event.DomainEvent, author string) (recipient, titl
 // dedupeKeyFor：默认一个事件一条通知（outbox 重放不会重复）。评论 / 转发是高频互动：同一个人、同一篇帖子、
 // 同一种互动，一天只通知一次——设置里的「互动通知」开关还不存在，这是它存在之前的节流。
 func dedupeKeyFor(e event.DomainEvent, recipient string) string {
+	if e.EventType == "SessionCreated" {
+		return "welcome:" + recipient // 欢迎只发一次：之后每次登录都是新会话，但不重复欢迎
+	}
 	if e.EventType == "PostReplied" || e.EventType == "PostReposted" {
 		return "social:" + e.EventType + ":" + e.AggregateID + ":" + recipient + ":" + e.OccurredAt.UTC().Format("2006-01-02")
 	}

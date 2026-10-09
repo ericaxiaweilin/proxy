@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -487,7 +488,6 @@ var eventsWithoutNotification = map[string]string{
 	"MediaReviewDecisionAmendPersistFailed": "同上",
 
 	// ── 登录/设备：正确出口是设备管理与安全页 ─────────────────────────────
-	"SessionCreated":           "登录流程内部事件",
 	"GoogleSessionCreated":     "同上",
 	"LoginChallengeRequested":  "登录挑战请求：正确出口是登录页本身",
 	"LoginChallengeVerified":   "同上",
@@ -1045,5 +1045,33 @@ func TestSocialNotificationsAreThrottledToOnePerPostPerDay(t *testing.T) {
 	other := event.DomainEvent{EventID: "e4", EventType: "OrderCreatedFromOffer", AggregateID: "ord_1", OccurredAt: day}
 	if dedupeKeyFor(other, "x") != notification.EventDedupeKey("e4") {
 		t.Fatal("everything else stays one-event-one-notification")
+	}
+}
+
+// 登录欢迎：收件人是登录的那个账号本人；去重键按账号 —— 每个账号终身只欢迎一次，之后每次登录（新会话）不重复。
+func TestLoginWelcomeGoesToTheAccountOnceEverNotPerSession(t *testing.T) {
+	rec := &recordingProducer{}
+	d := businessInboxDelivery{inner: logDelivery{}, producer: rec}
+	for i, ev := range []string{"evt_login_1", "evt_login_2"} {
+		e := testEvent("SessionCreated", "user-a", fmt.Sprintf("session_%d", i), map[string]any{"userAccountId": "user-a"})
+		e.EventID = ev
+		if err := d.createInboxForEvent(context.Background(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(rec.got) != 2 {
+		t.Fatalf("both logins reach the pipeline (dedupe is the pipeline's job): %d", len(rec.got))
+	}
+	for _, n := range rec.got {
+		if n.RecipientID != "user-a" || n.Title != "欢迎来到 Proxy" || n.Type != "SessionCreated" {
+			t.Fatalf("welcome is for the account itself: %+v", n)
+		}
+	}
+	if rec.got[0].DedupeKey != rec.got[1].DedupeKey || rec.got[0].DedupeKey != "welcome:user-a" {
+		t.Fatalf("one welcome per account, whatever the session: %q vs %q", rec.got[0].DedupeKey, rec.got[1].DedupeKey)
+	}
+	// 没有账号 id 的会话事件不发（不猜收件人）。
+	if _, _, _, _, ok := inboxForEvent(testEvent("SessionCreated", "someone", "s", map[string]any{})); ok {
+		t.Fatal("no account id, no welcome")
 	}
 }

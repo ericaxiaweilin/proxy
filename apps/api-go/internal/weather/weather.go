@@ -193,11 +193,14 @@ type METNorway struct {
 // Attribution 是 CC BY 4.0 要求的署名，随天气接口一起返回，界面要显示。
 const Attribution = "天气数据：挪威气象局 MET Norway（CC BY 4.0）"
 
+// DefaultContact 是 User-Agent 里的联系方式（MET Norway 条款要求能联系到使用方）。
+const DefaultContact = "contact@pao0.com"
+
 // UserAgentFromEnv：MET 要求 User-Agent 带联系方式。联系方式由环境变量 PROXY_WEATHER_CONTACT 给（公司邮箱或网址）。
 func UserAgentFromEnv() string {
 	contact := strings.TrimSpace(os.Getenv("PROXY_WEATHER_CONTACT"))
 	if contact == "" {
-		return "Proxy/1.0 (PROXY_WEATHER_CONTACT not set)"
+		contact = DefaultContact
 	}
 	return "Proxy/1.0 (" + contact + ")"
 }
