@@ -1,9 +1,11 @@
 package weather
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"strings"
@@ -43,7 +45,7 @@ func (g GDACS) Active(ctx context.Context) ([]Center, error) {
 	}
 	client := g.Client
 	if client == nil {
-		client = &http.Client{Timeout: 8 * time.Second}
+		client = &http.Client{Timeout: 20 * time.Second}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -61,9 +63,14 @@ func (g GDACS) Active(ctx context.Context) ([]Center, error) {
 }
 
 // ParseGDACS 从 RSS 里取现行热带气旋的中心。坐标缺 / 解析不了的条目跳过，不猜。
-func ParseGDACS(r interface{ Read([]byte) (int, error) }) ([]Center, error) {
+func ParseGDACS(r io.Reader) ([]Center, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	raw = bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf")) // 线上的 RSS 以 UTF-8 BOM 开头
 	var feed gdacsFeed
-	dec := xml.NewDecoder(r)
+	dec := xml.NewDecoder(bytes.NewReader(raw))
 	dec.Strict = false
 	if err := dec.Decode(&feed); err != nil {
 		return nil, err

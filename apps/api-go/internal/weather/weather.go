@@ -94,23 +94,38 @@ type Service struct {
 	cycMu      sync.Mutex
 	cycCenters []Center
 	cycAt      time.Time
+	cycTry     time.Time
+	cycBusy    bool
 }
 
-// typhoonNear：用户这个位置附近有没有现行热带气旋（中心列表缓存 30 分钟；读不到就当没有）。
+// typhoonNear：用户这个位置附近有没有现行热带气旋。中心列表缓存 30 分钟，过期后在后台刷新（不让用户请求等上游，
+// 上游慢 / 挂了也不拖慢天气）；刷新失败 5 分钟内不重试；拿不到就当没有，不编。
 func (s *Service) typhoonNear(ctx context.Context, lat, lng float64) bool {
 	if s.Cyclones == nil {
 		return false
 	}
 	s.cycMu.Lock()
-	defer s.cycMu.Unlock()
-	if s.cycAt.IsZero() || s.now().Sub(s.cycAt) > 30*time.Minute {
-		if centers, err := s.Cyclones.Active(ctx); err == nil {
-			s.cycCenters, s.cycAt = centers, s.now()
-		} else if s.cycAt.IsZero() || s.now().Sub(s.cycAt) > 3*time.Hour {
-			s.cycCenters = nil
-		}
+	stale := s.cycAt.IsZero() || s.now().Sub(s.cycAt) > 30*time.Minute
+	retryOK := s.cycTry.IsZero() || s.now().Sub(s.cycTry) > 5*time.Minute
+	if stale && retryOK && !s.cycBusy {
+		s.cycBusy, s.cycTry = true, s.now()
+		go func() {
+			rctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			centers, err := s.Cyclones.Active(rctx)
+			s.cycMu.Lock()
+			defer s.cycMu.Unlock()
+			s.cycBusy = false
+			if err == nil {
+				s.cycCenters, s.cycAt = centers, s.now()
+			} else if !s.cycAt.IsZero() && s.now().Sub(s.cycAt) > 3*time.Hour {
+				s.cycCenters, s.cycAt = nil, time.Time{} // 旧数据超过 3 小时不再信
+			}
+		}()
 	}
-	return NearTyphoon(s.cycCenters, lat, lng)
+	centers := s.cycCenters
+	s.cycMu.Unlock()
+	return NearTyphoon(centers, lat, lng)
 }
 
 func (s *Service) now() time.Time {

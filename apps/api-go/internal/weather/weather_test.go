@@ -137,11 +137,15 @@ func TestServiceMarksTyphoonOnlyNearAnActiveCycloneAndNeverOnAFailedLookup(t *te
 		return Report{Now: Now{TempC: 28, Condition: Clear}, Hours: []Hour{{At: time.Now().Add(time.Hour), Condition: Clear}}}, nil
 	})
 	near := &Service{Provider: prov, Cyclones: fakeCyclones{c: []Center{{Lat: 18.3, Lng: 108.0}}}}
+	_, _ = near.Forecast(context.Background(), 16.05, 108.2) // 第一次触发后台刷新（不让用户请求等上游）
+	time.Sleep(100 * time.Millisecond)
 	rep, _ := near.Forecast(context.Background(), 16.05, 108.2)
 	if rep.Now.Condition != Typhoon || rep.Hours[0].Condition != Typhoon {
 		t.Fatalf("near a cyclone: %+v", rep)
 	}
 	far := &Service{Provider: prov, Cyclones: fakeCyclones{c: []Center{{Lat: 18.3, Lng: 112.6}}}}
+	_, _ = far.Forecast(context.Background(), 21.05, 106.07)
+	time.Sleep(100 * time.Millisecond)
 	if rep, _ := far.Forecast(context.Background(), 21.05, 106.07); rep.Now.Condition != Clear {
 		t.Fatalf("far away stays as forecast: %+v", rep)
 	}
@@ -154,5 +158,13 @@ func TestServiceMarksTyphoonOnlyNearAnActiveCycloneAndNeverOnAFailedLookup(t *te
 	rep2 := Report{Hours: hoursFrom(now, map[int]string{15: Typhoon, 16: Typhoon}, map[int]int{15: 90, 16: 90}, 48)}
 	if a := Advise(rep2, now.Add(15*time.Hour), 2*time.Hour, now, hanoi); a.Level != LevelWarn || a.Condition != Typhoon {
 		t.Fatalf("a typhoon at the meeting time is a warning: %+v", a)
+	}
+}
+
+// 线上的 GDACS RSS 以 UTF-8 BOM 开头：带 BOM 也要能解析（实测踩过：不处理就一个气旋都读不出来）。
+func TestParseGDACSAcceptsTheByteOrderMark(t *testing.T) {
+	centers, err := ParseGDACS(strings.NewReader("\ufeff" + gdacsSample))
+	if err != nil || len(centers) != 1 {
+		t.Fatalf("BOM-prefixed feed: %+v %v", centers, err)
 	}
 }
