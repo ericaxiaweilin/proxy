@@ -324,7 +324,8 @@ describe("EXPLORE-REAL-001 the copy on this surface is only titles and state lin
     );
     expect(surface).toContain("getCurrentFix(expoLocationApi");
     // 版式是最初设计的那一版（横滑场景卡 / 活动预告卡 / 店铺卡 / 全部店铺 + 筛选），每一段各有自己的空态与加载行。
-    for (const key of Object.keys(EXPLORE_EMPTY_TEXT)) {
+    // 「此刻」没人打卡时，这一排用真实的咖啡店撑起来（不再单独画一行空态），所以只钉另外两段的空态。
+    for (const key of Object.keys(EXPLORE_EMPTY_TEXT).filter((k) => k !== "here")) {
       expect(surface, `${key} 段没有自己的空态文案`).toContain(`EXPLORE_EMPTY_TEXT.${key}`);
     }
     for (const part of ["styles.sceneCard", "styles.eventCard", "styles.shopCard", "styles.filterTab", "styles.modalSheet"]) {

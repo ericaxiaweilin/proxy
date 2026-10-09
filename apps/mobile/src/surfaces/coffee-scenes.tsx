@@ -114,6 +114,13 @@ export function CoffeeScenesHub({ onOpenScene }: { onOpenScene?: ((sceneId: stri
   const venues = useMemo(() => coffeeVenues(scenes), [scenes]);
   const hereNow = useMemo(() => hereNowScenes(venues), [venues]);
   const event = activities[0];
+  // 横滑暗色卡：有人此刻在场的优先；一个都没有时，用真实的咖啡店（按去过的人数）撑起这一排——
+  // 版式不因为「此刻没人打卡」就塌成一张空白。卡上只有「N 人此刻在这里」才带在场标记，其余不冒充在场。
+  const liveRow = useMemo(
+    () => (hereNow.length > 0 ? hereNow : [...venues].sort((a, b) => (b.visitedCount ?? 0) - (a.visitedCount ?? 0) || a.id.localeCompare(b.id)).slice(0, 6)),
+    [hereNow, venues],
+  );
+  const anyoneHere = hereNow.length > 0;
 
   async function joinEvent(activity: Activity): Promise<void> {
     if (joinBusy || joined.has(activity.activityId)) return;
@@ -156,20 +163,23 @@ export function CoffeeScenesHub({ onOpenScene }: { onOpenScene?: ((sceneId: stri
   return (
     <View>
       <View style={styles.sectionHead}>
-        <Text selectable style={styles.sectionTitle}>☕ 此刻在咖啡店</Text>
-        <Text selectable style={styles.sectionSub}>Live Now</Text>
+        <Text selectable style={styles.sectionTitle}>{anyoneHere ? "☕ 此刻在咖啡店" : "☕ 咖啡店"}</Text>
+        <Text selectable style={styles.sectionSub}>{anyoneHere ? "Live Now" : "Nearby"}</Text>
       </View>
       {stateLine(catalogState)}
-      {catalogState === "READY" && hereNow.length === 0 ? <Text selectable style={[styles.stateText, styles.sceneScroll]}>{EXPLORE_EMPTY_TEXT.here}</Text> : null}
-      {hereNow.length > 0 ? (
+      {catalogState === "READY" && liveRow.length === 0 ? <Text selectable style={[styles.stateText, styles.sceneScroll]}>{EXPLORE_EMPTY_TEXT.coffee}</Text> : null}
+      {liveRow.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sceneScroll}>
-          {hereNow.map((s) => {
+          {liveRow.map((s) => {
             const photo = photoUri(s.imageUrl, localApiBaseUrl);
             const dist = venueDistanceText(s, origin);
             const rating = ratingLine(s);
             return (
               <Pressable key={s.id} onPress={() => setActiveScene(s)} style={styles.sceneCard}>
-                <View style={styles.liveTag}><View style={styles.liveDot} /><Text selectable style={styles.liveText}>{hereNowLine(s.hereCount)}</Text></View>
+                <View style={styles.liveTag}>
+                  {(s.hereCount ?? 0) > 0 ? <View style={styles.liveDot} /> : null}
+                  <Text selectable style={styles.liveText}>{(s.hereCount ?? 0) > 0 ? hereNowLine(s.hereCount) : s.area || "咖啡店"}</Text>
+                </View>
                 <View style={styles.scenePerson}>
                   {photo
                     ? <Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={`live:${s.id}`} source={{ uri: photo }} style={styles.sceneAvatar} transition={0} />
@@ -182,7 +192,9 @@ export function CoffeeScenesHub({ onOpenScene }: { onOpenScene?: ((sceneId: stri
                 {dist ? <Text selectable style={styles.scenePlace}>📍 {dist}</Text> : null}
                 {rating ? <Text selectable style={styles.sceneActivity}>{rating}</Text> : null}
                 <View style={styles.sceneMetaGrid}>
-                  <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.hereCount}</Text><Text selectable style={styles.sceneMetaKey}>在场</Text></View>
+                  {(s.hereCount ?? 0) > 0 ? <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.hereCount}</Text><Text selectable style={styles.sceneMetaKey}>在场</Text></View> : null}
+                  {(s.visitedCount ?? 0) > 0 ? <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.visitedCount}</Text><Text selectable style={styles.sceneMetaKey}>去过</Text></View> : null}
+                  {s.ratingCount && s.rating ? <View style={styles.sceneMeta}><Text selectable style={styles.sceneMetaValue}>{s.rating}</Text><Text selectable style={styles.sceneMetaKey}>评分</Text></View> : null}
                 </View>
                 <View style={styles.sceneJoinRow}>
                   <Text selectable style={styles.sceneTag}>{s.type}</Text>
@@ -197,7 +209,12 @@ export function CoffeeScenesHub({ onOpenScene }: { onOpenScene?: ((sceneId: stri
       ) : null}
 
       {stateLine(activityState)}
-      {activityState === "READY" && !event ? <Text selectable style={[styles.stateText, styles.sceneScroll]}>{EXPLORE_EMPTY_TEXT.activities}</Text> : null}
+      {activityState === "READY" && !event ? (
+        <View style={styles.eventCard}>
+          <Text selectable style={styles.eventBadge}>✦ 活动预告</Text>
+          <Text selectable style={styles.eventDesc}>{EXPLORE_EMPTY_TEXT.activities}</Text>
+        </View>
+      ) : null}
       {event ? (
         <View style={styles.eventCard}>
           <Text selectable style={styles.eventBadge}>✦ 活动预告</Text>
