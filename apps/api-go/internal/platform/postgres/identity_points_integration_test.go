@@ -12,6 +12,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/guidance"
 	"github.com/proxy-app/proxy-api/internal/identitytier"
 	"github.com/proxy-app/proxy-api/internal/incentive"
+	"github.com/proxy-app/proxy-api/internal/weatherwatch"
 )
 
 func TestIdentityPointsCollectIdempotentlyAndScoreCampaignsGrantOnlyThoseWhoReachedTheLine(t *testing.T) {
@@ -184,5 +185,56 @@ func TestNudgeOptOutRemovesTheUserFromCandidates(t *testing.T) {
 	}
 	if !has() {
 		t.Fatal("opting back in restores the nudges")
+	}
+}
+
+// WEATHER-001：天气提醒的活动来源 —— 只取已发布、有结构化开始时间、场地有坐标、在时间窗口内的活动，带上发起人和报名的人。
+func TestWeatherWatchUpcomingFindsOnlyStructuredPublishedActivities(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	scene := "sc_ww_" + stamp
+	inWin, noStart, outWin := "act_ww1_"+stamp, "act_ww2_"+stamp, "act_ww3_"+stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM activity.participants WHERE activity_id = ANY($1)`, []string{inWin, noStart, outWin})
+		_, _ = pool.Exec(bg, `DELETE FROM activity.activities WHERE id = ANY($1)`, []string{inWin, noStart, outWin})
+		_, _ = pool.Exec(bg, `DELETE FROM reality.scenes WHERE id = $1`, scene)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	exec(`INSERT INTO reality.scenes (id, name, area, type, latitude, longitude, quality, best) VALUES ($1,'s','a','咖啡',21.0,105.8,50,'x')`, scene)
+	mk := func(id string, starts *time.Time) {
+		payload := fmt.Sprintf(`{"activityId":"%s","title":"t","ownerId":"host_%s","status":"PUBLISHED","realitySceneId":"%s"`, id, stamp, scene)
+		if starts != nil {
+			payload += fmt.Sprintf(`,"startsAt":"%s","durationMinutes":120`, starts.Format(time.RFC3339))
+		}
+		exec(`INSERT INTO activity.activities (id, payload) VALUES ($1, $2::jsonb)`, id, payload+"}")
+	}
+	soon, far := now.Add(24*time.Hour), now.Add(72*time.Hour)
+	mk(inWin, &soon)
+	mk(noStart, nil)
+	mk(outWin, &far)
+	exec(`INSERT INTO activity.participants (activity_id, actor_id) VALUES ($1, $2)`, inWin, "guest_"+stamp)
+	got, err := weatherwatch.NewPostgres(pool).Upcoming(ctx, now.Add(18*time.Hour), now.Add(30*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *weatherwatch.Meeting
+	for i := range got {
+		switch got[i].ID {
+		case inWin:
+			found = &got[i]
+		case noStart, outWin:
+			t.Fatalf("%s must not be picked", got[i].ID)
+		}
+	}
+	if found == nil || len(found.People) != 2 || found.Lat != 21.0 || found.DurationMin != 120 {
+		t.Fatalf("the structured, in-window activity with host + guest: %+v", found)
 	}
 }

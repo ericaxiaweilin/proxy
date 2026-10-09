@@ -664,3 +664,44 @@ func TestJoinUpdatesDisplayedPeopleCount(t *testing.T) {
 		t.Fatalf("capacity 0 activity had people overwritten to %q — inventing a headcount for an activity that has no capacity", open.People)
 	}
 }
+
+// WEATHER-001：结构化开始时间可选；给了就要在合理范围内，存下来供天气提醒用。
+func TestPublishActivityKeepsAValidStructuredStartAndRejectsNonsense(t *testing.T) {
+	s := New()
+	n := 0
+	publish := func(extra map[string]any) (Activity, command.Result) {
+		n++
+		e := activityEnvelope("PublishActivity", "owner_1", "new")
+		e.CommandID = fmt.Sprintf("PublishActivity_ws%d", n) // 活动 id 由命令 id 派生，每次发布要不同
+		p := map[string]any{"title": "周六咖啡", "time": "周六 15:00", "capacity": 6, "venueName": "木光咖啡", "venueIcon": "☕", "venueType": "CAFE", "realitySceneId": "scene_muguang", "desc": "聊天", "consumptionTerm": "SPLIT"}
+		for k, v := range extra {
+			p[k] = v
+		}
+		e.Payload = p
+		out := s.HandleContext(t.Context(), e)
+		var body struct {
+			Activity Activity `json:"activity"`
+		}
+		_ = json.Unmarshal([]byte(out.OperationRef), &body)
+		return body.Activity, out
+	}
+	start := time.Now().Add(30 * time.Hour).UTC().Truncate(time.Minute)
+	a, out := publish(map[string]any{"startsAt": start.Format(time.RFC3339), "durationMinutes": 120})
+	if out.Outcome != "ACCEPTED" || a.StartsAt == nil || !a.StartsAt.Equal(start) || a.DurationMinutes != 120 {
+		t.Fatalf("structured start kept: %+v %+v", out, a)
+	}
+	if a, out := publish(map[string]any{"time": "周日 10:00", "title": "周日早茶"}); out.Outcome != "ACCEPTED" || a.StartsAt != nil {
+		t.Fatalf("the start time stays optional: %+v err=%+v", out, out.Error)
+	}
+	for name, extra := range map[string]map[string]any{
+		"not a time":    {"startsAt": "周六下午"},
+		"long ago":      {"startsAt": time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)},
+		"years ahead":   {"startsAt": time.Now().Add(400 * 24 * time.Hour).UTC().Format(time.RFC3339)},
+		"absurd length": {"startsAt": start.Format(time.RFC3339), "durationMinutes": 5},
+	} {
+		extra["time"] = "周三 " + name
+		if _, out := publish(extra); out.Outcome != "REJECTED" || out.Error == nil || out.Error.ErrorCode != "ACTIVITY_START_INVALID" {
+			t.Fatalf("%s must be rejected: %+v", name, out)
+		}
+	}
+}

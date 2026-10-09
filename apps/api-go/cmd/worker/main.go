@@ -28,6 +28,8 @@ import (
 	"github.com/proxy-app/proxy-api/internal/outbox"
 	"github.com/proxy-app/proxy-api/internal/platform/postgres"
 	"github.com/proxy-app/proxy-api/internal/tagging"
+	"github.com/proxy-app/proxy-api/internal/weather"
+	"github.com/proxy-app/proxy-api/internal/weatherwatch"
 )
 
 type unavailableDelivery struct{}
@@ -689,6 +691,20 @@ func main() {
 	incentiveTicker := time.NewTicker(5 * time.Minute)
 	defer incentiveTicker.Stop()
 	tierStore := identitytier.NewPostgres(pool)
+	// WEATHER-001：见面前一天遇雨提醒（每 30 分钟一轮；同一场活动同一个人只提醒一次）。
+	weatherSvc := &weather.Service{Provider: weather.OpenMeteo{}}
+	weatherSource := weatherwatch.NewPostgres(pool)
+	weatherTicker := time.NewTicker(30 * time.Minute)
+	defer weatherTicker.Stop()
+	runWeather := func() {
+		n, err := weatherwatch.Run(ctx, weatherSource, weatherSvc, weatherNotifier{pipeline: inboxPipeline}, time.Now().UTC())
+		if err != nil {
+			log.Printf("weather alerts failed: %v", err)
+		} else if n > 0 {
+			log.Printf("weather alerts: sent=%d", n)
+		}
+	}
+	runWeather()
 	runIncentives := func() {
 		// 先把用户已经做成的事折成积分（固定规则，幂等），再按分数发奖励活动。
 		if n, err := tierStore.CollectMerchant(ctx, time.Now().UTC()); err != nil {
@@ -722,6 +738,8 @@ func main() {
 		select {
 		case <-ctx.Done():
 			return
+		case <-weatherTicker.C:
+			runWeather()
 		case <-ticker.C:
 			processed, runErr := outboxWorker.RunOnce(ctx)
 			if runErr != nil {
@@ -921,6 +939,17 @@ func dedupeKeyFor(e event.DomainEvent, recipient string) string {
 }
 
 // nudgeEmitter 把引导推送接到通知管线。DedupeKey 含用户和推送种类：同一种推送对同一个人终身只会落一行。
+// weatherNotifier 发天气提醒；同一场活动同一个人只发一次（去重键）。不带深链：App 里没有活动深链的落点。
+type weatherNotifier struct{ pipeline notification.Producer }
+
+func (w weatherNotifier) Notify(ctx context.Context, userID, meetingID, title, body string) error {
+	_, _, err := w.pipeline.Emit(ctx, notification.Notification{
+		RecipientID: userID, Type: "WEATHER_ALERT", Title: title, Body: body,
+		DedupeKey: "weather:" + meetingID + ":" + userID,
+	})
+	return err
+}
+
 type nudgeEmitter struct{ pipeline notification.Producer }
 
 func (n nudgeEmitter) Nudge(ctx context.Context, userID, key, title, body, target string) error {

@@ -443,7 +443,13 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         selectedSpot.id,
       );
       // ACTIVITY-COVER-001：封面资产 id 随发布一起走（没有就不带这个键）。
-      const created = await activities.publish(coverAssetId ? { ...input, coverMediaAssetId: coverAssetId } : input);
+      // WEATHER-001：带上结构化开始时间 / 时长，服务端据此在见面前一天提醒天气。整天活动按 8 小时算。
+      const startsAt = new Date(`${form.dateISO}T${String(form.hour).padStart(2, "0")}:${String(form.minute).padStart(2, "0")}:00`);
+      const structured = {
+        ...input,
+        ...(Number.isNaN(startsAt.getTime()) ? {} : { startsAt: startsAt.toISOString(), durationMinutes: form.duration === "all" ? 480 : form.duration }),
+      };
+      const created = await activities.publish(coverAssetId ? { ...structured, coverMediaAssetId: coverAssetId } : structured);
       await SecureStore.deleteItemAsync(DRAFT_KEY).catch(() => undefined);
       setResult(created);
       setResultMeta(`${dayLabel} ${form.hour.toString().padStart(2, "0")}:${form.minute.toString().padStart(2, "0")} · ${peopleLabel} ${t("peopleUnit")} · ${feeLabel}`);

@@ -37,6 +37,9 @@ export type PublishActivityInput = {
   // ACTIVITY-COVER-001: 封面图的**媒体资产 id**，不是 URL —— 先用 MediaClient
   // 上传拿到 mediaAssetId 再传这里。服务端只认能安全拼成 thumb URL 的裸 token。
   coverMediaAssetId?: string;
+  // WEATHER-001: 结构化开始时间（ISO）与时长（分钟）。「time」是给人看的文字，天气提醒只认这两个。
+  startsAt?: string;
+  durationMinutes?: number;
 };
 
 export class ActivityProtocolError extends Error {

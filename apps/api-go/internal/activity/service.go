@@ -48,18 +48,22 @@ type Activity struct {
 	// CoverImageURL 是 R17.x 的预留字段：至今**没有任何写入者**。
 	// 留着是为了不破坏既有 wire 形状（两个客户端 surface 已经在读它），
 	// 但它不是封面图的来源 —— 别再拿它当唯一事实源。
-	CoverImageURL   string `json:"coverImageUrl,omitempty"`
-	Desc            string `json:"desc"`
-	Benefit         string `json:"benefit"`
-	QACount         int    `json:"qaCount"`
-	Interested      int    `json:"interested"`
-	Joined          int    `json:"joined"`
-	Capacity        int    `json:"capacity,omitempty"`
-	Shares          int    `json:"shares"`
-	ParentTitle     string `json:"parentTitle,omitempty"`
-	OwnerID         string `json:"ownerId,omitempty"`
-	Status          string `json:"status,omitempty"`
-	ConsumptionTerm string `json:"consumptionTerm,omitempty"`
+	CoverImageURL string `json:"coverImageUrl,omitempty"`
+	Desc          string `json:"desc"`
+	Benefit       string `json:"benefit"`
+	QACount       int    `json:"qaCount"`
+	Interested    int    `json:"interested"`
+	Joined        int    `json:"joined"`
+	Capacity      int    `json:"capacity,omitempty"`
+	Shares        int    `json:"shares"`
+	ParentTitle   string `json:"parentTitle,omitempty"`
+	OwnerID       string `json:"ownerId,omitempty"`
+	// StartsAt / DurationMinutes：结构化的开始时间与时长（发布时可选）。「Time」仍是给人看的自由文本；
+	// 天气提醒这类要算时间的功能只认这两个，没有就不提醒（不去猜文本）。
+	StartsAt        *time.Time `json:"startsAt,omitempty"`
+	DurationMinutes int        `json:"durationMinutes,omitempty"`
+	Status          string     `json:"status,omitempty"`
+	ConsumptionTerm string     `json:"consumptionTerm,omitempty"`
 	// R58: 报名方式 OPEN(自由报名)/REVIEW(审核后加入)/INVITE_ONLY(仅邀请)。
 	SignupMode string `json:"signupMode,omitempty"`
 	// R58: 主题（日落/奥黛/胶片/本地人…），可选。
@@ -213,9 +217,9 @@ type MemoryRepository struct {
 	activities map[string]*Activity
 	order      []string
 	// ORDER-NO-001：内存版订单编号（key = activityID + "|" + actorID）和每日计数器。
-	orderNos map[string]string
-	daySeq   map[string]int
-	joinedAt map[string]time.Time
+	orderNos  map[string]string
+	daySeq    map[string]int
+	joinedAt  map[string]time.Time
 	snapshots map[string]OrderSnapshot
 }
 
@@ -223,12 +227,12 @@ type MemoryRepository struct {
 // State 来自报名状态记录（取消/签到/爽约）；那份记录目前只在内存里，
 // 取不到时留空，客户端按「已确认」显示（报名行存在 = 报名成立）。
 type JoinOrder struct {
-	ActivityID string    `json:"activityId"`
+	ActivityID string `json:"activityId"`
 	// FOR-YOU-SLOT-001：同一场活动可以有多单（约不同的小美），按 (activityId, companionId) 区分。
-	CompanionID string   `json:"companionId,omitempty"`
-	OrderNo    string    `json:"orderNo,omitempty"`
-	JoinedAt   time.Time `json:"joinedAt"`
-	State      string    `json:"state,omitempty"`
+	CompanionID string    `json:"companionId,omitempty"`
+	OrderNo     string    `json:"orderNo,omitempty"`
+	JoinedAt    time.Time `json:"joinedAt"`
+	State       string    `json:"state,omitempty"`
 	// ORDER-RECIPE-001：下单那一刻的票面；这个功能上线前的报名没有，为 nil。
 	Snapshot *OrderSnapshot `json:"snapshot,omitempty"`
 }
@@ -329,6 +333,9 @@ type publishActivityPayload struct {
 	// 服务端不该成为"客户端随便塞一个 URL 我就照着渲染"的转发点，那会让
 	// 活动的封面指向任意外部地址。资产 id 只能落在自家媒体管线上。
 	CoverMediaAssetID string `json:"coverMediaAssetId"`
+	// WEATHER-001：结构化开始时间（RFC3339）与时长（分钟），可选。
+	StartsAt        string `json:"startsAt"`
+	DurationMinutes int    `json:"durationMinutes"`
 }
 
 // ACTIVITY-COVER-001：封面资产 id 的形状校验。
@@ -383,6 +390,17 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if p.SignupMode != "OPEN" && p.SignupMode != "REVIEW" && p.SignupMode != "INVITE_ONLY" {
 		return command.Rejected(e, "ACTIVITY_SIGNUP_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.signup_invalid", nil)
 	}
+	var startsAt *time.Time
+	if strings.TrimSpace(p.StartsAt) != "" {
+		t, err := time.Parse(time.RFC3339, p.StartsAt)
+		// 合理范围：不早于一小时前、不晚于 180 天后；时长 0（不知道）或 15 分钟到 24 小时。
+		if err != nil || t.Before(time.Now().Add(-time.Hour)) || t.After(time.Now().Add(180*24*time.Hour)) ||
+			(p.DurationMinutes != 0 && (p.DurationMinutes < 15 || p.DurationMinutes > 24*60)) {
+			return command.Rejected(e, "ACTIVITY_START_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.start_invalid", nil)
+		}
+		t = t.UTC()
+		startsAt = &t
+	}
 	p.Theme = strings.TrimSpace(p.Theme)
 	if len([]rune(p.Theme)) > 30 {
 		return command.Rejected(e, "ACTIVITY_THEME_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.theme_invalid", nil)
@@ -404,7 +422,7 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 	if codeErr != nil {
 		return command.Rejected(e, "NUMBER_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "activity.number_unavailable", nil)
 	}
-	a := Activity{ID: activityID, Code: code, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE", CoverMediaAssetID: p.CoverMediaAssetID}
+	a := Activity{ID: activityID, Code: code, Origin: "USER", OwnerID: e.Actor.ID, Status: "PUBLISHED", Title: p.Title, Time: p.Time, People: "0 / " + strconv.Itoa(p.Capacity) + " 人", Capacity: p.Capacity, Price: "0₫", MoneyFlow: "FREE", PriceLabel: "免费参加", Consumption: consumption, ConsumptionTerm: p.ConsumptionTerm, SignupMode: p.SignupMode, Theme: p.Theme, VenueName: p.VenueName, VenueIcon: p.VenueIcon, VenueType: p.VenueType, VenueTypeLabel: venueTypeLabels[p.VenueType], RealitySceneID: p.RealitySceneID, Desc: p.Description, AIStatus: "NONE", CoverMediaAssetID: p.CoverMediaAssetID, StartsAt: startsAt, DurationMinutes: p.DurationMinutes}
 	// MERCHANT-PUBLISH-001: 商家注记（api 层已验成员）→ Origin MERCHANT +
 	// 店名。OwnerID 保留发布人（ListByOwner 按 ownerId 照常找到自己的店单）。
 	// 只认注记，不读 payload。
@@ -517,7 +535,7 @@ func (s *Service) listMyActivities(ctx context.Context, e command.Envelope) comm
 		"created":    created,
 		"joined":     joined,
 		"joinOrders": joinOrders,
-		"note":    "我的活动: created = 我发起的, joined = 我参加的. 都按 created_at 逆序.",
+		"note":       "我的活动: created = 我发起的, joined = 我参加的. 都按 created_at 逆序.",
 	}, nil)
 }
 
@@ -1091,6 +1109,7 @@ func (r *MemoryRepository) ListByParticipant(_ context.Context, actorID string) 
 	reverseActivityOrder(items)
 	return items, nil
 }
+
 // FilterKnownParticipants 实现见 Repository 接口注释：只测已知候选，不
 // 反查名单。
 func (r *MemoryRepository) FilterKnownParticipants(_ context.Context, sceneID string, candidateActorIDs []string) ([]string, error) {
