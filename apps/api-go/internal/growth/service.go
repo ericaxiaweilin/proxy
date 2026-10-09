@@ -314,10 +314,22 @@ type ledgerReader interface {
 	Points(ctx context.Context, k identitytier.Kind, id string) (int, error)
 }
 
+// ledgerRefresher：读自己的成长值之前，先把这个人已经做成的事折进账本（幂等）。
+// 后台任务也会定时收，但读的时候补一次，用户看到的就一定是最新的，不依赖任务刚好跑过。
+type ledgerRefresher interface {
+	CollectUserFor(ctx context.Context, userID string, now time.Time) (int, error)
+	CollectProviderFor(ctx context.Context, userID string, now time.Time) (int, error)
+}
+
 // ledgerTotal：用户 + 小美两个身份下的账本积分合计；任何一个读不出来就整体当作读不出来。
 func (s *Service) ledgerTotal(ctx context.Context, actorID string) (int, bool) {
 	if s.ledger == nil {
 		return 0, false
+	}
+	if r, ok := s.ledger.(ledgerRefresher); ok {
+		// 补算失败不拦读：读到多少算多少（宁可少，不编）。
+		_, _ = r.CollectUserFor(ctx, actorID, s.clock.Now())
+		_, _ = r.CollectProviderFor(ctx, actorID, s.clock.Now())
 	}
 	total := 0
 	for _, k := range []identitytier.Kind{identitytier.User, identitytier.Provider} {

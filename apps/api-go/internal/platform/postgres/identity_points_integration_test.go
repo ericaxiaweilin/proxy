@@ -379,3 +379,46 @@ func TestFollowListPersistsAndFeedCanBeScopedToFollowedAuthors(t *testing.T) {
 		t.Fatal("the followed author's post is there")
 	}
 }
+
+// 读自己的成长值时可以只补算自己（CollectUserFor），且和全量收集互不重复。
+func TestCollectUserForOnlyCreditsThatUserAndNeverDoubleCounts(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	mine, other := "u_cf_m_"+stamp, "u_cf_o_"+stamp
+	users := []string{mine, other}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.profiles WHERE user_account_id = ANY($1)`, users)
+		_, _ = pool.Exec(bg, `DELETE FROM identity.user_accounts WHERE id = ANY($1)`, users)
+	})
+	now := time.Now().UTC()
+	for _, u := range users {
+		if _, err := pool.Exec(ctx, `INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,'ACTIVE',$2,$2)`, u, now.Add(-72*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO identity.profiles (user_account_id, name, handle, city, avatar_path, updated_at) VALUES ($1,'N','h_`+u+`','HN','assets/x',$2)`, u, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st := identitytier.NewPostgres(pool)
+	if _, err := st.CollectUserFor(ctx, mine, now); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := st.Points(ctx, identitytier.User, mine); a != 30 {
+		t.Fatalf("my profile points: %d", a)
+	}
+	if b, _ := st.Points(ctx, identitytier.User, other); b != 0 {
+		t.Fatalf("someone else is not touched: %d", b)
+	}
+	if _, err := st.CollectUser(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := st.Points(ctx, identitytier.User, mine); a != 30 {
+		t.Fatalf("collecting everyone afterwards does not double count: %d", a)
+	}
+	if _, err := st.CollectProviderFor(ctx, mine, now); err != nil {
+		t.Fatal(err)
+	}
+}
