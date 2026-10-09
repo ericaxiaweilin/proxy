@@ -208,7 +208,7 @@ func TestWeatherWatchUpcomingFindsOnlyStructuredPublishedActivities(t *testing.T
 		}
 	}
 	now := time.Now().UTC()
-	exec(`INSERT INTO reality.scenes (id, name, area, type, latitude, longitude, quality, best) VALUES ($1,'s','a','咖啡',21.0,105.8,50,'x')`, scene)
+	exec(`INSERT INTO reality.scenes (id, name, area, type, latitude, longitude, best) VALUES ($1,'s','a','咖啡',21.0,105.8,'')`, scene)
 	mk := func(id string, starts *time.Time) {
 		payload := fmt.Sprintf(`{"activityId":"%s","title":"t","ownerId":"host_%s","status":"PUBLISHED","realitySceneId":"%s"`, id, stamp, scene)
 		if starts != nil {
