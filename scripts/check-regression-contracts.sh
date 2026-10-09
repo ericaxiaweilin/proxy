@@ -8713,11 +8713,21 @@ echo "    SCENE-MAP-LOCATION-001: PASS (scene map opens on the phone location, n
 # 跟 SCENE-MAP-LOCATION-001 同一病：壳里有活的人位（sceneMapOrigin），
 # 市场面就是不接，非要点一下“用我当前位置”。现在壳透传 userCenter，
 # 面以人为先（晚到补飞，不抢手动点）；没人位才退回 centroid/河内。
-if ! grep -q 'userCenter' apps/mobile/src/surfaces/market.tsx ||
-   ! grep -q 'if (userCenter) {' apps/mobile/src/surfaces/market.tsx ||
-   ! grep -q 'userCenter={sceneMapOrigin' apps/mobile/src/shell/app-shell.tsx; then
-  echo "  FAIL [MARKET-MAP-USER-CENTER-001]: 市场地图没接壳里的人位 ——" >&2
+#
+# 2026-10-09 更正：这条原来是 grep 源码里的 `if (userCenter) {` —— 钉的是**旧实现的语法**。
+# 现在 market.tsx 把 prop 灌进 state（`useState(userCenter)`），再由 `[marketplace, userFix]`
+# 那组依赖在定位晚到时重排列表，功能在、语法不是那句，所以判据在 HEAD 上一直红。
+# 换成钉功能真正住着的两处：state 以人位起步 + 查询真的带上它。行为侧由
+# market-map-center.test.ts 钉壳到面的接线。
+if ! grep -q 'userCenter={sceneMapOrigin' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [MARKET-MAP-USER-CENTER-001]: 壳不再把活的人位透给市场面 ——" >&2
   echo "        初开就回到河内默认，手机定位白开了。" >&2
+  exit 1
+fi
+if ! grep -qE 'useState<\{ lat: number; lng: number \} \| undefined>\(userCenter\)' apps/mobile/src/surfaces/market.tsx ||
+   ! grep -qE 'marketplace\.list\(userFix\)' apps/mobile/src/surfaces/market.tsx; then
+  echo "  FAIL [MARKET-MAP-USER-CENTER-001]: 市场面不再以人位起步/不再把人位带进列表查询 ——" >&2
+  echo "        没人的位置才该退回 centroid/河内，而不是永远退回河内。" >&2
   exit 1
 fi
 if ! grep -q 'MARKET-MAP-USER-CENTER-001' apps/mobile/src/market-map-center.test.ts; then
