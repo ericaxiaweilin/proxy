@@ -105,23 +105,16 @@ describe("ACTIVITY-CREATE-FORM-001 ten-block progressive create form", () => {
     expect(activityWizard).not.toContain("已通知附近");
   });
 
-  it("keeps the prototype people rail (dual slider + pills), not steppers", () => {
-    // ACTIVITY-CREATE-FORM-001：字体任务只许动字体。人数交互必须跟原型一致 ——
-    // 双滑杆（导轨/填充/双拇指/刻度）+ pills 快选，步进器不得回来。
-    expect(activityWizard).toContain("sliderFill");
-    expect(activityWizard).toContain("sliderThumb");
-    expect(activityWizard).toContain("sliderScale");
+  it("picks the people count from four range chips — no draggable slider that fights the page swipe", () => {
+    // 参与人数只有四档（2–5 / 6–10 / 11–30 / 31–80，最大 80）：咖啡店容纳有限，再多不好组织。
+    // 原来的双滑杆横拖会和外层模块横滑翻页抢手势，已整个移除；步进器也不回来。
     expect(activityWizard).toContain("PEOPLE_PRESETS");
-    expect(activityWizard).toContain('"50+"');
-    expect(activityWizard).toContain('t("peopleMin")');
-    expect(activityWizard).toContain('t("peopleMax")');
+    expect(activityWizard).toContain("PEOPLE_RANGES");
+    expect(activityWizard).not.toContain("sliderThumb");
+    expect(activityWizard).not.toContain("PanResponder.create");
+    expect(activityWizard).not.toContain("peopleDragDir");
     expect(activityWizard).not.toContain("stepPeople");
     expect(activityWizard).not.toContain("stepRow");
-    // 滑杆横拖不得触发外层模块翻页：落指即接管（抢在 pager 原生滚动前），
-    // 让位只看方向 —— 纵向交给表单滚动，横向拒绝 pager。
-    expect(activityWizard).toContain("onPanResponderTerminationRequest");
-    expect(activityWizard).toContain("peopleDragDir");
-    expect(activityWizard).toContain("locationX");
   });
 
   it("uses the home map logo for the place map button, not an emoji", () => {

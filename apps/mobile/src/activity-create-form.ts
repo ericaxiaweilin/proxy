@@ -43,7 +43,18 @@ export interface CreateFormState {
 }
 
 export const PEOPLE_MIN = 2;
-export const PEOPLE_MAX = 50;
+export const PEOPLE_MAX = 80;
+
+/**
+ * 参与人数只有四档（咖啡店一般就容纳这么多，再多不好组织）。显示用 2–5 / 6–10 / 11–30 / 31–80，
+ * 档与档之间不重叠。发布时取该档上沿作为人数上限（5 / 10 / 30 / 80）。
+ */
+export const PEOPLE_RANGES: ReadonlyArray<{ min: number; max: number }> = [
+  { min: 2, max: 5 },
+  { min: 6, max: 10 },
+  { min: 11, max: 30 },
+  { min: 31, max: 80 },
+];
 
 export function todayLocalISO(now: Date = new Date()): string {
   const y = now.getFullYear();
@@ -73,8 +84,8 @@ export function defaultCreateForm(todayISO: string): CreateFormState {
   return {
     cat: undefined,
     name: "",
-    peopleMin: 4,
-    peopleMax: 6,
+    peopleMin: 2,
+    peopleMax: 5,
     dateISO: todayISO,
     hour: 14,
     minute: 0,
@@ -112,16 +123,17 @@ export function canPublishForm(state: CreateFormState): boolean {
   return state.cat !== undefined && state.name.trim().length > 0 && state.placeId !== undefined;
 }
 
+/** 任意 min/max（老草稿 / 外来值）收敛到四档之一：取包含上沿的那一档；超出就夹到最近的档。 */
 export function clampPeople(min: number, max: number): { min: number; max: number } {
-  const lo = Math.min(Math.max(Math.round(min), PEOPLE_MIN), PEOPLE_MAX);
   const hi = Math.min(Math.max(Math.round(max), PEOPLE_MIN), PEOPLE_MAX);
-  if (lo >= hi) return { min: Math.max(PEOPLE_MIN, hi - 1), max: hi };
-  return { min: lo, max: hi };
+  const range = PEOPLE_RANGES.find((r) => hi <= r.max) ?? PEOPLE_RANGES[PEOPLE_RANGES.length - 1]!;
+  void min;
+  return { min: range.min, max: range.max };
 }
 
-/** 人数标签："4–6" / "20–50+"。 */
+/** 人数标签："2–5" / "31–80"。 */
 export function peopleRangeLabel(min: number, max: number): string {
-  return max >= PEOPLE_MAX ? `${min}–${PEOPLE_MAX}+` : `${min}–${max}`;
+  return `${min}–${max}`;
 }
 
 /** 服务端单个 capacity 取区间上沿（与 buildActivityPublishInput 同口径）。 */

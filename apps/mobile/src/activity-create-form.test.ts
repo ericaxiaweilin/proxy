@@ -3,6 +3,7 @@ import {
   addDaysISO,
   canPublishForm,
   capacityOfRange,
+  PEOPLE_RANGES,
   clampPeople,
   composeActivityTime,
   dayOfMonthISO,
@@ -45,14 +46,18 @@ describe("ACTIVITY-CREATE-FORM-001 create form state machine", () => {
     expect(formProgress(state({ cat: "cafe", name: "x", placeId: "s1" }))).toBe(7);
   });
 
-  it("clamps people to 2..50 and labels the range", () => {
-    expect(clampPeople(4, 6)).toEqual({ min: 4, max: 6 });
-    expect(clampPeople(1, 99)).toEqual({ min: 2, max: 50 });
-    expect(clampPeople(6, 6)).toEqual({ min: 5, max: 6 });
-    expect(peopleRangeLabel(4, 6)).toBe("4–6");
-    expect(peopleRangeLabel(20, 50)).toBe("20–50+");
+  it("snaps people to the four ranges (2–5 / 6–10 / 11–30 / 31–80, max 80)", () => {
+    // 四档：2–5 / 6–10 / 11–30 / 31–80；任何值收敛到包含它上沿的那一档。
+    expect(PEOPLE_RANGES).toEqual([{ min: 2, max: 5 }, { min: 6, max: 10 }, { min: 11, max: 30 }, { min: 31, max: 80 }]);
+    expect(clampPeople(4, 6)).toEqual({ min: 6, max: 10 });
+    expect(clampPeople(2, 5)).toEqual({ min: 2, max: 5 });
+    expect(clampPeople(1, 99)).toEqual({ min: 31, max: 80 });
+    expect(clampPeople(20, 50)).toEqual({ min: 31, max: 80 });
+    expect(clampPeople(11, 30)).toEqual({ min: 11, max: 30 });
+    expect(peopleRangeLabel(6, 10)).toBe("6–10");
+    expect(peopleRangeLabel(31, 80)).toBe("31–80");
     expect(capacityOfRange(6)).toBe(6);
-    expect(capacityOfRange(99)).toBe(50);
+    expect(capacityOfRange(99)).toBe(80);
   });
 
   it("composes time labels with duration and midnight crossing", () => {
@@ -82,7 +87,7 @@ describe("ACTIVITY-CREATE-FORM-001 create form state machine", () => {
   });
 
   it("round-trips drafts and repairs stale or garbage ones", () => {
-    const full = state({ cat: "photo", name: "街拍", placeId: "s9", peopleMin: 2, peopleMax: 4 });
+    const full = state({ cat: "photo", name: "街拍", placeId: "s9", peopleMin: 2, peopleMax: 5 });
     expect(decodeDraft(encodeDraft(full), "2026-09-28")).toEqual(full);
     expect(decodeDraft(undefined, "2026-09-28")).toBe(undefined);
     expect(decodeDraft("{{{", "2026-09-28")).toBe(undefined);

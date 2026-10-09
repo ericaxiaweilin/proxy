@@ -312,6 +312,9 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 	}
 }
 
+// MaxActivityCapacity：单场活动人数上限。咖啡店一般就容纳这么多，再多不好组织（用户 2026-10-09：最大 80）。
+const MaxActivityCapacity = 80
+
 type publishActivityPayload struct {
 	Title           string `json:"title"`
 	Time            string `json:"time"`
@@ -373,7 +376,7 @@ func (s *Service) publishActivity(ctx context.Context, e command.Envelope) comma
 		return command.Rejected(e, "ACTIVITY_ACTOR_REQUIRED", "AUTHORIZATION", "AFTER_USER_ACTION", "activity.actor_required", nil)
 	}
 	var p publishActivityPayload
-	if !decode(e.Payload, &p) || p.Title == "" || p.Time == "" || p.VenueName == "" || p.RealitySceneID == "" || p.Capacity < 2 || p.Capacity > 50 {
+	if !decode(e.Payload, &p) || p.Title == "" || p.Time == "" || p.VenueName == "" || p.RealitySceneID == "" || p.Capacity < 2 || p.Capacity > MaxActivityCapacity {
 		return command.Rejected(e, "ACTIVITY_PUBLISH_INVALID", "VALIDATION", "AFTER_USER_ACTION", "activity.publish_invalid", nil)
 	}
 	if _, ok := venueTypeLabels[p.VenueType]; !ok {

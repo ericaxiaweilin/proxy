@@ -11,12 +11,12 @@
 // 1. 发布门禁多卡 placeId：无 sceneId 的活动在场景页不可见，放行等于造
 //    不可见数据（Three Beans 教训）；
 // 2. 成功页不写推送到达类承诺（推送行为未知），用市场同款"已进入市场"文案；
-// 3. 人数双滑杆用 PanResponder 自绘双拇指实现（RN 无 range input；
+// 3. 人数：四档快选（2–5 / 6–10 / 11–30 / 31–80，不再有会和横滑切页抢手势的滑杆）；原先的双滑杆用 PanResponder 自绘双拇指实现（RN 无 range input；
 //    钳制、标签、刻度、pills 与原型同口径）；
 // 4. 地图不自绘：全页直接复用 home 的 RealitySceneMapSurface，选中回调
 //    以可选 props 注入（不改首页行为）；目录 id 同源，选中即落定。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { Image } from "expo-image";
 import * as SecureStore from "expo-secure-store";
 import type { ActivityClient } from "../activity-client";
@@ -41,6 +41,7 @@ import {
   FORM_PROGRESS_TOTAL,
   PEOPLE_MAX,
   PEOPLE_MIN,
+  PEOPLE_RANGES,
   addDaysISO,
   canPublishForm,
   capacityOfRange,
@@ -81,13 +82,8 @@ const CAT_COPY: Record<CreateCategoryId, { name: MessageKey; example: MessageKey
 
 const WEEKDAY_LOCALE: Record<string, string> = { zh: "zh-CN", vi: "vi", en: "en", lo: "lo", ko: "ko", ja: "ja" };
 
-const PEOPLE_PRESETS: ReadonlyArray<{ min: number; max: number }> = [
-  { min: 2, max: 4 },
-  { min: 4, max: 6 },
-  { min: 6, max: 10 },
-  { min: 10, max: 20 },
-  { min: 20, max: 50 },
-];
+// 四档参与人数（见 activity-create-form 的 PEOPLE_RANGES）。
+const PEOPLE_PRESETS = PEOPLE_RANGES;
 
 const DURATIONS: ReadonlyArray<{ value: CreateDuration; label: MessageKey }> = [
   { value: 60, label: "dur1h" },
@@ -239,84 +235,8 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
   }, [dateChips, form.dateISO]);
 
   const peopleLabel = peopleRangeLabel(form.peopleMin, form.peopleMax);
-  // 原型 peopleValue 大字口径："4 – 6" / "20 – 50+"（空格 + 上沿 50+）。
-  const peopleDisplay = form.peopleMax >= PEOPLE_MAX
-    ? `${form.peopleMin} – ${PEOPLE_MAX}+`
-    : `${form.peopleMin} – ${form.peopleMax}`;
-
-  // 双滑杆位置（原型 minPct/maxPct 同口径）。RN 无 range input，用 PanResponder
-  // 自绘双拇指；手势中 form 变化即重建 responder，保证钳制边界读到最新值。
-  const peopleMinPct = (form.peopleMin - PEOPLE_MIN) / (PEOPLE_MAX - PEOPLE_MIN);
-  const peopleMaxPct = (form.peopleMax - PEOPLE_MIN) / (PEOPLE_MAX - PEOPLE_MIN);
-  const [peopleTrackW, setPeopleTrackW] = useState(0);
-  const peopleDrag = useRef<{ which: "min" | "max"; start: number; other: number } | null>(null);
-  // 最近一次手势方向：terminationRequest 只有 event 没有 gestureState，靠它判断纵/横。
-  const peopleDragDir = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-
-  // 辅助技术微调（滑杆的键盘等价操作），钳制与拖动同口径。
-  function nudgePeople(which: "min" | "max", delta: number): void {
-    setError(undefined);
-    setDraftMsg(undefined);
-    if (which === "min") {
-      const v = Math.max(Math.min(form.peopleMin + delta, form.peopleMax - 1), PEOPLE_MIN);
-      setForm((prev) => ({ ...prev, peopleMin: v }));
-    } else {
-      const v = Math.min(Math.max(form.peopleMax + delta, form.peopleMin + 1), PEOPLE_MAX);
-      setForm((prev) => ({ ...prev, peopleMax: v }));
-    }
-  }
-
-  // 整条导轨可拖：落点离哪只拇指近就拖哪只（HTML 点击导轨跳最近拇指同语义），
-  // 之后跟手走 dx。只认横向主导，纵向留给表单滚动；接管后不让外层 pager 抢走。
-  const railResponder = useMemo(() => PanResponder.create({
-    // 落指即接管：必须抢在外层 pager 原生滚动之前成为 responder，
-    // 否则 pager 一旦滚起来就再也要不回来（observedScroll）。
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 4 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
-    // 方向感知的让位：纵向为主就交给表单滚动，横向自己留着（pager 要横向时拒绝）。
-    onPanResponderTerminationRequest: () => {
-      const d = peopleDragDir.current;
-      return Math.abs(d.dy) > Math.abs(d.dx);
-    },
-    onShouldBlockNativeResponder: () => true,
-    onPanResponderGrant: (e) => {
-      peopleDragDir.current = { dx: 0, dy: 0 };
-      if (peopleTrackW <= 0) return;
-      setError(undefined);
-      setDraftMsg(undefined);
-      const unit = peopleTrackW / (PEOPLE_MAX - PEOPLE_MIN);
-      const at = Math.round(PEOPLE_MIN + (e.nativeEvent.locationX ?? 0) / unit);
-      const which = Math.abs(at - form.peopleMin) <= Math.abs(at - form.peopleMax) ? "min" : "max";
-      if (which === "min") {
-        // 原型 updateSlider：min 拇指最多顶到 max - 1。
-        const v = Math.max(Math.min(at, form.peopleMax - 1), PEOPLE_MIN);
-        peopleDrag.current = { which, start: v, other: form.peopleMax };
-        setForm((prev) => ({ ...prev, peopleMin: v }));
-      } else {
-        // 原型 updateSlider：max 拇指最少到 min + 1。
-        const v = Math.min(Math.max(at, form.peopleMin + 1), PEOPLE_MAX);
-        peopleDrag.current = { which, start: v, other: form.peopleMin };
-        setForm((prev) => ({ ...prev, peopleMax: v }));
-      }
-    },
-    onPanResponderMove: (_, gesture) => {
-      const drag = peopleDrag.current;
-      if (!drag || peopleTrackW <= 0) return;
-      peopleDragDir.current = { dx: gesture.dx, dy: gesture.dy };
-      setError(undefined);
-      setDraftMsg(undefined);
-      const unit = peopleTrackW / (PEOPLE_MAX - PEOPLE_MIN);
-      if (drag.which === "min") {
-        const v = Math.max(Math.min(Math.round(drag.start + gesture.dx / unit), drag.other - 1), PEOPLE_MIN);
-        setForm((prev) => ({ ...prev, peopleMin: v }));
-      } else {
-        const v = Math.min(Math.max(Math.round(drag.start + gesture.dx / unit), drag.other + 1), PEOPLE_MAX);
-        setForm((prev) => ({ ...prev, peopleMax: v }));
-      }
-    },
-    onPanResponderRelease: () => { peopleDrag.current = null; peopleDragDir.current = { dx: 0, dy: 0 }; },
-    onPanResponderTerminate: () => { peopleDrag.current = null; peopleDragDir.current = { dx: 0, dy: 0 }; },
-  }), [form.peopleMin, form.peopleMax, peopleTrackW]);
+  // 大字显示当前档："2 – 5" / "31 – 80"。
+  const peopleDisplay = `${form.peopleMin} – ${form.peopleMax}`;
 
   // 地点筛选（搜索 + category 封闭三态，不过滤 active —— 目录是什么就列什么）。
   const spotFilterCounts = useMemo(() => {
@@ -589,56 +509,17 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createPeople")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
-          <Text selectable style={styles.blockHint}>{t("tuneHint")}</Text>
         </View>
         <View style={styles.peopleDisplay}>
           <Text selectable style={styles.peopleValue}>{peopleDisplay}</Text>
           <Text selectable style={styles.peopleUnit}>{t("peopleUnit")}</Text>
-        </View>
-        {/* 原型双滑杆：导轨 + 填充 + 双拇指 + 刻度；下方 pills 快选与原型同值。 */}
-        <View style={styles.sliderWrap}>
-          <View style={styles.sliderInner} onLayout={(e) => setPeopleTrackW(e.nativeEvent.layout.width)} {...railResponder.panHandlers}>
-            <View style={styles.sliderTrack} />
-            <View style={[styles.sliderFill, { left: `${peopleMinPct * 100}%`, width: `${(peopleMaxPct - peopleMinPct) * 100}%` }]} />
-            <View
-              accessible
-              accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
-              accessibilityLabel={t("peopleMin")}
-              accessibilityRole="adjustable"
-              accessibilityValue={{ max: PEOPLE_MAX, min: PEOPLE_MIN, now: form.peopleMin }}
-              hitSlop={{ bottom: 12, left: 12, right: 12, top: 12 }}
-              onAccessibilityAction={(e) => {
-                if (e.nativeEvent.actionName === "increment") nudgePeople("min", 1);
-                else if (e.nativeEvent.actionName === "decrement") nudgePeople("min", -1);
-              }}
-              style={[styles.sliderThumb, { left: `${peopleMinPct * 100}%` }]}
-            />
-            <View
-              accessible
-              accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
-              accessibilityLabel={t("peopleMax")}
-              accessibilityRole="adjustable"
-              accessibilityValue={{ max: PEOPLE_MAX, min: PEOPLE_MIN, now: form.peopleMax }}
-              hitSlop={{ bottom: 12, left: 12, right: 12, top: 12 }}
-              onAccessibilityAction={(e) => {
-                if (e.nativeEvent.actionName === "increment") nudgePeople("max", 1);
-                else if (e.nativeEvent.actionName === "decrement") nudgePeople("max", -1);
-              }}
-              style={[styles.sliderThumb, { left: `${peopleMaxPct * 100}%` }]}
-            />
-          </View>
-        </View>
-        <View style={styles.sliderScale}>
-          {["2", "10", "20", "30", "40", "50+"].map((mark) => (
-            <Text key={mark} selectable style={styles.scaleText}>{mark}</Text>
-          ))}
         </View>
         <View style={styles.pills}>
           {PEOPLE_PRESETS.map((p) => {
             const on = form.peopleMin === p.min && form.peopleMax === p.max;
             return (
               <Pressable key={`${p.min}-${p.max}`} onPress={() => patch({ peopleMin: p.min, peopleMax: p.max })} style={[styles.pill, on && styles.pillOn]}>
-                <Text selectable style={[styles.pillText, on && styles.pillTextOn]}>{p.max >= PEOPLE_MAX ? `${p.min}+` : peopleRangeLabel(p.min, p.max)}</Text>
+                <Text selectable style={[styles.pillText, on && styles.pillTextOn]}>{peopleRangeLabel(p.min, p.max)}</Text>
               </Pressable>
             );
           })}
@@ -967,13 +848,6 @@ const styles = StyleSheet.create({
   peopleDisplay: { alignItems: "baseline", flexDirection: "row", gap: 8, marginBottom: 12 },
   peopleValue: { color: color.ink, fontSize: 28, fontVariant: ["tabular-nums"], fontWeight: "900", letterSpacing: -0.5 },
   peopleUnit: { color: color.muted, fontSize: 12, fontWeight: "500" },
-  sliderWrap: { marginBottom: 4, marginTop: 8, paddingHorizontal: 14 },
-  sliderInner: { height: 44, justifyContent: "center" },
-  sliderTrack: { backgroundColor: color.offWhite, borderRadius: 3, height: 6 },
-  sliderFill: { backgroundColor: color.ink, borderRadius: 3, height: 6, marginTop: -3, position: "absolute", top: "50%" },
-  sliderThumb: { backgroundColor: color.white, borderColor: color.ink, borderRadius: 14, borderWidth: 2, height: 28, marginLeft: -14, marginTop: -14, position: "absolute", top: "50%", width: 28 },
-  sliderScale: { flexDirection: "row", justifyContent: "space-between", marginBottom: 16, paddingHorizontal: 14 },
-  scaleText: { color: color.muted, fontSize: 11, fontVariant: ["tabular-nums"], fontWeight: "800" },
   pills: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   pill: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1.5, paddingHorizontal: 16, paddingVertical: 9 },
   pillOn: { backgroundColor: color.ink, borderColor: color.ink },

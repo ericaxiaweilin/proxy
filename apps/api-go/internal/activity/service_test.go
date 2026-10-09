@@ -705,3 +705,25 @@ func TestPublishActivityKeepsAValidStructuredStartAndRejectsNonsense(t *testing.
 		}
 	}
 }
+
+// 人数上限 80：80 可以，81 不行；低于 2 也不行。
+func TestPublishActivityCapacityBounds(t *testing.T) {
+	s := New()
+	n := 0
+	publish := func(capacity int) command.Result {
+		n++
+		e := activityEnvelope("PublishActivity", "owner_cap", "new")
+		e.CommandID = fmt.Sprintf("PublishActivity_cap%d", n)
+		e.Payload = map[string]any{"title": fmt.Sprintf("活动%d", n), "time": fmt.Sprintf("周%d 10:00", n), "capacity": capacity, "venueName": "木光咖啡", "venueIcon": "☕", "venueType": "CAFE", "realitySceneId": "scene_muguang", "desc": "聊天", "consumptionTerm": "SPLIT"}
+		return s.HandleContext(t.Context(), e)
+	}
+	if out := publish(80); out.Outcome != "ACCEPTED" {
+		t.Fatalf("80 is the largest allowed: %+v", out.Error)
+	}
+	if out := publish(81); out.Outcome != "REJECTED" {
+		t.Fatal("81 is over the cap")
+	}
+	if out := publish(1); out.Outcome != "REJECTED" {
+		t.Fatal("a one-person activity is not an activity")
+	}
+}
