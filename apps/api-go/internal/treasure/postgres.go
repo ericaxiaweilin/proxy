@@ -45,14 +45,14 @@ func (p *Postgres) Spawn(ctx context.Context, now time.Time) (int, error) {
 	tag, err := p.pool.Exec(ctx, `
 		INSERT INTO treasure.chests (id, scene_id, points, capacity, created_at, expires_at, prize_id, prize_slots)
 		SELECT 'tc_' || md5(sc.id || clock_timestamp()::text), sc.id,
-		       CASE WHEN pr.id IS NOT NULL THEN $6 ELSE $1 END, $2, $3, $4,
-		       COALESCE(pr.id, ''), COALESCE(LEAST($7, pr.quota - pr.awarded - COALESCE(held.slots, 0)), 0)
+		       CASE WHEN pr.id IS NOT NULL THEN $6::int ELSE $1::int END, $2::int, $3::timestamptz, $4::timestamptz,
+		       COALESCE(pr.id, ''), COALESCE(LEAST($7::int, pr.quota - pr.awarded - COALESCE(held.slots, 0)), 0)
 		  FROM reality.scenes sc
 		  LEFT JOIN treasure.prizes pr ON pr.scene_id = sc.id AND pr.status = 'ACTIVE' AND pr.awarded < pr.quota
 		  LEFT JOIN LATERAL (SELECT COALESCE(SUM(c2.prize_slots),0) AS slots FROM treasure.chests c2 WHERE c2.prize_id = pr.id AND c2.status = 'ACTIVE') held ON TRUE
 		 WHERE sc.status = 'ACTIVE' AND sc.type LIKE '咖啡%'
 		   AND NOT EXISTS (SELECT 1 FROM treasure.chests c WHERE c.scene_id = sc.id AND c.status = 'ACTIVE')
-		 ORDER BY sc.id LIMIT $5
+		 ORDER BY sc.id LIMIT $5::int
 		ON CONFLICT DO NOTHING`, SoloPoints, SoloCapacity, now.UTC(), now.Add(ChestTTL).UTC(), room, PrizePoints, PrizeSlotsPerChest)
 	return int(tag.RowsAffected()), err
 }
