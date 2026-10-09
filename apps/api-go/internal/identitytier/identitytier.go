@@ -1,4 +1,5 @@
-// Package identitytier：身份成长体系（铜 / 银 / 金 × 1–3 星）。积分 → 等级是纯函数，等级不单独存。
+// Package identitytier：身份成长体系（铜 / 银 / 金 / 铂 × 1–3 星）。积分 → 等级是纯函数，等级不单独存。
+// 「我的权益」（internal/growth）就是这套体系的展示面：它读这里的阶梯和积分账本，不另算一份。
 //
 // 固定部分：等级阶梯和积分赚取规则（代码里）。不固定的奖励活动（咖啡券等）在 incentive.rules：
 // 按分数、在时间窗口里由运营开启。积分不是钱，不能提现。
@@ -24,17 +25,18 @@ func Valid(k Kind) bool {
 }
 
 type Step struct {
-	Tier  string `json:"tier"` // BRONZE | SILVER | GOLD
-	Name  string `json:"name"` // 铜 / 银 / 金
+	Tier  string `json:"tier"` // BRONZE | SILVER | GOLD | PLATINUM
+	Name  string `json:"name"` // 铜 / 银 / 金 / 铂
 	Stars int    `json:"stars"`
 	Min   int    `json:"min"` // 到这一级需要的积分
 }
 
-// 三个身份共用同一条阶梯（运营后面想分开调，改这里按 Kind 分叉即可）：9 级，积分越高越难升。
+// 三个身份共用同一条阶梯：4 档 × 3 星 = 12 级，每档起点和「我的权益」原来的档位一致（0 / 500 / 1000 / 2000）。
 var ladder = []Step{
-	{"BRONZE", "铜", 1, 0}, {"BRONZE", "铜", 2, 100}, {"BRONZE", "铜", 3, 250},
-	{"SILVER", "银", 1, 500}, {"SILVER", "银", 2, 800}, {"SILVER", "银", 3, 1200},
-	{"GOLD", "金", 1, 1800}, {"GOLD", "金", 2, 2600}, {"GOLD", "金", 3, 3600},
+	{"BRONZE", "铜", 1, 0}, {"BRONZE", "铜", 2, 150}, {"BRONZE", "铜", 3, 300},
+	{"SILVER", "银", 1, 500}, {"SILVER", "银", 2, 650}, {"SILVER", "银", 3, 800},
+	{"GOLD", "金", 1, 1000}, {"GOLD", "金", 2, 1300}, {"GOLD", "金", 3, 1600},
+	{"PLATINUM", "铂", 1, 2000}, {"PLATINUM", "铂", 2, 2500}, {"PLATINUM", "铂", 3, 3000},
 }
 
 func Ladder(k Kind) []Step { return append([]Step(nil), ladder...) }

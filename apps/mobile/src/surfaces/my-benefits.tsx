@@ -106,7 +106,7 @@ export function MyGrowthSurface({
             <View style={styles.heroAvatarFallback}><Text selectable style={styles.heroAvatarFallbackText}>{initial}</Text></View>
           )}
           <View style={styles.heroHeadInfo}>
-            <Text numberOfLines={1} selectable style={styles.heroName}>{viewerDisplayName || "我"} <Text style={styles.heroBadge}>{summary.tier.name}</Text></Text>
+            <Text numberOfLines={1} selectable style={styles.heroName}>{viewerDisplayName || "我"} <Text style={styles.heroBadge}>{summary.tier.name}{"★".repeat(summary.tier.stars ?? 0)}</Text></Text>
             <Text selectable style={styles.heroSub}>成长值 {summary.tier.currentPoints}{summary.tier.nextLevelPoints ? ` / ${summary.tier.nextLevelPoints}` : ""}</Text>
           </View>
         </View>

@@ -7,7 +7,7 @@ func TestResolveWalksTheLadderAndStopsAtTheTop(t *testing.T) {
 		pts   int
 		tier  string
 		stars int
-	}{{-5, "BRONZE", 1}, {0, "BRONZE", 1}, {99, "BRONZE", 1}, {100, "BRONZE", 2}, {250, "BRONZE", 3}, {500, "SILVER", 1}, {1799, "SILVER", 3}, {1800, "GOLD", 1}, {99999, "GOLD", 3}} {
+	}{{-5, "BRONZE", 1}, {0, "BRONZE", 1}, {149, "BRONZE", 1}, {150, "BRONZE", 2}, {300, "BRONZE", 3}, {500, "SILVER", 1}, {999, "SILVER", 3}, {1000, "GOLD", 1}, {2000, "PLATINUM", 1}, {99999, "PLATINUM", 3}} {
 		l := Resolve(User, c.pts)
 		if l.Tier != c.tier || l.Stars != c.stars {
 			t.Fatalf("%d -> %s%d, want %s%d", c.pts, l.Tier, l.Stars, c.tier, c.stars)
@@ -16,7 +16,7 @@ func TestResolveWalksTheLadderAndStopsAtTheTop(t *testing.T) {
 	if l := Resolve(User, 99999); !l.Highest || l.Next != nil {
 		t.Fatal("the top level has no next")
 	}
-	if l := Resolve(User, 40); l.Next == nil || l.ToNext != 60 {
+	if l := Resolve(User, 40); l.Next == nil || l.ToNext != 110 {
 		t.Fatalf("distance to next: %+v", l)
 	}
 }

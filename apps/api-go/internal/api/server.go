@@ -366,7 +366,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/feed", s.publicFeed)
 	mux.HandleFunc("/v1/reality-scenes", s.publicRealityScenes)
 	mux.HandleFunc("/v1/weather", s.publicWeather)
-	mux.HandleFunc("/v1/me/identity-tier", s.myIdentityTier)
 	mux.HandleFunc("/v1/scene-assets", s.publicSceneAssets)
 	mux.HandleFunc("/v1/reality-scenes/nearby", s.nearbyRealityScenes)
 	mux.HandleFunc("/v1/scenes/", s.dynamicSceneRead)

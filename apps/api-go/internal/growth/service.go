@@ -30,11 +30,13 @@ package growth
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/identitytier"
 )
 
 // ──────────────────────────────────────────────────────────────
@@ -104,24 +106,35 @@ func tierRank(level TierLevel) int {
 type Tier struct {
 	Level           TierLevel `json:"level"`
 	Name            string    `json:"name"`
+	Stars           int       `json:"stars"` // 1–3，档内第几星（identitytier 阶梯）
 	CurrentPoints   int       `json:"currentPoints"`
 	NextLevelPoints int       `json:"nextLevelPoints,omitempty"`
 	NextLevelName   string    `json:"nextLevelName,omitempty"`
 }
 
 func resolveTier(points int) Tier {
-	for i, t := range tierLadder {
+	// 档位用本包的 tierLadder（特权 / 对比表都挂在它上面）；档内星级和「下一级」用统一的身份阶梯。
+	l := identitytier.Resolve(identitytier.User, points)
+	tier := Tier{Level: TierBronze, Name: "青铜会员", CurrentPoints: points, Stars: l.Stars}
+	for _, t := range tierLadder {
 		if points >= t.min {
-			tier := Tier{Level: t.level, Name: t.name, CurrentPoints: points}
-			if i > 0 {
-				next := tierLadder[i-1]
-				tier.NextLevelPoints = next.min
-				tier.NextLevelName = next.name
-			}
-			return tier
+			tier.Level, tier.Name = t.level, t.name
+			break
 		}
 	}
-	return Tier{Level: TierBronze, Name: "青铜会员", CurrentPoints: points}
+	if l.Next != nil {
+		tier.NextLevelPoints = l.Next.Min
+		nextName := tier.Name
+		if l.Next.Tier != l.Tier {
+			for _, t := range tierLadder {
+				if string(t.level) == l.Next.Tier {
+					nextName = t.name
+				}
+			}
+		}
+		tier.NextLevelName = nextName + strings.Repeat("★", l.Next.Stars)
+	}
+	return tier
 }
 
 type TodayProgress struct {
@@ -292,7 +305,17 @@ type orderReader interface {
 type Service struct {
 	repo  orderReader
 	clock clock.Clock
+	// ledger：积分账本（用户行为积分 + 奖励活动给的成长值）。nil = 只算订单积分。
+	ledger ledgerReader
 }
+
+// ledgerReader 读一个人在某个身份下的账本积分。
+type ledgerReader interface {
+	Points(ctx context.Context, k identitytier.Kind, id string) (int, error)
+}
+
+// SetLedger 接上积分账本：「我的权益」的成长值 = 订单积分 + 账本积分，等级由合计算。
+func (s *Service) SetLedger(l ledgerReader) { s.ledger = l }
 
 func New(repo orderReader) *Service {
 	return &Service{repo: repo, clock: clock.System{}}
@@ -319,7 +342,16 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		if err != nil {
 			return command.Rejected(e, "GROWTH_SUMMARY_FAILED", "INTERNAL", "SAFE_RETRY", "growth.summary_failed", nil)
 		}
-		summary := BuildSummary(orders, e.Actor.ID, s.clock.Now())
+		bonus := 0
+		if s.ledger != nil {
+			// 读不出来就只算订单积分（宁可少算，不编）。
+			for _, k := range []identitytier.Kind{identitytier.User, identitytier.Provider} {
+				if n, err := s.ledger.Points(ctx, k, e.Actor.ID); err == nil {
+					bonus += n
+				}
+			}
+		}
+		summary := BuildSummaryWithBonus(orders, e.Actor.ID, s.clock.Now(), bonus)
 		result := command.Accepted(e, "GrowthSummary", e.Actor.ID, 1, "READY", nil)
 		result.Body = map[string]any{"summary": summary}
 		return result
@@ -332,6 +364,11 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 // table-driven tests can construct fixtures directly, without going
 // through the command envelope.
 func BuildSummary(all []fulfillment.Order, actorID string, now time.Time) Summary {
+	return BuildSummaryWithBonus(all, actorID, now, 0)
+}
+
+// BuildSummaryWithBonus：bonus 是账本里的积分（订单之外赚的），并进成长值再算等级。
+func BuildSummaryWithBonus(all []fulfillment.Order, actorID string, now time.Time, bonus int) Summary {
 	mine := agentOrders(all, actorID)
 	completed := completedOrders(mine)
 
@@ -349,7 +386,7 @@ func BuildSummary(all []fulfillment.Order, actorID string, now time.Time) Summar
 
 	settlementConfirmedToday := settlementConfirmedSince(completed, dayStart)
 
-	points := len(completed)*pointsPerCompletedOrder + satFull*pointsPerFullSatisfaction + repeatCustomers*pointsPerRepeatCustomer
+	points := len(completed)*pointsPerCompletedOrder + satFull*pointsPerFullSatisfaction + repeatCustomers*pointsPerRepeatCustomer + bonus
 	tier := resolveTier(points)
 
 	stats := Stats{

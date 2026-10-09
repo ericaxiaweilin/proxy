@@ -1002,6 +1002,13 @@ func main() {
 	// no separate service construction order to worry about, no new
 	// repository to open.
 	server.Growth = growth.New(fulfillmentService.Repository())
+	if server.IdentityTiers != nil {
+		if l, ok := server.IdentityTiers.(interface {
+			Points(context.Context, identitytier.Kind, string) (int, error)
+		}); ok {
+			server.Growth.SetLedger(l)
+		}
+	}
 	// CLIENT-RATING-001: ratingService already has its final (memory or
 	// Postgres) form by here — wire it into both the command surface and
 	// marketplace's read-through lookup (ListMarketOpportunities attaches

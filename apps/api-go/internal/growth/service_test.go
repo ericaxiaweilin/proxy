@@ -246,3 +246,21 @@ func findEgg(t *testing.T, s Summary, key string) Egg {
 	t.Fatalf("no egg with key %q in %+v", key, s.Eggs)
 	return Egg{}
 }
+
+// 「我的权益」的成长值 = 订单积分 + 账本积分；等级和星级由合计算。
+func TestSummaryAddsLedgerPointsAndShowsStars(t *testing.T) {
+	s := BuildSummaryWithBonus(nil, "agent_1", fixedNow, 175)
+	if s.Tier.Level != TierBronze || s.Tier.Stars != 2 || s.Tier.CurrentPoints != 175 {
+		t.Fatalf("175 points = bronze 2 stars: %+v", s.Tier)
+	}
+	if s.Tier.NextLevelPoints != 300 || s.Tier.NextLevelName != "青铜会员★★★" {
+		t.Fatalf("next step is the third star: %+v", s.Tier)
+	}
+	top := BuildSummaryWithBonus(nil, "agent_1", fixedNow, 600)
+	if top.Tier.Level != TierSilver || top.Tier.Stars != 1 {
+		t.Fatalf("600 = silver 1 star: %+v", top.Tier)
+	}
+	if got := BuildSummary(nil, "agent_1", fixedNow); got.Tier.CurrentPoints != 0 || got.Tier.Stars != 1 {
+		t.Fatalf("no points is bronze 1 star, honestly zero: %+v", got.Tier)
+	}
+}

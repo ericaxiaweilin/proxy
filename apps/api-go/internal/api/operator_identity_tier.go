@@ -12,7 +12,6 @@ import (
 type IdentityTierSource interface {
 	Points(ctx context.Context, k identitytier.Kind, id string) (int, error)
 	Distribution(ctx context.Context) ([]identitytier.Bucket, error)
-	Recent(ctx context.Context, k identitytier.Kind, id string, limit int) ([]identitytier.Entry, error)
 }
 
 // operatorIdentityTiers：GET /v1/operator/identity-tiers[?kind=USER&userId=…]
@@ -51,35 +50,4 @@ func (s *Server) operatorIdentityTiers(w http.ResponseWriter, r *http.Request) {
 		out["subject"] = map[string]any{"kind": k, "userId": uid, "level": identitytier.Resolve(k, pts)}
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-// myIdentityTier：GET /v1/me/identity-tier —— 我的等级、积分、怎么赚、最近几笔。
-// 没记过分的人是 0 分铜 1，如实说 0，不编。积分不是钱、不能提现。
-func (s *Server) myIdentityTier(w http.ResponseWriter, r *http.Request) {
-	if !methodGuard(w, r, http.MethodGet) {
-		return
-	}
-	if s.IdentityTiers == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "identity_tier_unavailable"})
-		return
-	}
-	auth, ok := s.authenticatePrivacyRequest(w, r)
-	if !ok {
-		return
-	}
-	id := auth.Actor.ID
-	pts, err := s.IdentityTiers.Points(r.Context(), identitytier.User, id)
-	if err != nil {
-		log.Printf("my identity tier: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "identity_tier_failed"})
-		return
-	}
-	recent, err := s.IdentityTiers.Recent(r.Context(), identitytier.User, id, 10)
-	if err != nil {
-		recent = []identitytier.Entry{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"level": identitytier.Resolve(identitytier.User, pts), "earnRules": identitytier.EarnRules(identitytier.User),
-		"ladder": identitytier.Ladder(identitytier.User), "recent": recent,
-	})
 }

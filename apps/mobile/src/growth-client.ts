@@ -26,6 +26,8 @@ export type TierLevel = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM";
 export type Tier = {
   level: TierLevel;
   name: string;
+  /** 档内第几星（1–3）。 */
+  stars?: number;
   currentPoints: number;
   nextLevelPoints?: number;
   nextLevelName?: string;
