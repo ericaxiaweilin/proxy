@@ -3,6 +3,7 @@ package weather
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,8 +58,8 @@ func TestAdviseDryMeansOKAndMissingForecastIsUnknown(t *testing.T) {
 		t.Fatalf("beyond the forecast is unknown, not fine: %+v", a)
 	}
 	rainy := Report{Hours: hoursFrom(now, map[int]string{3: Rain}, map[int]int{3: 65}, 24)}
-	if a := Advise(rainy, now.Add(3*time.Hour), time.Hour, now, hanoi); a.Level != LevelCaution {
-		t.Fatalf("ordinary rain is a reminder, not a block: %+v", a)
+	if a := Advise(rainy, now.Add(3*time.Hour), time.Hour, now, hanoi); a.Level != LevelOK {
+		t.Fatalf("ordinary rain says nothing — only heavy rain / typhoon prompt: %+v", a)
 	}
 }
 
@@ -100,17 +101,58 @@ type provFunc func(lat, lng float64) (Report, error)
 
 func (f provFunc) Fetch(_ context.Context, lat, lng float64) (Report, error) { return f(lat, lng) }
 
-// 台风：越南的「bão」按风速判（≥ 62 km/h），压过雨量级别；并且一定是警告。
-func TestTyphoonIsJudgedByWindAndAlwaysWarns(t *testing.T) {
-	if WithWind(Clear, 61) != Clear || WithWind(Rain, 61.9) != Rain {
-		t.Fatal("below the threshold the weather code decides")
+const gdacsSample = `<?xml version="1.0"?><rss xmlns:gdacs="http://www.gdacs.org" xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#"><channel>
+<item><gdacs:eventtype>TC</gdacs:eventtype><gdacs:iscurrent>true</gdacs:iscurrent><geo:Point><geo:lat>18.3</geo:lat><geo:long>112.6</geo:long></geo:Point></item>
+<item><gdacs:eventtype>TC</gdacs:eventtype><gdacs:iscurrent>false</gdacs:iscurrent><geo:Point><geo:lat>21.0</geo:lat><geo:long>105.8</geo:long></geo:Point></item>
+<item><gdacs:eventtype>EQ</gdacs:eventtype><gdacs:iscurrent>true</gdacs:iscurrent><geo:Point><geo:lat>21.0</geo:lat><geo:long>105.8</geo:long></geo:Point></item>
+<item><gdacs:eventtype>TC</gdacs:eventtype><gdacs:iscurrent>true</gdacs:iscurrent><geo:Point><geo:lat>x</geo:lat><geo:long>y</geo:long></geo:Point></item>
+</channel></rss>`
+
+// 台风 = 公共气象数据（GDACS 现行热带气旋）里有一个中心离用户 500 公里以内。只认 TC、现行、坐标可解析的。
+func TestTyphoonComesFromActiveCyclonesNearTheUser(t *testing.T) {
+	centers, err := ParseGDACS(strings.NewReader(gdacsSample))
+	if err != nil || len(centers) != 1 || centers[0].Lat != 18.3 || centers[0].Lng != 112.6 {
+		t.Fatalf("only the current, parseable TC counts: %+v %v", centers, err)
 	}
-	if WithWind(Drizzle, 62) != Typhoon || WithWind(Clear, 120) != Typhoon {
-		t.Fatal("62 km/h and up is a typhoon, whatever the rain says")
+	if !NearTyphoon([]Center{{Lat: 18.3, Lng: 108.0}}, 16.05, 108.2) { // 岘港附近
+		t.Fatal("a cyclone ~250km away is a typhoon for Da Nang")
 	}
+	if NearTyphoon([]Center{{Lat: 18.3, Lng: 112.6}}, 21.05, 106.07) { // 北宁，≈ 700 km
+		t.Fatal("700km away is not")
+	}
+	if NearTyphoon(nil, 21, 106) {
+		t.Fatal("no cyclones, no typhoon")
+	}
+}
+
+type fakeCyclones struct {
+	c   []Center
+	err error
+}
+
+func (f fakeCyclones) Active(context.Context) ([]Center, error) { return f.c, f.err }
+
+func TestServiceMarksTyphoonOnlyNearAnActiveCycloneAndNeverOnAFailedLookup(t *testing.T) {
+	prov := provFunc(func(float64, float64) (Report, error) {
+		return Report{Now: Now{TempC: 28, Condition: Clear}, Hours: []Hour{{At: time.Now().Add(time.Hour), Condition: Clear}}}, nil
+	})
+	near := &Service{Provider: prov, Cyclones: fakeCyclones{c: []Center{{Lat: 18.3, Lng: 108.0}}}}
+	rep, _ := near.Forecast(context.Background(), 16.05, 108.2)
+	if rep.Now.Condition != Typhoon || rep.Hours[0].Condition != Typhoon {
+		t.Fatalf("near a cyclone: %+v", rep)
+	}
+	far := &Service{Provider: prov, Cyclones: fakeCyclones{c: []Center{{Lat: 18.3, Lng: 112.6}}}}
+	if rep, _ := far.Forecast(context.Background(), 21.05, 106.07); rep.Now.Condition != Clear {
+		t.Fatalf("far away stays as forecast: %+v", rep)
+	}
+	down := &Service{Provider: prov, Cyclones: fakeCyclones{err: errors.New("down")}}
+	if rep, _ := down.Forecast(context.Background(), 16.05, 108.2); rep.Now.Condition != Clear {
+		t.Fatalf("a failed lookup never invents a typhoon: %+v", rep)
+	}
+	// 台风 = 一定提示。
 	now := time.Date(2026, 10, 9, 0, 0, 0, 0, hanoi)
-	rep := Report{Hours: hoursFrom(now, map[int]string{15: Typhoon, 16: Typhoon}, map[int]int{15: 90, 16: 90}, 48)}
-	if a := Advise(rep, now.Add(15*time.Hour), 2*time.Hour, now, hanoi); a.Level != LevelWarn || a.Condition != Typhoon {
+	rep2 := Report{Hours: hoursFrom(now, map[int]string{15: Typhoon, 16: Typhoon}, map[int]int{15: 90, 16: 90}, 48)}
+	if a := Advise(rep2, now.Add(15*time.Hour), 2*time.Hour, now, hanoi); a.Level != LevelWarn || a.Condition != Typhoon {
 		t.Fatalf("a typhoon at the meeting time is a warning: %+v", a)
 	}
 }

@@ -56,8 +56,12 @@ func TestHeavyRainWarnsEveryoneWithBetterTimesAndDryDaysStaySilent(t *testing.T)
 		t.Fatalf("good weather says nothing: %d", n)
 	}
 	out = &rec{}
-	if n, _ := Run(context.Background(), fakeSrc{m}, fakeFc{weather.Rain}, out, now); n != 2 || !strings.Contains(out.got[0], "带伞") {
-		t.Fatalf("ordinary rain is just a reminder: %d %v", n, out.got)
+	if n, _ := Run(context.Background(), fakeSrc{m}, fakeFc{weather.Rain}, out, now); n != 0 {
+		t.Fatalf("ordinary rain says nothing: %d %v", n, out.got)
+	}
+	out = &rec{}
+	if n, _ := Run(context.Background(), fakeSrc{m}, fakeFc{weather.Typhoon}, out, now); n != 2 || !strings.Contains(out.got[0], "台风") {
+		t.Fatalf("a typhoon warns everyone: %d %v", n, out.got)
 	}
 }
 

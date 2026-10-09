@@ -29,10 +29,10 @@ describe("weather", () => {
     expect(msg?.options[1]).toEqual({ label: "明天 18:00", iso: nextDay });
   });
 
-  it("ordinary rain is a reminder; dry or unknown says nothing", () => {
+  it("only heavy rain / typhoon prompt; ordinary rain, dry or unknown say nothing", () => {
     const now = new Date(2026, 9, 9, 10, 0);
     const at = new Date(2026, 9, 9, 15, 0);
-    expect(adviceMessage({ level: "CAUTION", condition: "rain", maxPrecipProb: 65, suggestions: [] }, at, now)?.tone).toBe("caution");
+    expect(adviceMessage({ level: "CAUTION", condition: "rain", maxPrecipProb: 65, suggestions: [] }, at, now)).toBeUndefined(); // 普通雨不提示
     expect(adviceMessage({ level: "OK", maxPrecipProb: 5, suggestions: [] }, at, now)).toBeUndefined();
     expect(adviceMessage({ level: "UNKNOWN", maxPrecipProb: 0, suggestions: [] }, at, now)).toBeUndefined();
     expect(adviceMessage(undefined, at, now)).toBeUndefined();

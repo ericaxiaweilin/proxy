@@ -764,7 +764,7 @@ func main() {
 		}
 		// OPS-AUDIT-001：运营动作审计（operator.action_log，migration 161，只追加）。
 		server.Audit = operatoraudit.NewRecorder(operatoraudit.NewPostgres(pool))
-		server.Weather = &weather.Service{Provider: weather.OpenMeteo{}}
+		server.Weather = &weather.Service{Provider: weather.OpenMeteo{}, Cyclones: weather.GDACS{}}
 		server.IdentityTiers = identitytier.NewPostgres(pool)
 		server.NudgePrefs = guidance.NewPostgres(pool)
 		server.Treasure = treasure.NewPostgres(pool)

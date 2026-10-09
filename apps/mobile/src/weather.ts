@@ -6,7 +6,7 @@
 
 export type WeatherCondition = "clear" | "cloudy" | "fog" | "drizzle" | "rain" | "heavy_rain" | "storm" | "typhoon";
 
-export type WeatherNow = { tempC: number; condition: WeatherCondition; windKmh?: number };
+export type WeatherNow = { tempC: number; condition: WeatherCondition };
 
 export type WeatherAdvice = {
   level: "OK" | "CAUTION" | "WARN" | "UNKNOWN";
@@ -98,11 +98,9 @@ export type AdviceMessage = { tone: "warn" | "caution"; text: string; options: A
 
 /** OK / UNKNOWN 返回 undefined：没话可说就不画。 */
 export function adviceMessage(advice: WeatherAdvice | undefined, at: Date, now: Date): AdviceMessage | undefined {
-  if (!advice || (advice.level !== "WARN" && advice.level !== "CAUTION")) return undefined;
+  if (!advice || advice.level !== "WARN") return undefined;
   const cond = advice.condition ? conditionLabel(advice.condition) : "降雨";
-  if (advice.level === "CAUTION") {
-    return { tone: "caution", text: `${slotOf(at)} 前后可能有${cond}（降水概率 ${advice.maxPrecipProb}%），出门带伞`, options: [] };
-  }
+  // 只有暴雨 / 雷暴 / 台风才提示（level=WARN）；普通雨不打扰（用户：「暴雨 台风要提示 别的没事」）。
   const options: AdviceOption[] = advice.suggestions.map((iso) => {
     const d = new Date(iso);
     const sameDay = d.toDateString() === at.toDateString();

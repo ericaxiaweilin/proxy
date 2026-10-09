@@ -24,12 +24,10 @@ const (
 	Rain      = "rain"
 	HeavyRain = "heavy_rain"
 	Storm     = "storm"
-	// Typhoon：越南说的「bão」——10 米平均风速达到热带风暴量级（≥ 62 km/h，约 8 级）。由风速判，不由天气码判。
+	// Typhoon：台风。不由天气码判（天气码里没有台风），由公共气象数据（GDACS 的现行热带气旋）+ 用户位置判：
+	// 有现行热带气旋的中心离用户不到 TyphoonRadiusKm 就是台风。
 	Typhoon = "typhoon"
 )
-
-// TyphoonWindKmh 是判「台风」的风速门槛（km/h）。
-const TyphoonWindKmh = 62.0
 
 var severity = map[string]int{Clear: 0, Cloudy: 0, Fog: 1, Drizzle: 1, Rain: 2, HeavyRain: 3, Storm: 3, Typhoon: 4}
 
@@ -58,15 +56,6 @@ func ConditionFromWMO(code int) string {
 type Now struct {
 	TempC     float64 `json:"tempC"`
 	Condition string  `json:"condition"`
-	WindKmh   float64 `json:"windKmh"`
-}
-
-// WithWind 把风速并进天气状态：风速达到台风门槛就是台风（压过雨量级别），否则维持天气码的结论。
-func WithWind(condition string, windKmh float64) string {
-	if windKmh >= TyphoonWindKmh {
-		return Typhoon
-	}
-	return condition
 }
 
 type Hour struct {
@@ -94,11 +83,34 @@ func Grid(lat, lng float64) (float64, float64) {
 // Service 带缓存（同网格 30 分钟）。上游失败时，已有的旧缓存最多再用 3 小时，之后如实报错。
 type Service struct {
 	Provider Provider
+	// Cyclones 给出现行热带气旋的中心；nil = 不判台风。读不到（上游挂了）也不判，不编。
+	Cyclones CycloneSource
 	Now      func() time.Time
 	TTL      time.Duration
 
 	mu    sync.Mutex
 	cache map[[2]float64]Report
+
+	cycMu      sync.Mutex
+	cycCenters []Center
+	cycAt      time.Time
+}
+
+// typhoonNear：用户这个位置附近有没有现行热带气旋（中心列表缓存 30 分钟；读不到就当没有）。
+func (s *Service) typhoonNear(ctx context.Context, lat, lng float64) bool {
+	if s.Cyclones == nil {
+		return false
+	}
+	s.cycMu.Lock()
+	defer s.cycMu.Unlock()
+	if s.cycAt.IsZero() || s.now().Sub(s.cycAt) > 30*time.Minute {
+		if centers, err := s.Cyclones.Active(ctx); err == nil {
+			s.cycCenters, s.cycAt = centers, s.now()
+		} else if s.cycAt.IsZero() || s.now().Sub(s.cycAt) > 3*time.Hour {
+			s.cycCenters = nil
+		}
+	}
+	return NearTyphoon(s.cycCenters, lat, lng)
 }
 
 func (s *Service) now() time.Time {
@@ -109,6 +121,17 @@ func (s *Service) now() time.Time {
 }
 
 func (s *Service) Forecast(ctx context.Context, lat, lng float64) (Report, error) {
+	rep, err := s.forecastBase(ctx, lat, lng)
+	if err != nil {
+		return rep, err
+	}
+	if s.typhoonNear(ctx, lat, lng) {
+		return withTyphoon(rep, s.now()), nil
+	}
+	return rep, nil
+}
+
+func (s *Service) forecastBase(ctx context.Context, lat, lng float64) (Report, error) {
 	glat, glng := Grid(lat, lng)
 	key := [2]float64{glat, glng}
 	ttl := s.TTL
@@ -153,7 +176,7 @@ func (o OpenMeteo) Fetch(ctx context.Context, lat, lng float64) (Report, error) 
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
-	url := fmt.Sprintf("%s/v1/forecast?latitude=%.1f&longitude=%.1f&current=temperature_2m,weather_code,wind_speed_10m&hourly=precipitation_probability,weather_code,wind_speed_10m&forecast_days=3&timeformat=unixtime&timezone=auto", base, lat, lng)
+	url := fmt.Sprintf("%s/v1/forecast?latitude=%.1f&longitude=%.1f&current=temperature_2m,weather_code&hourly=precipitation_probability,weather_code&forecast_days=3&timeformat=unixtime&timezone=auto", base, lat, lng)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return Report{}, err
@@ -170,28 +193,22 @@ func (o OpenMeteo) Fetch(ctx context.Context, lat, lng float64) (Report, error) 
 		Current struct {
 			Temp float64 `json:"temperature_2m"`
 			Code int     `json:"weather_code"`
-			Wind float64 `json:"wind_speed_10m"`
 		} `json:"current"`
 		Hourly struct {
 			Time []int64    `json:"time"`
 			Prob []*float64 `json:"precipitation_probability"`
 			Code []*int     `json:"weather_code"`
-			Wind []*float64 `json:"wind_speed_10m"`
 		} `json:"hourly"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return Report{}, err
 	}
-	rep := Report{Now: Now{TempC: math.Round(body.Current.Temp), Condition: WithWind(ConditionFromWMO(body.Current.Code), body.Current.Wind), WindKmh: math.Round(body.Current.Wind)}}
+	rep := Report{Now: Now{TempC: math.Round(body.Current.Temp), Condition: ConditionFromWMO(body.Current.Code)}}
 	for i, ts := range body.Hourly.Time {
 		if i >= len(body.Hourly.Prob) || i >= len(body.Hourly.Code) || body.Hourly.Prob[i] == nil || body.Hourly.Code[i] == nil {
 			continue // 缺的小时不补
 		}
-		wind := 0.0
-		if i < len(body.Hourly.Wind) && body.Hourly.Wind[i] != nil {
-			wind = *body.Hourly.Wind[i]
-		}
-		rep.Hours = append(rep.Hours, Hour{At: time.Unix(ts, 0).UTC(), PrecipProb: int(*body.Hourly.Prob[i]), Condition: WithWind(ConditionFromWMO(*body.Hourly.Code[i]), wind)})
+		rep.Hours = append(rep.Hours, Hour{At: time.Unix(ts, 0).UTC(), PrecipProb: int(*body.Hourly.Prob[i]), Condition: ConditionFromWMO(*body.Hourly.Code[i])})
 	}
 	return rep, nil
 }
@@ -232,16 +249,12 @@ func windowWorst(hours []Hour, start time.Time, dur time.Duration) (sev int, con
 }
 
 func levelOf(sev, prob int) string {
-	switch {
-	case sev >= 3:
+	// 只有暴雨 / 雷暴 / 台风才提示（用户：「暴雨 台风要提示 别的没事」）。普通雨不打扰。
+	_ = prob
+	if sev >= 3 {
 		return LevelWarn
-	case sev >= 2 || prob >= 60:
-		return LevelCaution
-	case sev >= 1 && prob >= 40:
-		return LevelCaution
-	default:
-		return LevelOK
 	}
+	return LevelOK
 }
 
 // Advise 判断 [at, at+dur) 的天气，并在不是 OK 时给出之后 48 小时内更合适的开始时间。
@@ -267,7 +280,8 @@ func Advise(rep Report, at time.Time, dur time.Duration, now time.Time, loc *tim
 			continue
 		}
 		s, _, p, ok := windowWorst(rep.Hours, t, dur)
-		if !ok || levelOf(s, p) != LevelOK {
+		// 建议的时段要「干」：连普通雨 / 毛毛雨都不要（只有暴雨 / 台风才提示，但推荐时间要挑真正好的）。
+		if !ok || s != 0 || levelOf(s, p) != LevelOK {
 			continue
 		}
 		d := t.Sub(at)
