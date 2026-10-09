@@ -564,15 +564,22 @@ export function DemandWizard({ marketplace, supply, onBack, onPublished, onViewM
     setPublishing(true);
     setError(undefined);
     try {
+      const publishInput = buildDemandPublishInput(
+        template,
+        specs,
+        targetAgent?.agentId,
+        priceQuote === undefined ? { price: "", moneyFlow: "TBD" } : { price: demandPriceToWire(priceQuote), moneyFlow: "EARN" }
+      );
+      // WEATHER-001：带了坐标的需求，同时带上结构化开始时间（向导只选时刻，取「下一次出现的那一刻」）和时长，
+      // 确认合作后服务端据此在见面前一天提醒天气。没坐标就不带——不知道在哪就谈不上天气。
+      const startsAt = nextOccurrence(normalizeTimeSlot(specs.time), new Date());
+      const structured = typeof specs.lat === "number" && typeof specs.lng === "number"
+        ? { ...publishInput, startsAt: startsAt.toISOString(), durationMinutes: (Number.parseInt(normalizeDuration(specs.duration), 10) || 2) * 60 }
+        : publishInput;
       const opportunity = await marketplace.publish(
         // DEMAND-TARGET-KEEP-001：搭子选择跟着需求走（定向邀约）。targetAgent 为空
         // 时第三个参数是 undefined，wire 形状与改动前一致。
-        buildDemandPublishInput(
-          template,
-          specs,
-          targetAgent?.agentId,
-          priceQuote === undefined ? { price: "", moneyFlow: "TBD" } : { price: demandPriceToWire(priceQuote), moneyFlow: "EARN" }
-        )
+        structured
       );
       setResult(opportunity);
       onPublished(opportunity);

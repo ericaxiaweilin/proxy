@@ -978,7 +978,11 @@ export const PublishMarketOpportunityInputSchema = z.object({
   // ORDER-SCENARIO-001: 发布向导按 moment 家族填（pro → assistance）。
   scenario: z.enum(["ordinary", "assistance"]).optional(),
   // MARKET-FAST-001：选「快速」= 同意平台按撮合排名代选报名人（她 5 分钟内确认即成单，超时换下一位）。
-  matchingMode: z.enum(["FAST"]).optional()
+  matchingMode: z.enum(["FAST"]).optional(),
+  // WEATHER-001：结构化开始时间（ISO）与时长（分钟）。「time」是给人看的文字；天气提醒只认这两个，
+  // 且只在带了坐标时有意义。不带 = 不提醒。
+  startsAt: z.string().datetime().optional(),
+  durationMinutes: z.number().int().min(15).max(1440).optional()
 });
 export type PublishMarketOpportunityInput = z.infer<typeof PublishMarketOpportunityInputSchema>;
 

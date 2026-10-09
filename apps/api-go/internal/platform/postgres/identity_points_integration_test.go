@@ -277,3 +277,59 @@ func TestProviderOrderPointsMatchTheLiveFormulaAndCountOnce(t *testing.T) {
 		t.Fatalf("3*50 + 1*30 + 1*100 = 280, once each: %d", pts)
 	}
 }
+
+// WEATHER-001：需求的天气提醒来源 —— 只取已确认合作、带坐标和结构化开始时间、在窗口内的需求，发布人 + 确认的那位。
+func TestWeatherWatchUpcomingIncludesConfirmedDemands(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	confirmed, open, noCoord := "opp_ww1_"+stamp, "opp_ww2_"+stamp, "opp_ww3_"+stamp
+	all := []string{confirmed, open, noCoord}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM marketplace.applications WHERE opportunity_id = ANY($1)`, all)
+		_, _ = pool.Exec(bg, `DELETE FROM marketplace.opportunities WHERE id = ANY($1)`, all)
+	})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	now := time.Now().UTC()
+	starts := now.Add(24 * time.Hour).Format(time.RFC3339)
+	opp := func(id string, withCoord bool) {
+		payload := fmt.Sprintf(`{"id":"%s","title":"周六同行","startsAt":"%s","durationMinutes":180`, id, starts)
+		if withCoord {
+			payload += `,"lat":21.05,"lng":105.82`
+		}
+		exec(`INSERT INTO marketplace.opportunities (id, owner_id, payload) VALUES ($1,$2,$3::jsonb)`, id, "owner_"+stamp, payload+"}")
+	}
+	opp(confirmed, true)
+	opp(open, true)
+	opp(noCoord, false)
+	app := func(oppID, applicant, status string) {
+		exec(`INSERT INTO marketplace.applications (id, opportunity_id, applicant_id, payload, created_at) VALUES ($1,$2,$3,$4::jsonb,$5)`,
+			"app_"+oppID+applicant, oppID, applicant, fmt.Sprintf(`{"status":"%s"}`, status), now)
+	}
+	app(confirmed, "xiaomei_"+stamp, "CONFIRMED")
+	app(confirmed, "other_"+stamp, "PENDING")
+	app(open, "xiaomei_"+stamp, "PENDING")
+	app(noCoord, "xiaomei_"+stamp, "CONFIRMED")
+	got, err := weatherwatch.NewPostgres(pool).Upcoming(ctx, now.Add(18*time.Hour), now.Add(30*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *weatherwatch.Meeting
+	for i := range got {
+		switch got[i].ID {
+		case "opp:" + confirmed:
+			found = &got[i]
+		case "opp:" + open, "opp:" + noCoord:
+			t.Fatalf("%s must not be picked", got[i].ID)
+		}
+	}
+	if found == nil || len(found.People) != 2 || found.DurationMin != 180 {
+		t.Fatalf("confirmed demand with owner + the confirmed applicant only: %+v", found)
+	}
+}

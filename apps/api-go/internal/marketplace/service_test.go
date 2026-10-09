@@ -484,6 +484,7 @@ func TestMarketApplyRequiresKYCWhenCheckerSet(t *testing.T) {
 		t.Fatalf("approved KYC must accept, got %+v", out)
 	}
 }
+
 // 服务器应在 ApplyToMarketOpportunity 边界返回 AI_ACTION_FORBIDDEN。
 // 这条 tripwire 保证未来重构不会默默打开“AI 助手调用接单”的能力。
 func TestMarketApplyIsForbiddenForAIActor(t *testing.T) {
@@ -1245,5 +1246,43 @@ func TestListMarketOpportunitiesAttachesRealRatingOnly(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("published opportunity not found in listing")
+	}
+}
+
+// WEATHER-001：需求的结构化开始时间可选；给了就要在合理范围内，并随机会存下来供天气提醒用。
+func TestPublishOpportunityKeepsAValidStructuredStartAndRejectsNonsense(t *testing.T) {
+	s := New()
+	base := map[string]any{"title": "周六城市同行", "theme": "城市同行", "date": "周六", "time": "10:00", "location": "河内 · 西湖", "price": "2,000,000₫", "skills": "中文", "lat": 21.05, "lng": 105.82}
+	publish := func(extra map[string]any) (Opportunity, command.Result) {
+		p := map[string]any{}
+		for k, v := range base {
+			p[k] = v
+		}
+		for k, v := range extra {
+			p[k] = v
+		}
+		out := s.HandleContext(t.Context(), marketEnvelope("PublishMarketOpportunity", "owner", p))
+		var body struct {
+			Opportunity Opportunity `json:"opportunity"`
+		}
+		_ = json.Unmarshal([]byte(out.OperationRef), &body)
+		return body.Opportunity, out
+	}
+	start := time.Now().Add(30 * time.Hour).UTC().Truncate(time.Minute)
+	o, out := publish(map[string]any{"startsAt": start.Format(time.RFC3339), "durationMinutes": 120})
+	if out.Outcome != "ACCEPTED" || o.StartsAt == nil || !o.StartsAt.Equal(start) || o.DurationMinutes != 120 {
+		t.Fatalf("structured start kept: %+v %+v", out, o)
+	}
+	if o, out := publish(nil); out.Outcome != "ACCEPTED" || o.StartsAt != nil {
+		t.Fatalf("optional: %+v", out)
+	}
+	for name, extra := range map[string]map[string]any{
+		"long ago":    {"startsAt": time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)},
+		"years ahead": {"startsAt": time.Now().Add(400 * 24 * time.Hour).UTC().Format(time.RFC3339)},
+		"absurd len":  {"startsAt": start.Format(time.RFC3339), "durationMinutes": 5},
+	} {
+		if _, out := publish(extra); out.Outcome != "REJECTED" {
+			t.Fatalf("%s must be rejected: %+v", name, out)
+		}
 	}
 }

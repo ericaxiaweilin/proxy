@@ -1,13 +1,13 @@
 package marketplace
 
 import (
-	"sort"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -112,6 +112,7 @@ type OrderRecord struct {
 func (s *Service) SetOrderPermission(check func(ctx context.Context, userAccountID string) (bool, error)) {
 	s.orderPermission = check
 }
+
 // Production code in cmd/api/main.go calls this once at boot; tests
 // can leave it nil to exercise the legacy path.
 func (s *Service) SetOrderCreator(c OrderCreator) { s.orderCreator = c }
@@ -216,22 +217,22 @@ type Opportunity struct {
 	PriceLabel string `json:"priceLabel"`
 	// R58 demand notes (optional free text). Stored verbatim in the JSONB
 	// payload; no migration needed for the additive field.
-	Desc                    string   `json:"desc,omitempty"`
-	Owner                   string   `json:"owner"`
-	OwnerID                 string   `json:"-"`
-	OwnerType               string   `json:"ownerType"`
-	Match                   string   `json:"match"`
-	Responses               int      `json:"responses"`
-	Posted                  string   `json:"posted"`
-	Skills                  string   `json:"skills"`
-	Verified                bool     `json:"verified"`
+	Desc      string `json:"desc,omitempty"`
+	Owner     string `json:"owner"`
+	OwnerID   string `json:"-"`
+	OwnerType string `json:"ownerType"`
+	Match     string `json:"match"`
+	Responses int    `json:"responses"`
+	Posted    string `json:"posted"`
+	Skills    string `json:"skills"`
+	Verified  bool   `json:"verified"`
 	// CLIENT-RATING-001: the owner's real public rating (providers rate
 	// clients after a completed order — see internal/rating). Both are
 	// omitted (not zero) when RatingCount == 0: nobody has rated this
 	// owner yet, so there is no average to show, and 0 would read as a
 	// real (bad) score rather than "no data".
-	Rating      float64 `json:"rating,omitempty"`
-	RatingCount int     `json:"ratingCount,omitempty"`
+	Rating                  float64  `json:"rating,omitempty"`
+	RatingCount             int      `json:"ratingCount,omitempty"`
 	Lens                    []string `json:"lens"`
 	Travel                  *int     `json:"travel"`
 	Signal                  string   `json:"signal"`
@@ -248,9 +249,13 @@ type Opportunity struct {
 	// distance. Lat/Lng stay optional because some opportunities
 	// are remote (online) or the publisher didn't disclose a
 	// precise venue.
-	Lat          *float64 `json:"lat,omitempty"`
-	Lng          *float64 `json:"lng,omitempty"`
-	TravelSource string   `json:"travelSource,omitempty"` // "seeded" | "user_distance" | "unknown"
+	// StartsAt / DurationMinutes：结构化开始时间与时长（发布时可选；Time 仍是给人看的文字）。
+	// 天气提醒这类要算时间的功能只认这两个，没有就不提醒。
+	StartsAt        *time.Time `json:"startsAt,omitempty"`
+	DurationMinutes int        `json:"durationMinutes,omitempty"`
+	Lat             *float64   `json:"lat,omitempty"`
+	Lng             *float64   `json:"lng,omitempty"`
+	TravelSource    string     `json:"travelSource,omitempty"` // "seeded" | "user_distance" | "unknown"
 	// OPP-TARGETED-001: optional directed invitation. When set, the
 	// opportunity is a private ask to one specific account (选人 → 向
 	// TA 发出邀约): List only shows it to the target and the owner;
@@ -267,21 +272,21 @@ type Opportunity struct {
 }
 
 type Application struct {
-	ID            string     `json:"applicationId"`
-	OpportunityID string     `json:"opportunityId"`
-	OwnerID       string     `json:"-"` // R17.x: opportunity owner, 在 apply 时快照, 用于派生 Order.RequesterID (fulfillment 侧不查 opportunity)
-	ApplicantID   string     `json:"applicantId"`
-	Quote         string     `json:"quote"`
-	Scope         string     `json:"scope"`
-	Status        string     `json:"status"`
+	ID            string `json:"applicationId"`
+	OpportunityID string `json:"opportunityId"`
+	OwnerID       string `json:"-"` // R17.x: opportunity owner, 在 apply 时快照, 用于派生 Order.RequesterID (fulfillment 侧不查 opportunity)
+	ApplicantID   string `json:"applicantId"`
+	Quote         string `json:"quote"`
+	Scope         string `json:"scope"`
+	Status        string `json:"status"`
 	// ORDER-SCENARIO-001: 报名时从机会快照的消费场景（ordinary/assistance/空），
 	// 确认时原样带进 OrderRecord。与 OwnerID 同一条快照 precedent —— 确认回调里
 	// 不许再读仓（memory 锁重入死锁），只消费这里现成的值。
-	Scenario      string     `json:"scenario,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	SelectedAt    *time.Time `json:"selectedAt,omitempty"`
-	ConfirmedAt   *time.Time `json:"confirmedAt,omitempty"`
-	OrderRef      string     `json:"orderRef,omitempty"`
+	Scenario    string     `json:"scenario,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	SelectedAt  *time.Time `json:"selectedAt,omitempty"`
+	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
+	OrderRef    string     `json:"orderRef,omitempty"`
 }
 
 func New() *Service {
@@ -425,6 +430,17 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		var p Opportunity
 		if !decode(e.Payload, &p) || p.Title == "" || p.Location == "" {
 			return rejected(e, "INVALID_OPPORTUNITY", "market.invalid_opportunity")
+		}
+		// 结构化开始时间：给了就必须在合理范围内（不早于一小时前、不晚于 180 天后；时长 0 或 15 分钟到 24 小时）。
+		if p.StartsAt != nil {
+			t := p.StartsAt.UTC()
+			if t.Before(time.Now().Add(-time.Hour)) || t.After(time.Now().Add(180*24*time.Hour)) ||
+				(p.DurationMinutes != 0 && (p.DurationMinutes < 15 || p.DurationMinutes > 24*60)) {
+				return rejected(e, "INVALID_OPPORTUNITY", "market.invalid_start")
+			}
+			p.StartsAt = &t
+		} else {
+			p.DurationMinutes = 0
 		}
 		// R58 demand notes: trim, cap at 500 runes.
 		p.Desc = strings.TrimSpace(p.Desc)
@@ -743,12 +759,12 @@ func normalizeOpportunityMoney(o *Opportunity) {
 // （internal/platform/postgres/marketplace.go）是把整段 payload unmarshal 回来照发
 // 的 —— 那次清扫之前发布的行，至今仍带着当时的编造值下发，客户端只能照画：
 //
-//   · Match  —— 平台从来没有匹配引擎，写路径现在恒为空串。任何非空 Match
-//     都是存量值（活库里能看到 "100%"/"96%"），卡片会渲染成「100% 匹配」。
-//   · Verified —— 只有商家成员资格真的验过（api 层 merchantStamp，见
-//     merchant_identity.go）才该为 true，写路径同时把 OwnerType 置成
-//     BUSINESS。存量行里 ownerType=PERSON + verified=true 这个组合是写路径
-//     从来不产出的，详情页据此给个人发布者画了「商家身份已验证」。
+//	· Match  —— 平台从来没有匹配引擎，写路径现在恒为空串。任何非空 Match
+//	  都是存量值（活库里能看到 "100%"/"96%"），卡片会渲染成「100% 匹配」。
+//	· Verified —— 只有商家成员资格真的验过（api 层 merchantStamp，见
+//	  merchant_identity.go）才该为 true，写路径同时把 OwnerType 置成
+//	  BUSINESS。存量行里 ownerType=PERSON + verified=true 这个组合是写路径
+//	  从来不产出的，详情页据此给个人发布者画了「商家身份已验证」。
 //
 // 只清「平台不产出的形态」，不新增任何判断：Verified 为 true 且 OwnerType 是
 // BUSINESS 的行（真商家）原样保留；种子行的 Verified=false 也原样保留。
@@ -1087,7 +1103,6 @@ func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	return earthRadiusKm * c
 }
 
-
 // ---------- MARKET-RANK-001：报名人按撮合排序 ----------
 //
 // 以前发单方看到的报名列表是「谁先报名谁在前」。现在用同一套撮合口径（internal/matching：可靠 /
@@ -1197,7 +1212,6 @@ func rankReasons(b matching.Breakdown) []RankReason {
 	}
 	return out
 }
-
 
 // ---------- MARKET-FAST-001：快速发单（平台代选） ----------
 
