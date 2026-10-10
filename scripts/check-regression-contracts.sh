@@ -1058,6 +1058,66 @@ if grep -qE 'evaluate_calls_30d|没有注册路由' apps/market-intelligence-con
   exit 1
 fi
 echo "    OPS-ENGINE-API-001: PASS (evaluate 已注册且硬认证 · 暴雨规则行为钉住 · 输入校验 400 · 运营页端点清单为真)"
+# OPS-RESEARCH-001（2026-10-09）：实验 / 影子流量页。
+#
+# 这一页原来是控制台上**最后一个**挂着 notConnected 桩的（「库里没有任何实验或影子流量
+# 的表」）。现在从表建起：迁移 181 两张表 + internal/research（阶段机 + 乐观锁）+
+# 四个端点 + 页面读写都在。钉七件事：
+#   ① 四张表 / 四个口都在，且读口接的是真读模型（不是又变回桩）；
+#   ② 阶段机：DRAFT→LAB→SHADOW→PROD 只能前进，ENDED 是终点（回退 / 跨级都要被拒）；
+#   ③ 乐观锁：读到旧 version 的推阶段必须回冲突，不能静默覆盖（丢更新没人会报）；
+#   ④ 影子只存在于 SHADOW 阶段：DRAFT / LAB / PROD 投影子必须被拒；
+#   ⑤ 输入校验与 /v1/decisions/evaluate 同一份口径（weather 受控词表、0..1 区间、ETA 上限）
+#      —— 400 而不是静默按 clear 处理；
+#   ⑥ 列名 / jsonb 往返 / CHECK 约束对真库钉（Memory 证明不了这些：改个列名它照样绿）；
+#   ⑦ 页面不许退回 mock：它必须**读** /v1/operator/research 且**写**三个 POST 口 ——
+#      只读不写的话那三个写口就成了没人调用的死通道（本仓反复出现过的那种）。
+for t in TestResearchWriteEndpointsAreOperatorOnlyAndPostOnly TestResearchCreateRejectsBadInputAndConflicts \
+         TestResearchStageEndpointGuardsThePipeline TestResearchStageConflictIs409Not500 \
+         TestResearchShadowValidatesSnapshotAndStage TestResearchInventoryIsLiveAndSaysWhatIsNotBuilt; do
+  require_test "OPS-RESEARCH-001" "./internal/api" "$t" \
+    "apps/api-go/internal/api/operator_research_test.go" || exit $?
+done
+for t in TestCreateValidatesAndDefaultsToDraft TestCanTransitionIsStrictlyForwardAndEndedIsTerminal \
+         TestTransitionRejectsUnknownNotFoundAndBackward TestTransitionRefusesToOverwriteSomeoneElsesChange \
+         TestShadowEvaluationOnlyInShadowStage TestInventoryCountsEveryStageAndSortsByRecency; do
+  require_test "OPS-RESEARCH-001" "./internal/research" "$t" \
+    "apps/api-go/internal/research/research_test.go" || exit $?
+done
+require_test "OPS-RESEARCH-001" "./internal/platform/postgres" \
+  "TestResearchRepositoryRoundTripsAgainstRealSchema" \
+  "apps/api-go/internal/platform/postgres/research_integration_test.go" || exit $?
+
+if [ ! -f apps/api-go/migrations/181_research_experiments.sql ]; then
+  echo "  FAIL [OPS-RESEARCH-001]: 迁移 181 不见了 —— 实验表没了，这一页会回 NOT_CONNECTED。" >&2
+  exit 1
+fi
+if ! grep -qF '"/v1/operator/research", s.operatorConsole(s.operatorResearchInventory)' apps/api-go/internal/api/server.go; then
+  echo "  FAIL [OPS-RESEARCH-001]: 读口没接真读模型（又变回 NOT_CONNECTED 桩了？）" >&2
+  exit 1
+fi
+for route in research/experiments research/experiments/stage research/shadow; do
+  if ! grep -qF "\"/v1/operator/$route\"" apps/api-go/internal/api/server.go; then
+    echo "  FAIL [OPS-RESEARCH-001]: /v1/operator/$route 没注册路由。" >&2
+    exit 1
+  fi
+done
+RESEARCH_PAGE=apps/market-intelligence-console/src/pages/Research.tsx
+if ! grep -qF '"/v1/operator/research"' "$RESEARCH_PAGE"; then
+  echo "  FAIL [OPS-RESEARCH-001]: 实验页不再读 /v1/operator/research。" >&2
+  exit 1
+fi
+for p in experiments experiments/stage shadow; do
+  if ! grep -qF "\"/v1/operator/research/$p\"" "$RESEARCH_PAGE"; then
+    echo "  FAIL [OPS-RESEARCH-001]: 实验页不再调 POST /v1/operator/research/$p —— 写口成了没人调用的死通道。" >&2
+    exit 1
+  fi
+done
+if grep -qE 'field_flow|d\.stages|stages\?:' "$RESEARCH_PAGE"; then
+  echo "  FAIL [OPS-RESEARCH-001]: 实验页又出现旧 mock 形状（field_flow / stages）—— 那套字段后端从来不发。" >&2
+  exit 1
+fi
+echo "    OPS-RESEARCH-001: PASS (实验表+阶段机+影子评估接真后端 · 乐观锁不丢更新 · 影子只在 SHADOW · 列名对真库钉 · 页面读写都在)"
 # OPS-TAG-VOCAB-001（2026-10-07）：标签中心。
 #
 # 标签体系（tag-service / tag-factory）不存在：全库只有 1 个名字带 tag 的列

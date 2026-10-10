@@ -131,25 +131,19 @@ func notConnected(missing, spec string) http.HandlerFunc {
 
 const personalizationSpec = "docs/spec/personalization/Proxy_Personalization_Orchestration_Engineering_Spec_v1.md"
 
-// 这一个是**真的没有数据源**的页面（其余各页已建成真读模型，见
-// operator_console_pages.go 与 decisions_evaluate.go；引擎 API 页的
-// 后端 = POST /v1/decisions/evaluate + 复用的引力状态机）。
+// 运营控制台里「没有数据源」的页面曾经都挂在这里当 notConnected 桩。
 //
-// 措辞从「模块名」换成了**具体的缺什么**：哪张表没有写入方、哪个键对不上、哪个端点没注册路由。
-// 「缺 outcome-service」这种写法看起来是说明，其实什么都没说 —— 运营既不知道差多少，
-// 也不知道能不能补。下面每一条都写的是可以**当场验证**的事实。
+// OPS-RESEARCH-001（2026-10-08）之后，最后一页「实验 / 影子流量」也接上了真后端
+// （迁移 181 + internal/research + 四个端点，见 internal/api/operator_research.go），
+// **这个文件里的桩已经清空** —— 留一个空 var 块只会让人以为还有页面没接。
 //
-// 已经建起来的五页（决策引擎 / 信任与风险 / 澄清门 / 意图编排 / 标签中心）搬去了
-// internal/api/operator_console_pages.go，那里接的是真读模型。
+// 措辞原则留在这里，因为以后再出现「没接的页」时还要照它写：不要写「缺
+// outcome-service」这种模块名 —— 那是说明，不是信息，运营既不知道差多少、也不知道
+// 能不能补。要写就写可以**当场验证**的事实：哪张表没有写入方、哪个键对不上、
+// 哪个端点没注册路由。
 //
-// 标签中心是这里唯一「名不副实」的一页：标签体系确实不存在，但库里有 7 个轴今天在
-// 当标签用，盘点它们比留一句「未接入」有用 —— 详见那边 operatorTags 的注释。
-var (
-	// 实验 / 影子流量：连表都没有。
-	operatorResearch = notConnected(
-		"Geometry Research / 影子流量（experiment-service）：库里没有任何实验或影子流量的表（按 experiment / shadow / abtest 全库查表名为 0 命中）",
-		personalizationSpec+" §18 §19")
-)
+// 已建成各页的真读模型在 internal/api/operator_console_pages.go 与
+// decisions_evaluate.go；标签中心的盘点见那边 operatorTags 的注释。
 
 // operatorMerchant：商家管理（OPS-MERCHANT-001）。原来是 notConnected 桩，控制台那页
 // 永远停在「未接入」。库里其实有真数（47 个主体 / 46 家店 / 819 张单），所以这一页

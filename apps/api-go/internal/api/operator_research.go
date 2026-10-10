@@ -145,6 +145,11 @@ func (s *Server) operatorResearchTransition(w http.ResponseWriter, r *http.Reque
 	case errors.Is(err, research.ErrIllegalTransition), errors.Is(err, research.ErrWrongStageForShadow):
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	case errors.Is(err, research.ErrVersionConflict):
+		// 乐观锁：这条实验在你读到它之后被别的运营改过。409 而不是 400 ——
+		// 请求本身没错，重试（拿新状态再推）有意义。
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "experiment_modified_by_someone_else"})
+		return
 	case strings.Contains(err.Error(), "not found"):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "experiment_not_found"})
 		return

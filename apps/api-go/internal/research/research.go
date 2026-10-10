@@ -46,6 +46,11 @@ var ErrIllegalTransition = errors.New("research: illegal stage transition")
 // 影子流量只存在于 SHADOW 阶段，PROD 是真流量，LAB 还没上影子。
 var ErrWrongStageForShadow = errors.New("research: shadow evaluation requires SHADOW stage")
 
+// ErrVersionConflict 表示推阶段时实验已被别人改过（乐观锁）。
+// 两个运营同时推同一个实验：两边读到的都是同一个旧 version，只有先写的那次能落地，
+// 后到的必须**看见冲突**而不是悄悄覆盖 —— 否则后一次推阶段会凭空消失。
+var ErrVersionConflict = errors.New("research: experiment was modified by someone else")
+
 // Experiment 是一条注册实验。
 type Experiment struct {
 	ExperimentID string    `json:"experiment_id"`
@@ -61,12 +66,12 @@ type Experiment struct {
 
 // ShadowEvaluation 是一次影子判定：引擎真的跑了，结果留在库里，App 看不见。
 type ShadowEvaluation struct {
-	EvaluationID    string           `json:"evaluation_id"`
-	ExperimentID    string           `json:"experiment_id"`
-	Snapshot        map[string]any   `json:"snapshot"`
-	Intent          map[string]any   `json:"intent"`
-	NoChangeReason  string           `json:"no_change_reason"`
-	DecidedAt       time.Time        `json:"decided_at"`
+	EvaluationID   string         `json:"evaluation_id"`
+	ExperimentID   string         `json:"experiment_id"`
+	Snapshot       map[string]any `json:"snapshot"`
+	Intent         map[string]any `json:"intent"`
+	NoChangeReason string         `json:"no_change_reason"`
+	DecidedAt      time.Time      `json:"decided_at"`
 }
 
 // CanTransition：DRAFT→LAB→SHADOW→PROD 严格前进；非 ENDED 都可以收尾。
@@ -88,17 +93,20 @@ type Inventory struct {
 }
 
 // Repo 是存储面。Postgres 实现（platform/postgres）为主，测试用 Memory。
+//
+// UpdateStage 带 expectedVersion：读到的 version 与库里不一致时返回 ErrVersionConflict
+// （乐观锁 —— 见 ErrVersionConflict 的注释）。
 type Repo interface {
 	CreateExperiment(ctx context.Context, e Experiment) (Experiment, error)
 	GetExperiment(ctx context.Context, id string) (Experiment, error)
-	UpdateStage(ctx context.Context, id string, to Stage) (Experiment, error)
+	UpdateStage(ctx context.Context, id string, to Stage, expectedVersion int) (Experiment, error)
 	ListExperiments(ctx context.Context) ([]Experiment, error)
 	InsertShadowEvaluation(ctx context.Context, ev ShadowEvaluation) error
 	ListShadowEvaluations(ctx context.Context, limit int) ([]ShadowEvaluation, error)
 }
 
 // Service 是运营页背后的一切写操作。判定内核由 caller 注入
-//（Evaluate func：ContextSnapshot 的 map 形态进，intent map / no_change_reason 出 ——
+// （Evaluate func：ContextSnapshot 的 map 形态进，intent map / no_change_reason 出 ——
 // api 层包 runtime.Decide，research 包不依赖 experience/runtime，方向保持单向）。
 type Service struct {
 	Repo     Repo
@@ -133,7 +141,7 @@ func (s *Service) Create(ctx context.Context, e Experiment) (Experiment, error) 
 	return s.Repo.CreateExperiment(ctx, e)
 }
 
-// Transition 推阶段。
+// Transition 推阶段。读到的 version 一起交给 Repo —— 期间有人改过就回 ErrVersionConflict。
 func (s *Service) Transition(ctx context.Context, id string, to Stage) (Experiment, error) {
 	if !isKnownStage(to) {
 		return Experiment{}, errors.New("research: unknown stage")
@@ -145,7 +153,7 @@ func (s *Service) Transition(ctx context.Context, id string, to Stage) (Experime
 	if !CanTransition(cur.Stage, to) {
 		return Experiment{}, ErrIllegalTransition
 	}
-	return s.Repo.UpdateStage(ctx, id, to)
+	return s.Repo.UpdateStage(ctx, id, to, cur.Version)
 }
 
 // RecordShadowEvaluation：SHADOW 阶段专属 —— 引擎真实判定一次并存档。

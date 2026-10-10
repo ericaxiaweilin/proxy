@@ -381,6 +381,42 @@ same commit. Do not record routine business logic changes here.
   它跟着旧组名走，现在和新标题打架；而且「原始设计：发展 builder」本来就是内部说明漏到了
   用户可见的副标题上。要么换掉整句，要么至少删掉那半句内部注记。
 
+## Revision 352 — 2026-10-09
+
+- **控制台最后一页「实验 / 影子流量」接上真后端**（`OPS-RESEARCH-001`）：运营后台从
+  「15 页 LIVE + 1 页诚实未接入」变成 **16 页全部 LIVE**。
+
+  这一页原来是控制台上**唯一**挂着 notConnected 桩的，理由是「库里没有任何实验或影子流量
+  的表」。桩里那句「§18 §19」引用本身也是虚的 —— 个人化 spec 正文根本没有这两节。
+  所以这一轮是**从表建起**：
+
+  · **迁移 181**：`research.experiments`（stage CHECK 在 DRAFT/LAB/SHADOW/PROD/ENDED、
+    traffic_pct 0–100、version）+ `research.shadow_evaluations`（snapshot NOT NULL、
+    intent 可空、按 experiment + decided_at 建索引）。
+  · **`internal/research`**：阶段机（DRAFT→LAB→SHADOW→PROD 严格前进，ENDED 是终点）+
+    乐观锁 + 影子评估；判定内核由组合根注入（research 包不依赖 experience/runtime，
+    方向保持单向）。
+  · **四个端点**：`GET /v1/operator/research`、`POST .../experiments`、
+    `POST .../experiments/stage`、`POST .../shadow`。读写同一道门（会话 + 白名单 +
+    ANALYTICS），每个写口落 `operator.action_log`。
+  · **Research.tsx** 从 mock 重写成读写都在：注册实验 / 推阶段 / 投影子判定都有入口 ——
+    只做读的一半，三个写口就成了没人调用的死通道。
+
+  有意不做（页面上写明，不让空转的机器冒充能力）：流量分桶 / 置信区间 / 自动晋级 ——
+  没有行为样本之前那些都是空转的机器。影子判定用的是与线上**同一个内核**（暴雨规则），
+  所以影子里看到的判定质量就是线上判定质量；NO_UI_CHANGE 多数是「规则没覆盖」。
+
+- **顺手补上三处「注释承诺了、代码没做」**（同一轮的收尾，不是新功能）：
+  · `UpdateStage` 的注释写着「带乐观锁：version 不对就上抛」，SQL 里却没有 version 条件
+    ⇒ 现在真的带 `expectedVersion`；0 行时区分「实验不存在」（404）与「被别人改过」
+    （409 `ErrVersionConflict`），并留了一条会红的测试（对 Memory 与真库各一条）。
+  · `marshalJSON(nil)` 的注释说「编成 null」，代码却编成 `{}` —— 那正好是它自己写的
+    「别在这里编造默认值」。改回 SQL NULL 后，「内核没给意图」读回来是 nil，handler
+    记审计时 `ev.Intent != nil` 不再把「没意图」写成「有意图」。
+  · `platform/postgres/research.go` 说列名钉在「internal/research 的集成测试」里 ——
+    那写不出来（本包 import research，反过来会成环）。钉改到本包的
+    `research_integration_test.go`，对真库跑（列名 / jsonb 往返 / CHECK 约束）。
+
 ## Revision 351 — 2026-10-09
 
 - **「我的 → 企业 / 店铺」第二个磁贴改名：「推荐管理」→「店铺推荐」**（`STORE-TILES-002`，

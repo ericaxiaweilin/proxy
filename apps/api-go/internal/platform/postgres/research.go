@@ -11,7 +11,10 @@ import (
 )
 
 // OPS-RESEARCH-001：research.experiments / research.shadow_evaluations 的存取（迁移 181）。
-// 列名一改就红的口令在 internal/research 的集成测试里钉（对真库跑）。
+//
+// 列名一改就红的口令在**本包**的 research_integration_test.go 里钉（对真库跑）。
+// 原来这句写的是「internal/research 的集成测试」—— 那是写不出来的：本包 import
+// research，research 再 import 本包就成环。所以钉只能在有真库的这边。
 
 type ResearchRepository struct {
 	pool *pgxpool.Pool
@@ -53,17 +56,25 @@ func (r *ResearchRepository) GetExperiment(ctx context.Context, id string) (rese
 	return e, err
 }
 
-// UpdateStage 带乐观锁：version 不对就上抛（运营双人同时推阶段，后到的看到冲突）。
-func (r *ResearchRepository) UpdateStage(ctx context.Context, id string, to research.Stage) (research.Experiment, error) {
+// UpdateStage 带乐观锁：WHERE 里带 expectedVersion，对不上就回 ErrVersionConflict
+// （运营双人同时推阶段，后到的**看见冲突**，而不是把先到的那次悄悄覆盖掉 ——
+// 那种丢更新没有任何地方会报出来）。
+//
+// 0 行有两种原因，必须分开报：实验不存在 vs version 被别人改过。混成一个「冲突」
+// 会让打错 id 的运营以为只是并发，对着同一个错一直重试。
+func (r *ResearchRepository) UpdateStage(ctx context.Context, id string, to research.Stage, expectedVersion int) (research.Experiment, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE research.experiments
 		SET stage = $2::text, version = version + 1, updated_at = now()
-		WHERE experiment_id = $1`, id, string(to))
+		WHERE experiment_id = $1 AND version = $3`, id, string(to), expectedVersion)
 	if err != nil {
 		return research.Experiment{}, err
 	}
 	if tag.RowsAffected() == 0 {
-		return research.Experiment{}, errors.New("research: experiment not found")
+		if _, err := r.GetExperiment(ctx, id); err != nil {
+			return research.Experiment{}, err
+		}
+		return research.Experiment{}, research.ErrVersionConflict
 	}
 	return r.GetExperiment(ctx, id)
 }
@@ -120,14 +131,19 @@ func (r *ResearchRepository) ListShadowEvaluations(ctx context.Context, limit in
 }
 
 // marshalJSON / unmarshalJSONMap：jsonb 列 ↔ map 的两个小助手。
-// nil map 编成 "null" 也能被 jsonb 收（快照/意图缺字段不是错误，别在这里编造默认值）。
+//
+// nil map 编成 SQL NULL（不是 `{}`）：`intent` 列可空，而「内核没给意图」和
+// 「内核给了一个空意图」是两件事 —— 前者读回来必须是 nil，否则 handler 记审计时
+// `ev.Intent != nil` 会把它报成"有意图"。这里不编造默认值。
+//
+// 注意 `snapshot` 列是 NOT NULL：真传 nil 会被库拒。那是调用方的 bug，应该炸出来。
 func marshalJSON(m map[string]any) []byte {
 	if m == nil {
-		return []byte(`{}`)
+		return []byte(`null`)
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
-		return []byte(`{}`)
+		return []byte(`null`)
 	}
 	return b
 }

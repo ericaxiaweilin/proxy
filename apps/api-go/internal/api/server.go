@@ -300,7 +300,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/north-star", s.operatorConsole(s.operatorNorthStar))
 	mux.HandleFunc("/v1/operator/fulfillment-attribution", s.operatorConsole(s.operatorAttributionAudit))
 	mux.HandleFunc("/v1/operator/behavior", s.operatorConsole(s.operatorBehavior))
-	mux.HandleFunc("/v1/operator/research", s.operatorConsole(operatorResearch))
+	// OPS-RESEARCH-001：实验注册 + 阶段流水线 + 影子评估（控制台「实验 / 影子流量」页）。
+	// 读口 ANALYTICS；三个写口（注册实验 / 推阶段 / 投影子判定）也走同一道门 ——
+	// 它们改的是平台实验状态，OPS-AUDIT-001 的口径适用（每个写口都落 action_log）。
+	mux.HandleFunc("/v1/operator/research", s.operatorConsole(s.operatorResearchInventory))
+	mux.HandleFunc("/v1/operator/research/experiments", s.operatorConsoleMethod(http.MethodPost, s.operatorResearchCreate))
+	mux.HandleFunc("/v1/operator/research/experiments/stage", s.operatorConsoleMethod(http.MethodPost, s.operatorResearchTransition))
+	mux.HandleFunc("/v1/operator/research/shadow", s.operatorConsoleMethod(http.MethodPost, s.operatorResearchShadow))
 	mux.HandleFunc("/v1/operator/population", s.operatorConsole(s.operatorPopulation))
 	mux.HandleFunc("/v1/operator/tags", s.operatorConsole(s.operatorTags))
 	mux.HandleFunc("/v1/operator/intent-orchestration", s.operatorConsole(s.operatorIntentOrchestration))

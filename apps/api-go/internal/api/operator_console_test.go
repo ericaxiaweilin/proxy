@@ -13,6 +13,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/identity"
 	"github.com/proxy-app/proxy-api/internal/opsmetrics"
+	"github.com/proxy-app/proxy-api/internal/research"
 )
 
 // OPS-REAL-001（取代 OPS-TELEMETRY-001 的「自报占位」）：运营控制台的 17 个端点
@@ -27,11 +28,15 @@ var operatorConsolePaths = []string{
 }
 
 // OPS-CONSOLE-PAGES-001：决策引擎 / 澄清门 / 意图编排 / 信任与风险 四页接上了真读模型，
-// 从这里挪到下面 liveConsolePaths。剩下的五个是**真的没有数据源**的 —— 它们的
-// missing 文案写的是哪张表没写入方、哪个键对不上，不是笼统的模块名。
-var notConnectedConsolePaths = []string{
-	"research",
-}
+// 从这里挪到下面 liveConsolePaths。
+//
+// OPS-RESEARCH-001（2026-10-08）把**最后一个**（research）也接上了：迁移 181 的两张表 +
+// internal/research + 四个端点。所以这个列表现在是**空的**。
+//
+// 它没有被删掉，是因为它是一条口令而不是一份清单：「列在这里的页**必须**回
+// NOT_CONNECTED，而且不许夹带任何数字」。空列表 = 今天没有这样的页；哪天再出现一个
+// 没数据源的页，它该进这里，而不是被塞进 live 组、然后靠一个编出来的数字让测试变绿。
+var notConnectedConsolePaths = []string{}
 
 // merchant 曾经是桩，OPS-MERCHANT-001 把它换成真实读模型；这里断言它**不再**属于
 // "必须回 NOT_CONNECTED" 那一组，而属于下面的 LIVE 组 —— 挪走要留下痕迹，
@@ -40,9 +45,10 @@ var notConnectedConsolePaths = []string{
 // matching / matching/trace 是 OPS-MATCHING-TUNABLES-001 接上去的：旋钮来自库
 // （没有行就是出厂默认），轨迹读的是 supply.candidate_batches 里存着的快照。
 // OPS-NORTH-STAR-001 把 north-star 接上真读模型（四个格子各带口径与缺口说明）。
+// OPS-RESEARCH-001 把 research 接上（实验注册表 + 影子评估）。
 var liveConsolePaths = []string{"population", "behavior", "merchant", "matching", "matching/trace", "retention", "supply-health", "north-star",
 	"decision-engine", "clarification-gate", "intent-orchestration", "trust", "tags",
-	"fulfillment-attribution", "quality", "engine-api"}
+	"fulfillment-attribution", "quality", "engine-api", "research"}
 
 type stubOpsMetrics struct{}
 
@@ -247,6 +253,10 @@ func operatorConsoleServer() *Server {
 		// 撮合引擎管理（OPS-MATCHING-TUNABLES-001）：假存储只证明 handler 与门，
 		// SQL 由 internal/platform/postgres 的集成测试对真库钉。
 		Matching: &fakeMatching{},
+		// 实验 / 影子流量（OPS-RESEARCH-001）：同上 —— 这里用 Memory 证明门与状态码，
+		// 阶段机 / 乐观锁在 internal/research 的单元测试，列名与 jsonb 在 postgres 包的
+		// 集成测试里对真库钉。
+		Research: research.NewService(research.NewMemory()),
 		Authenticator: strictAuthenticator{validTokens: map[string]identity.AuthenticatedSession{
 			"ops_token":  {Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_ops"}},
 			"user_token": {Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_xiaomei"}},
