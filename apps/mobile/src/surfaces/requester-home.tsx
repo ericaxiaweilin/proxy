@@ -1188,7 +1188,7 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
   // 纯数字：场地类别码3位+越南日期+每日序号，如 1002609270002；重复下单走 safeDetails 带回原号）。
   // 下单页优先显示个人订单号；老服务端没有该字段时回落活动自己的 code
   //（PX-A-yymmdd-####，PublishActivity 时生成，老的/种子活动没有就是没有，不补假号）。
-  type StoreActivityBrief = { activityId: string; code: string | undefined; title: string; venueName: string; time: string; people: string; joined: number; capacity: number; coverImageUrl: string | undefined; coverMediaAssetId: string | undefined; realitySceneId: string | undefined; priceLabel: string; moneyFlow: string; venueSpend: string; desc: string; benefit: string };
+  type StoreActivityBrief = { activityId: string; code: string | undefined; title: string; venueName: string; time: string; people: string; joined: number; capacity: number; coverImageUrl: string | undefined; coverMediaAssetId: string | undefined; realitySceneId: string | undefined; priceLabel: string; moneyFlow: string; venueSpend: string; desc: string; benefit: string; slotKey: string | undefined };
   const [storeActivities, setStoreActivities] = useState<StoreActivityBrief[]>([]);
   // 首屏加载与中心圆圈刷新（HOME-FORYOU-REFRESH-001）共用同一份映射。
   function toStoreActivityBrief(a: Activity): StoreActivityBrief {
@@ -1198,6 +1198,7 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
       title: a.title,
       venueName: a.venueName,
       time: a.time,
+      slotKey: a.slotKey,
       people: a.people,
       joined: a.joined,
       capacity: a.capacity ?? 0,
@@ -1242,6 +1243,7 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
             activityId: order.activityId,
             title: order.snapshot?.activity.title ?? a?.title ?? "",
             time: order.snapshot?.activity.time ?? a?.time ?? "",
+            slotKey: a?.slotKey,
             orderNo: order.orderNo,
             companionId: order.companionId || undefined,
             cancelled: order.state === "CANCELLED",
@@ -1406,7 +1408,7 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
     // 这里防确认页开着期间状态变了）。
     const target = storeActivities.find((a) => a.activityId === activityId);
     const companionId = recipe?.companion?.id;
-    const conflict = target ? detectOrderConflict({ activityId, time: target.time, companionId }, myOrders, busySlots) : undefined;
+    const conflict = target ? detectOrderConflict({ activityId, time: target.time, slotKey: target.slotKey, companionId }, myOrders, busySlots) : undefined;
     if (conflict) {
       setJoinMsg(orderConflictText(conflict, recipe?.companion?.name));
       return "failed";
@@ -1633,7 +1635,7 @@ const coarseLocationConsent = useMemo(() => resolveLocationConsentClient({ authC
             // 这一组能不能下：活动可约（没满 / 我没下过这场 / 这个时段我没别的单）+ 有同行人。
             // 不可约时说清是哪一种；「已下过这场」的下一步就是看那张票（ORDER-008 的 CTA 保留）。
             const fyStatus = activityStatus(fyCurrent, fyCtx);
-            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, companionId: gridPerson?.id }, myOrders, busySlots);
+            const orderConflict = detectOrderConflict({ activityId: gridActivity.activityId, time: gridActivity.time, slotKey: gridActivity.slotKey, companionId: gridPerson?.id }, myOrders, busySlots);
             // 有票 = 这一组 (活动, 这个小美) 我下过。没选人时谈不上「这一组」。
             const existingOrder = gridPerson ? myOrders.find((o) => o.activityId === gridActivity.activityId && o.companionId === gridPerson.id && !o.cancelled) : undefined;
             const anyAvailable = personOptions(filteredPeople, fyActivities, fyCtx, lockValues).some((o) => o.status.ok);

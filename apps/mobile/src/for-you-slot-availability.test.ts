@@ -32,3 +32,34 @@ describe("HOME-FORYOU-CTA-DOCK-001 For You CTA 不许落到玻璃 dock 底下", 
     expect(Number(source.match(/gridCta: \{[^\n]*marginTop: (\d+),/)?.[1])).toBeLessThanOrEqual(6);
   });
 });
+
+import { canonicalSlotKey, detectOrderConflict as detectConflict2, toBusySlots as toBusy2 } from "./requester-home-combo";
+
+describe("FOR-YOU-SLOT-002 canonical key prefers the server slotKey over free text", () => {
+  it("uses slotKey when present, falls back to normalized time otherwise", () => {
+    expect(canonicalSlotKey({ slotKey: "@2026-10-11T08:00:00Z", time: "周六 下午三点" })).toBe("@2026-10-11T08:00:00Z");
+    expect(canonicalSlotKey({ time: "  周六   15:00 " })).toBe("周六 15:00");
+    expect(canonicalSlotKey({ slotKey: "  ", time: "周六 15:00" })).toBe("周六 15:00");
+  });
+
+  it("two activities with the same free-text time but different real start are NOT the same slot", () => {
+    // 小美被 A（本周六 08:00）约走；B 文本也写'周六'但真实是下周六 → 不该判她没空。
+    const busy = toBusy2([{ companionId: "xm", time: "@2026-10-11T08:00:00Z" }]);
+    const blockedSameInstant = detectConflict2({ activityId: "B", time: "周六", slotKey: "@2026-10-11T08:00:00Z", companionId: "xm" }, [], busy);
+    expect(blockedSameInstant?.kind).toBe("COMPANION_BUSY");
+    const freeNextWeek = detectConflict2({ activityId: "C", time: "周六", slotKey: "@2026-10-18T08:00:00Z", companionId: "xm" }, [], busy);
+    expect(freeNextWeek).toBeUndefined();
+  });
+
+  it("self-conflict across two activities matches on the canonical key", () => {
+    const mine = [{ activityId: "A", title: "a", time: "周六 下午三点", slotKey: "@2026-10-11T08:00:00Z", companionId: "xm" }];
+    const sameInstant = detectConflict2({ activityId: "B", time: "Sat 3pm", slotKey: "@2026-10-11T08:00:00Z", companionId: "xm" }, mine);
+    expect(sameInstant?.kind).toBe("COMPANION_BUSY");
+  });
+
+  it("without slotKey everywhere, behaviour is identical to the old free-text matching", () => {
+    const busy = toBusy2([{ companionId: "xm", time: "周六 15:00" }]);
+    expect(detectConflict2({ activityId: "B", time: " 周六  15:00 ", companionId: "xm" }, [], busy)?.kind).toBe("COMPANION_BUSY");
+    expect(detectConflict2({ activityId: "C", time: "周日 15:00", companionId: "xm" }, [], busy)).toBeUndefined();
+  });
+});

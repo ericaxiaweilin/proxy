@@ -631,7 +631,11 @@ export const ActivitySchema = z.object({
   // LikenessConsent 走 — ActivitySchema 只负责 wire contract.)
   aiPersonaPhoto: z.string().min(1).optional(),
   aiStatus: z.enum(["NONE", "AI_ASSISTED", "AI_GENERATED"]).default("NONE"),
-  aiActorKind: z.enum(["PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"]).optional()
+  aiActorKind: z.enum(["PLATFORM_AI", "USER_TWIN", "USER_ASSISTANT"]).optional(),
+  // FOR-YOU-SLOT-002：「小美时段」冲突的规范键，服务端算好带来；缺省时客户端退回按 time 规整。
+  slotKey: z.string().optional(),
+  startsAt: z.string().optional(),
+  durationMinutes: z.number().optional()
 });
 export type Activity = z.infer<typeof ActivitySchema>;
 

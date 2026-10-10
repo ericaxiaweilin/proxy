@@ -128,7 +128,7 @@ func (r *ActivityRepository) Join(ctx context.Context, activityID, actorID strin
 			return activity.ErrAlreadyJoined
 		}
 		_ = decodeActivity(payload, interested, joined, capacity, &result)
-		slotKey := activity.SlotKey(result.Time)
+		slotKey := activity.SlotKeyForActivity(result) // FOR-YOU-SLOT-002：优先结构化开始时间
 		if companionID != "" {
 			// 小美的这个时段被任何人、任何一场活动约走了 ⇒ 不可约。并发由
 			// ux_participants_companion_slot 唯一索引兜底（见下面 INSERT 的错误映射）。

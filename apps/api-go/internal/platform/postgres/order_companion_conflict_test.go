@@ -82,3 +82,35 @@ func TestForYouCompanionTimeSlotOrdersPostgres(t *testing.T) {
 		t.Fatalf("cancelling the alice order must not touch the bob order: %+v", bobOrder)
 	}
 }
+
+// FOR-YOU-SLOT-002：两场活动展示文本不同、但结构化开始时间相同 ⇒ 判为同一时段（按真实时刻，不按文本）。
+func TestCompanionSlotUsesStructuredStartTimePostgres(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	run := strconv.FormatInt(time.Now().UnixNano(), 10)
+	repo := NewActivityRepository(pool)
+	start := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
+	seed := func(id, venue, text string) activity.Activity {
+		return activity.Activity{
+			ID: id, Origin: "TEST", Title: "结构化时段 " + run, Time: text, StartsAt: &start, DurationMinutes: 120,
+			People: "1", Capacity: 1, MoneyFlow: "FREE", PriceLabel: "Free", VenueName: venue, VenueType: "CAFE", Status: "PUBLISHED",
+		}
+	}
+	a, b := "act_sk_a_"+run, "act_sk_b_"+run
+	if err := repo.Seed(ctx, []activity.Activity{seed(a, "店A", "周六 下午三点"), seed(b, "店B", "Sat 3pm")}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	me, other := "u_sk_me_"+run, "u_sk_other_"+run
+	recipe := activity.JoinRecipe{Source: "FOR_YOU", Companion: &activity.RecipeCompanion{ID: "mei_" + run, Name: "Mei"}}
+	if _, _, err := repo.Join(ctx, a, me, recipe); err != nil {
+		t.Fatalf("first booking: %v", err)
+	}
+	// 文本不同（"Sat 3pm" vs "周六 下午三点"），但真实时刻相同 ⇒ 她这个时段已被约走。
+	if _, _, err := repo.Join(ctx, b, other, recipe); !errors.Is(err, activity.ErrCompanionSlotTaken) {
+		t.Fatalf("same real start, different label must still collide: %v", err)
+	}
+	slots, err := repo.ListBookedCompanionSlots(ctx, []string{"mei_" + run})
+	if err != nil || len(slots) != 1 || slots[0].Time != "@2026-11-01T08:00:00Z" {
+		t.Fatalf("booked slot key is the canonical structured key: err=%v slots=%+v", err, slots)
+	}
+}

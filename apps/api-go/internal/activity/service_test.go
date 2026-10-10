@@ -727,3 +727,26 @@ func TestPublishActivityCapacityBounds(t *testing.T) {
 		t.Fatal("a one-person activity is not an activity")
 	}
 }
+
+// FOR-YOU-SLOT-002：规范键优先用结构化开始时间；没有时退回自由文本（和改动前一致）。
+func TestSlotKeyForActivityPrefersStartTimeOverFreeText(t *testing.T) {
+	start := time.Date(2026, 10, 11, 8, 0, 0, 0, time.UTC)
+	withStart := Activity{Time: "周六 下午三点", StartsAt: &start}
+	k := SlotKeyForActivity(withStart)
+	if k != "@2026-10-11T08:00:00Z" {
+		t.Fatalf("structured start wins: %q", k)
+	}
+	// 同一真实时刻、不同文本 → 同键（不会漏判成双订）。
+	withStart2 := Activity{Time: "Sat 3pm", StartsAt: &start}
+	if SlotKeyForActivity(withStart2) != k {
+		t.Fatal("same instant, different text = same key")
+	}
+	// 没有 startsAt → 退回文本规整（@ 前缀保证结构化键永不等于文本键）。
+	free := Activity{Time: "  周六   15:00 "}
+	if got := SlotKeyForActivity(free); got != "周六 15:00" {
+		t.Fatalf("free text fallback unchanged: %q", got)
+	}
+	if SlotKeyForActivity(free) == k {
+		t.Fatal("a free-text key can never equal a structured key")
+	}
+}

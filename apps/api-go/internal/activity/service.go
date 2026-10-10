@@ -62,8 +62,10 @@ type Activity struct {
 	// 天气提醒这类要算时间的功能只认这两个，没有就不提醒（不去猜文本）。
 	StartsAt        *time.Time `json:"startsAt,omitempty"`
 	DurationMinutes int        `json:"durationMinutes,omitempty"`
-	Status          string     `json:"status,omitempty"`
-	ConsumptionTerm string     `json:"consumptionTerm,omitempty"`
+	// SlotKey 是「小美时段」冲突的规范键，服务端算好带给客户端（见 SlotKeyForActivity）；读时填，不单独持久化。
+	SlotKey         string `json:"slotKey,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ConsumptionTerm string `json:"consumptionTerm,omitempty"`
 	// R58: 报名方式 OPEN(自由报名)/REVIEW(审核后加入)/INVITE_ONLY(仅邀请)。
 	SignupMode string `json:"signupMode,omitempty"`
 	// R58: 主题（日落/奥黛/胶片/本地人…），可选。
@@ -163,6 +165,19 @@ func CompanionIDOf(recipe JoinRecipe) string {
 // 文本（如「周五 19:00–20:30」），两场活动的时段文本相同才算同一时段。
 func SlotKey(activityTime string) string {
 	return strings.Join(strings.Fields(activityTime), " ")
+}
+
+// SlotKeyForActivity 是「小美时段」冲突用的规范键（FOR-YOU-SLOT-002）。
+//
+// 有结构化开始时间（StartsAt）就用它，取整到分钟、UTC，前缀「@」—— 这样两场活动按**真实时刻**判冲突，
+// 而不是按展示文本：文本一样但日期不同的两场不再误判「没空」，真实同刻但文本不同的两场也不会漏判成双订。
+// 没有 StartsAt（存量活动、发布时没填）退回原来的自由文本规整——所以 StartsAt 缺席时行为和改动前完全一致。
+// 「@」前缀保证结构化键永不和自由文本键相等。
+func SlotKeyForActivity(a Activity) string {
+	if a.StartsAt != nil && !a.StartsAt.IsZero() {
+		return "@" + a.StartsAt.UTC().Truncate(time.Minute).Format(time.RFC3339)
+	}
+	return SlotKey(a.Time)
 }
 
 // CompanionSlot 是一个已被约走的「小美 × 时段」。只说「这个时段她没空」，不说谁约的。
@@ -543,6 +558,7 @@ func (s *Service) listMyActivities(ctx context.Context, e command.Envelope) comm
 }
 
 func normalizeActivityForOutput(a *Activity) {
+	a.SlotKey = SlotKeyForActivity(*a)
 	if a.MoneyFlow == "" {
 		if a.Price == "" || a.Price == "0₫" {
 			a.MoneyFlow = "FREE"
@@ -884,10 +900,10 @@ func (r *MemoryRepository) Join(_ context.Context, activityID, actorID string, r
 	}
 	if companionID != "" {
 		// FOR-YOU-SLOT-001：小美的这个时段被任何人约走了（任何一场活动）就不能再约。
-		slot := SlotKey(item.Time)
+		slot := SlotKeyForActivity(*item)
 		for _, id := range r.order {
 			other := r.activities[id]
-			if other == nil || SlotKey(other.Time) != slot {
+			if other == nil || SlotKeyForActivity(*other) != slot {
 				continue
 			}
 			for _, part := range other.parts {
@@ -1085,7 +1101,7 @@ func (r *MemoryRepository) ListBookedCompanionSlots(_ context.Context, companion
 			if part.CompanionID == "" || !wanted[part.CompanionID] || part.State == PartCancelled {
 				continue
 			}
-			slot := CompanionSlot{CompanionID: part.CompanionID, Time: SlotKey(item.Time)}
+			slot := CompanionSlot{CompanionID: part.CompanionID, Time: SlotKeyForActivity(*item)}
 			if k := slot.CompanionID + "|" + slot.Time; !seen[k] {
 				seen[k] = true
 				out = append(out, slot)

@@ -45,6 +45,8 @@ export type ComboActivity = {
   venueName: string;
   time: string;
   realitySceneId?: string | undefined;
+  // FOR-YOU-SLOT-002：服务端算好的规范时段键（基于真实开始时间）；缺省退回按 time 规整。
+  slotKey?: string | undefined;
 };
 
 /** 池子里一个人。`distanceM` 是今天唯一可用的 location 信号。 */
@@ -63,6 +65,8 @@ export type Combo = {
   person?: ComboPerson | undefined;
   /** 冗余一份方便直接渲染：**永远**等于 `activity.time`，不是独立轴。 */
   time: string;
+  /** FOR-YOU-SLOT-002：规范时段键，等于 `activity.slotKey`。 */
+  slotKey?: string | undefined;
 };
 
 /** 就近随机的默认档位：在最近的前 N 个组合里随机，而不是全池均匀随机。 */
@@ -107,7 +111,7 @@ export function buildCombinationPool(
     const scene = scenes.find((candidate) => candidate.id === sceneId);
     if (!scene) continue;
     if (people.length === 0) {
-      pool.push({ key: `${scene.id}|${activity.activityId}`, scene, activity, time: activity.time });
+      pool.push({ key: `${scene.id}|${activity.activityId}`, scene, activity, time: activity.time, slotKey: activity.slotKey });
       continue;
     }
     for (const person of people) {
@@ -279,6 +283,8 @@ export type ExistingOrder = {
   // FOR-YOU-SLOT-001：这一单约的小美。同一场活动约不同的小美是不同的单；
   // 直接报名（不带同行人）的老单这里是 undefined。
   companionId?: string | undefined;
+  // FOR-YOU-SLOT-002：这一单的规范时段键（服务端带来）；缺省退回按 time 规整。
+  slotKey?: string | undefined;
 };
 
 /** 时段键：活动时间文本去首尾空白、压缩空白（与服务端 activity.SlotKey 同一口径）。 */
@@ -288,11 +294,13 @@ export function slotKey(time: string): string {
 
 /** 已被约走的「小美 × 时段」集合（ListCompanionBookedSlots，谁约的都算）。 */
 export type BusySlots = ReadonlySet<string>;
-export function busyKey(companionId: string, time: string): string {
-  return `${companionId}|${slotKey(time)}`;
+export function busyKey(companionId: string, keyOrTime: string): string {
+  // keyOrTime 可能是服务端规范键（@... 无空白，slotKey 原样返回）或自由文本（规整）。两者 idempotent。
+  return `${companionId}|${slotKey(keyOrTime)}`;
 }
 
 export function toBusySlots(slots: readonly { companionId: string; time: string }[]): BusySlots {
+  // 服务端返回的 slot.time 已经是规范键（FOR-YOU-SLOT-002）。
   return new Set(slots.map((slot) => busyKey(slot.companionId, slot.time)));
 }
 
@@ -310,7 +318,7 @@ export type OrderConflict =
  * 时间是活动自己写的自由文本，按规整后的原文相等判断同一时段（slotKey）。
  */
 export function detectOrderConflict(
-  combo: { activityId: string; time: string; companionId?: string | undefined },
+  combo: { activityId: string; time: string; companionId?: string | undefined; slotKey?: string | undefined },
   existing: readonly ExistingOrder[],
   busy: BusySlots = new Set()
 ): OrderConflict | undefined {
@@ -318,10 +326,17 @@ export function detectOrderConflict(
   const same = live.find((order) => order.activityId === combo.activityId && (order.companionId ?? "") === (combo.companionId ?? ""));
   if (same) return { kind: "ALREADY_ORDERED", orderNo: same.orderNo };
   const companionId = combo.companionId;
-  const time = slotKey(combo.time);
-  if (!companionId || !time) return undefined;
-  const taken = busy.has(busyKey(companionId, time))
-    || live.some((order) => order.companionId === companionId && slotKey(order.time) === time);
+  // FOR-YOU-SLOT-002：优先用服务端带来的规范键（基于真实开始时间）；没有才退回按 time 规整。
+  const key = canonicalSlotKey(combo);
+  if (!companionId || !key) return undefined;
+  const taken = busy.has(busyKey(companionId, key))
+    || live.some((order) => order.companionId === companionId && canonicalSlotKey(order) === key);
   return taken ? { kind: "COMPANION_BUSY", time: combo.time } : undefined;
+}
+
+/** 规范时段键：服务端给了 slotKey 就用它（基于真实开始时间），否则退回按自由文本 time 规整。 */
+export function canonicalSlotKey(x: { slotKey?: string | undefined; time: string }): string {
+  const given = (x.slotKey ?? "").trim();
+  return given !== "" ? given : slotKey(x.time);
 }
 
