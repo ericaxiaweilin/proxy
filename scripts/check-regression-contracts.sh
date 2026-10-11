@@ -1426,6 +1426,20 @@ if ! grep -qF 'if (mutedAuthors.has(post.authorId)) return false;' apps/mobile/s
 fi
 echo "    FEED-AUTHOR-DISPERSE-001 / FEED-VIEWER-001 / FEED-NOT-INTERESTED-001 / MUTED-AUTHORS-003: PASS"
 
+# FEED-RANK-001（2026-10-11，用户：「可以 你自己决定」）：登录读者的推荐流按分数排（时间衰减 ×
+# 平滑互动质量 × 关注 / 少看），新帖保底位，一页一作者（读者自己除外）；匿名仍是时间倒序。
+# 钉：打分方向、保底位、打散、整条分页不重复不漏并接回时间倒序；App 在 ranked 时保留服务端顺序。
+require_test "FEED-RANK-001" ./internal/localnet TestFeedRank_ScoreUsesEngagementFollowAndReduce apps/api-go/internal/localnet/feed_rank_test.go || exit 1
+require_test "FEED-RANK-001" ./internal/localnet TestFeedRank_ExploreSlotGivesNewPostsExposure apps/api-go/internal/localnet/feed_rank_test.go || exit 1
+require_test "FEED-RANK-001" ./internal/localnet TestFeedRank_OneAuthorPerPageViewerExempt apps/api-go/internal/localnet/feed_rank_test.go || exit 1
+require_test "FEED-RANK-001" ./internal/localnet TestFeedRank_SignedInViewerGetsRankedPagesAnonymousStaysChronological apps/api-go/internal/localnet/feed_rank_test.go || exit 1
+if ! grep -qF 'localNetService.WithFeedSignals(postgres.NewFeedSignals(pool))' apps/api-go/cmd/api/main.go \
+  || ! grep -qF 'const ranked = feedRanked && tab === "RECOMMENDED" ? unranked :' apps/mobile/src/surfaces/feed.tsx; then
+  echo "  FAIL [FEED-RANK-001]: 推荐流排序没接信号源，或 App 又把服务端排好的顺序按时间重排了。" >&2
+  exit 1
+fi
+echo "    FEED-RANK-001: PASS"
+
 # DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
 # 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
 # ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。

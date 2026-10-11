@@ -28,6 +28,8 @@ export type FeedReadModel = {
   media: Record<string, FeedMediaItem[]>;
   nextCursor: string | undefined;
   hasMore: boolean;
+  // FEED-RANK-001：服务端按分数排过 —— 推荐页保留这个顺序，不按时间重排。
+  ranked?: boolean;
 };
 
 // TWIN-SIGNALS-001: 单条帖子曝光聚合（战绩页读模型）。数字含义：
@@ -221,7 +223,8 @@ export class LocalNetClient {
         posts: filterPostsByFeedSearch(payload.posts, search),
         media: payload.media,
         nextCursor: payload.nextCursor || undefined,
-        hasMore: payload.hasMore === true
+        hasMore: payload.hasMore === true,
+        ranked: payload.ranked === true
       };
     }
     const result = await this.sendCommand(

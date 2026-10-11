@@ -388,6 +388,8 @@ func main() {
 		storeOnboardingService = storeonboarding.NewWithRepository(postgres.NewStoreOnboardingRepository(pool))
 		outcomeService = outcome.NewWithRepository(postgres.NewOutcomeRepository(pool))
 		localNetService = localnet.NewWithAll(postgres.NewLocalNetRepository(pool), media.NewPostMediaLookup(mediaService), modelStack, scene.NewSceneAestheticAdapter(sceneService))
+		// FEED-RANK-001：登录读者的推荐流按分数排（匿名 / 关注 / 搜索仍是时间倒序）。
+		localNetService.WithFeedSignals(postgres.NewFeedSignals(pool))
 		cityCompanionService = citycompanion.NewWithRepositoryAndSupplier(postgres.NewCityCompanionRepository(pool), supply.NewCityCompanionSupplier(supplyService))
 		// MERCHANT-CREATOR-NOTIFY-001：同城伴游的 agent 侧收件人必须解析成
 		// user account（候选来自 supply，ConfirmedAgent.AgentId 是 agent id）。

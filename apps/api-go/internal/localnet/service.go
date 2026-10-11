@@ -1369,8 +1369,10 @@ func clonePost(post Post) Post {
 }
 
 type Service struct {
-	mu             sync.Mutex
-	repository     Repository
+	mu         sync.Mutex
+	repository Repository
+	// feedSignals：推荐时间流的打分信号（FEED-RANK-001）。nil = 时间倒序。
+	feedSignals    FeedSignalSource
 	mediaLookup    MediaLookup
 	sceneAesthetic SceneAestheticProvider
 	modelStack     modelstack.Port
@@ -2690,6 +2692,10 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 	var cursor struct {
 		CreatedAt time.Time `json:"createdAt"`
 		PostID    string    `json:"postId"`
+		// FEED-RANK-001：排序模式游标 —— m="rank"、t0 = 第一页的时刻、o = 已经给出去的条数。
+		Mode string    `json:"m,omitempty"`
+		T0   time.Time `json:"t0,omitempty"`
+		Off  int       `json:"o,omitempty"`
 	}
 	if request.Cursor != "" {
 		if raw, ok := verifyCursor(request.Cursor); ok {
@@ -2702,6 +2708,12 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			_ = json.Unmarshal(raw, &cursor)
 		} else {
 			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
+		}
+	}
+	// FEED-RANK-001：登录读者的推荐流按分数排（见 feed_rank.go）。匿名 / 关注 / 搜索 / 没接信号源都不走这里。
+	if s.feedSignals != nil && len(request.AuthorIDs) == 0 && search == "" && viewerIsSignedIn(e) && (request.Cursor == "" || cursor.Mode == "rank") {
+		if pageRepository, ok := s.repository.(FeedPageRepository); ok {
+			return s.listFeedRanked(ctx, e, pageRepository, request.Limit, cursor.T0, cursor.Off)
 		}
 	}
 	// FEED-AUTHOR-DISPERSE-001：全局时间流里同一作者一页只露最新一条，其余折叠成

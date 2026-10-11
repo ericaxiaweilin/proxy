@@ -507,7 +507,9 @@ export const ListFeedPostsPayloadSchema = z.object({
   // R15.14: 同样回显全量不过滤 (client 没传或传 "" 等于 “全量”).
   unfiltered: z.boolean().optional(),
   nextCursor: z.string().optional(),
-  hasMore: z.boolean().optional()
+  hasMore: z.boolean().optional(),
+  // FEED-RANK-001：服务端按分数排过（登录读者的推荐流）。客户端要保留这个顺序，不要再按时间重排。
+  ranked: z.boolean().optional()
 });
 export type ListFeedPostsPayload = z.infer<typeof ListFeedPostsPayloadSchema>;
 

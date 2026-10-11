@@ -325,6 +325,8 @@ export function FeedSurface({
   const [posts, setPosts] = useState<FeedPost[]>(cachedPosts);
   const [media, setMedia] = useState<Record<string, FeedMediaItem[]>>(cachedMedia);
   const [nextCursor, setNextCursor] = useState<string>();
+  // FEED-RANK-001：服务端按分数排过的推荐流（登录读者）。为 true 时推荐页保留服务端顺序。
+  const [feedRanked, setFeedRanked] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
@@ -904,6 +906,7 @@ export function FeedSurface({
       const read = await localNet.listFeedPosts(undefined, searching ? 50 : 25, searching ? search : undefined, fresh);
       // 搜索结果不是 feed 本身：写回模块级缓存会让退出搜索后（以及冷启动读盘时）
       // 看到的是上次的搜索结果，所以只在非搜索加载时更新缓存与磁盘缓存。
+      if (!searching) setFeedRanked(read.ranked === true);
       if (!searching) {
         cachedPosts = read.posts;
         cachedMedia = read.media;
@@ -1973,7 +1976,9 @@ export function FeedSurface({
   // 谁都不置顶。feedPrefs.weights 还存着（偏好页照常写），但排序不再消费它。
   const { visible, scopeHiddenCount } = useMemo(() => {
     const unranked = getVisibleForTab(tab);
-    const ranked = [...unranked].sort((a, b) => {
+    // FEED-RANK-001（2026-10-11，用户同意第三步「你自己决定」）：登录读者的推荐流由服务端按分数排，
+    // 这里保留服务端顺序（分页按到达顺序追加）。匿名读 / 关注 tab / 本地缓存回放仍按时间倒序。
+    const ranked = feedRanked && tab === "RECOMMENDED" ? unranked : [...unranked].sort((a, b) => {
       const ta = Date.parse(a.createdAt);
       const tb = Date.parse(b.createdAt);
       if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return tb - ta;
@@ -1986,7 +1991,7 @@ export function FeedSurface({
         : 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, tab, feedPrefs, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId, mutedAuthors]);
+  }, [posts, tab, feedPrefs, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId, mutedAuthors, feedRanked]);
   // FEED-SCOPE-001: 时间范围是相对 Date.now() 滚动的，帖文会一天天无声消失 ——
   // 实测默认 7D 隐藏了 62% 的帖文，而时间线上没有任何提示，看起来就是「数据丢了」。
   // 生效时把「正在筛选」和「藏了多少」摆出来，并给一个一键看全部的出口。
