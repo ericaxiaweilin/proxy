@@ -521,7 +521,6 @@ export interface Messages {
   ctxRequesterDesc: string;
   ctxBusinessTitle: string;
   ctxBusinessDesc: string;
-  locScopeMapPick: string;
   locStateAcquiring: string;
   locStateDenied: string;
   locStateUnavailable: string;
@@ -1184,7 +1183,6 @@ const ZH: Messages = {
   ctxRequesterDesc: "找服务、看订单、参加活动，也可以开放自己的服务能力",
   ctxBusinessTitle: "商家",
   ctxBusinessDesc: "经营店铺、找服务、发布订单与活动",
-  locScopeMapPick: "地图选点",
   locStateAcquiring: "正在定位…",
   locStateDenied: "定位未授权",
   locStateUnavailable: "定位不可用 · {message}",
@@ -1788,7 +1786,6 @@ const VI: Messages = {
   ctxRequesterDesc: "Tìm dịch vụ, xem đơn hàng, tham gia hoạt động; cũng có thể mở năng lực dịch vụ của mình",
   ctxBusinessTitle: "Nhà kinh doanh",
   ctxBusinessDesc: "Vận hành cửa hàng, tìm dịch vụ, đăng đơn hàng và hoạt động",
-  locScopeMapPick: "Điểm trên bản đồ",
   locStateAcquiring: "Đang định vị…",
   locStateDenied: "Chưa cấp quyền định vị",
   locStateUnavailable: "Định vị không khả dụng · {message}",
@@ -2392,7 +2389,6 @@ const EN: Messages = {
   ctxRequesterDesc: "Find services, track orders, join activities — and open your own service capabilities.",
   ctxBusinessTitle: "Business",
   ctxBusinessDesc: "Run your store, find services, publish orders and activities.",
-  locScopeMapPick: "Map pin",
   locStateAcquiring: "Locating…",
   locStateDenied: "Location not permitted",
   locStateUnavailable: "Location unavailable · {message}",
@@ -2995,7 +2991,6 @@ const LO: Messages = {
   ctxRequesterDesc: "ຫາບໍລິການ, ເບິ່ງຄຳສັ່ງຊື້, ເຂົ້າຮ່ວມກິດຈະກຳ ແລະ ເປີດຄວາມສາມາດດ້ວຍການສະໜຸງບໍລິການຂອງຕົນໄດ້",
   ctxBusinessTitle: "ຮ້ານຄ້າ",
   ctxBusinessDesc: "ບໍລິຫາຫຼານຮ້ານ, ຫາບໍລິການ, ລົງຄຳສັ່ງຊື້ ແລະ ກິດຈະກຳ",
-  locScopeMapPick: "ຈຸດໃນແຜນທີ່",
   locStateAcquiring: "ກຳລັງຫາຕຳແຫນ່…",
   locStateDenied: "ຍັງບໍ່ໄດ້ອະນຸຍາດຕຳແຫນ່",
   locStateUnavailable: "ຕຳແຫນ່ໃຊ້ບໍ່ໄດ້ · {message}",
@@ -3598,7 +3593,6 @@ const KO: Messages = {
   ctxRequesterDesc: "서비스 찾기, 주문 확인, 활동 참여. 내 서비스 역량도 열 수 있습니다.",
   ctxBusinessTitle: "사업자",
   ctxBusinessDesc: "매장 운영, 서비스 찾기, 주문과 활동 등록.",
-  locScopeMapPick: "지도 핀",
   locStateAcquiring: "위치 확인 중…",
   locStateDenied: "위치 권한 없음",
   locStateUnavailable: "위치를 쓸 수 없음 · {message}",
@@ -4201,7 +4195,6 @@ const JA: Messages = {
   ctxRequesterDesc: "サービスを探す・注文を見る・活動に参加する。自分のサービス性も公開できます。",
   ctxBusinessTitle: "事業者",
   ctxBusinessDesc: "店舗運営・サービス探索・注文と活動の公開。",
-  locScopeMapPick: "地図のピン",
   locStateAcquiring: "現在地を取得中…",
   locStateDenied: "位置情報の許可がありません",
   locStateUnavailable: "位置情報を取得できません · {message}",

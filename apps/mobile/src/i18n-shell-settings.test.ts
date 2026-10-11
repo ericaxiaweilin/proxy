@@ -43,7 +43,6 @@ const SHELL_KEYS: ReadonlyArray<MessageKey> = [
   "tabHome", "tabMarket", "tabFeed", "tabMessages", "tabMe",
   "guestMeTitle", "guestMeSub", "guestMeCta",
   "ctxRequesterTitle", "ctxRequesterDesc", "ctxBusinessTitle", "ctxBusinessDesc",
-  "locScopeMapPick",
   "locStateAcquiring", "locStateDenied", "locStateUnavailable",
   "locSwitch", "locOpenMapA11y", "locSwitchScopeA11y"
 ];
@@ -91,21 +90,9 @@ describe("I18N-SETTINGS-001 shell + settings chrome", () => {
     expect(seen.size, `tabMe collapsed to ${seen.size} distinct strings`).toBe(CODES.length);
   });
 
-  it("keeps the map-pin line free of any coverage claim (HOME-RADIUS-001)", () => {
-    // 用户：「home 首页的地图选点 覆盖范围5km可以移除 废话」（2026-10-09）。
-    // 没有任何查询读那个半径，所以这句话里不许再声明覆盖范围，也不许留 {radius}
-    // 占位符 —— 漏掉的占位符会原样印在界面上，那是一眼假的句子。
-    for (const code of CODES) {
-      const line = translate(code as Language, "locScopeMapPick");
-      expect(line, `${code} 那句不能空`).not.toBe("");
-      expect(line, `${code} 又带上半径了`).not.toContain("{radius}");
-      expect(line, `${code} 还在声称覆盖范围`).not.toMatch(/km|覆蓋|覆盖|覆盖|Covers|phủ|범위|範囲/);
-    }
-    // 六种语言各自的说法都存在（不是同一个词复制六遍）。
-    const lines = CODES.map((code) => translate(code as Language, "locScopeMapPick"));
-    expect(new Set(lines).size, "locScopeMapPick collapsed to one string").toBe(CODES.length);
-    expect(lines[0]).toBe("地图选点");
-    // 定位失败那句带的是设备层的原始 message，也不能吞掉变量。
+  it("the unavailable-location line keeps the device-layer message (HOME-LOCATION-CLEAN-001)", () => {
+    // 「地图选点」那一行（locScopeMapPick）已随用户「移除 废话」删除 —— 这里只留与它同测的另一条：
+    // 定位失败那句带的是设备层的原始 message，不能吞掉变量。
     expect(translate("en", "locStateUnavailable", { message: "GPS off" })).toContain("GPS off");
   });
 
@@ -154,7 +141,6 @@ describe("I18N-SETTINGS-001 the surfaces actually call the dictionary", () => {
     }
     for (const key of [
       "locStateAcquiring", "locStateDenied", "locStateUnavailable",
-      "locScopeMapPick",
       "locSwitch", "locOpenMapA11y", "locSwitchScopeA11y"
     ]) {
       expect(shellCode, `location chrome must read ${key}`).toContain(`"${key}"`);

@@ -4,6 +4,7 @@
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
 import { useUsageTracker } from "../usage-tracker";
+import { GrowthClient } from "../growth-client";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TabActiveContext } from "./tab-active";
 import { WeatherBadge } from "../components/weather-chip";
@@ -269,6 +270,18 @@ export function AppShell({
     const sub = AppState.addEventListener("change", (next) => { if (next === "active") void refresh(); });
     return () => { cancelled = true; sub.remove(); };
   }, [legalStatus]);
+  // DAILY-LOGIN-001（用户：「每日登录都默认加积分 比如 5 积分」）：登录态下打开 / 回到前台时静默记一次
+  // 「每日登录」。服务端按越南时区的日期去重，所以回前台多少次都只算一天一次；游客（没有登录态）
+  // 不加分，调用会被拒，这里吞掉。不弹提示 —— 积分明细里能看到。
+  useEffect(() => {
+    // secureSessionStore 是可选 prop：没传就没有会话可读，也就没有「登录」可记。
+    if (!secureSessionStore) return undefined;
+    const client = new GrowthClient({ authClient: sessionAuthClient, secureSessionStore });
+    const record = (): void => { void client.recordDailyLogin().catch(() => undefined); };
+    record();
+    const sub = AppState.addEventListener("change", (next) => { if (next === "active") record(); });
+    return () => { sub.remove(); };
+  }, [sessionAuthClient, secureSessionStore]);
   // NOTIF-BELL-001：拉 inbox 算角标。三个时机都拉：进首页（铃铛只在首页出现）、
   // 通知中心关闭（用户可能在里面标了已读，角标必须跟着降）、以及 notification 换实例。
   //
@@ -1411,7 +1424,10 @@ function LocationContext({
   // HOME-RADIUS-001（2026-10-09，用户：「home 首页的地图选点 覆盖范围5km可以移除 废话」）：
   // 手动选点这件事值得告诉用户（说明没在跟随设备），半径不值得 —— 没有任何查询读它，
   // 写在首页上只会让人以为首页内容被这个圈限住了。
-  const sub = location.kind === "CUSTOM" ? t("locScopeMapPick") : deviceSub;
+  // HOME-LOCATION-CLEAN-001（2026-10-11，用户：「home 的地址下面显示地图选点 4 个字 移除 废话」）：
+  // 手动选点时也不再出这一行 —— 城市名本身已经说明了位置在哪，「地图选点」没告诉用户任何他不知道的事。
+  // 副标题只剩定位中 / 未授权 / 不可用这三种用户确实需要知道的状态。
+  const sub = deviceSub;
   return (
     <View style={styles.locationRow}>
     <Pressable
@@ -1422,8 +1438,9 @@ function LocationContext({
     >
       <View style={styles.locationPin}>
         {/* MAP-FOOTPRINT-LOGO-001：首页场景地图入口用原型「折叠地图」logo。
-            27 小格里用 21（48 栅格原画显小一圈，等效原来 route 17 的分量）。 */}
-        <ProxyIcon color={color.ink} name="mapFold" size={21} />
+            HOME-LOCATION-CLEAN-001（用户：「把地图 logo 做大点 不需要矩形包裹」）：去掉浅紫矩形底，
+            logo 直接放大到 34（创建活动里选地点那颗同款裸图标取 32）。 */}
+        <ProxyIcon color={color.ink} name="mapFold" size={34} />
       </View>
       <View style={styles.locationCopy}>
         <Text selectable numberOfLines={2} style={styles.locationCity}>{formatLocationTitle(location)}</Text>
@@ -1838,13 +1855,12 @@ const styles = StyleSheet.create({
   // R15.13 P5：LocationContext 变成真可按 — “切换⌄” 现在真的会跳出 picker。
   // pressed 状态给个轻微背景色，用户能看到交互发生。
   locationRowPressed: { backgroundColor: "#F1EAF7" },
+  // HOME-LOCATION-CLEAN-001：只是个定位尺寸用的透明容器 —— 不再有底色 / 圆角（不要矩形包裹）。
   locationPin: {
     alignItems: "center",
-    backgroundColor: "#F1EAF7",
-    borderRadius: 10,
-    height: 27,
+    height: 36,
     justifyContent: "center",
-    width: 27
+    width: 36
   },
   locationCopy: { flex: 1 },
   locationCity: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },

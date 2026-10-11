@@ -487,8 +487,10 @@ describe("UI-HOME-DISCOVERY-001 requester home baseline", () => {
     // HOME-RADIUS-001（2026-10-09，用户：「覆盖范围5km可以移除 废话」）：钉的不再是
     // 「覆盖范围由 formatRadius 给出」，而是**这句里不许再有覆盖范围** —— 没有一处查询
     // 读那个半径，写出来只会让人以为首页被这个圈限住了。坐标仍然不进 UI。
-    expect(shell).toContain('t("locScopeMapPick")');
-    expect(shell).not.toContain("locScopeMapPick\", { radius");
+    // HOME-LOCATION-CLEAN-001（2026-10-11，用户：「home 的地址下面显示地图选点 4 个字 移除」）：
+    // 手动选点时首页地址下面也不再有那一行字，键一并删了；选点面板里的「地图选点」选项（上面的
+    // locationPicker 断言）是另一处，不动。
+    expect(shell).not.toContain("locScopeMapPick");
     expect(shell).not.toMatch(/lat\.toFixed\(4\).*lng\.toFixed\(4\)/);
     expect(mapCanvas).not.toContain("当前 grid 坐标");
     // 选点面板上那排 1 / 3 / 5 km 的芯片必须真的没了（只删文案不删控件=还问用户要半径）。

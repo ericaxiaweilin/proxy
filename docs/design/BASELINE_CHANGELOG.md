@@ -4,6 +4,30 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 362 — 2026-10-11
+
+- **首页地址行：去掉「地图选点」字幕，地图 logo 放大并去掉矩形底**（`HOME-LOCATION-CLEAN-001`，
+  用户原话：「home 的地址下面显示地图选点 4 个字 这 4 个字移除 废话，把地图 logo 做大点，不需要矩形包裹」）。
+
+  · 手动选点时，城市名下面原来多出一行「地图选点」（HOME-RADIUS-001 当时只去掉了半径、留下了这句）。
+    现在副标题只来自设备定位状态（定位中 / 未授权 / 不可用）；`locScopeMapPick` 键与 6 种语言翻译、
+    以及钉它的两条断言一并删除。选点面板里的「地图选点」选项是另一处，不动。
+  · `mapFold` logo 21 → 34，`locationPin` 容器去掉浅紫底色和圆角（只留 36×36 的定位尺寸）。
+  · 反转了 HOME-RADIUS-001 留下的「手动选点值得告诉用户」那条取舍；对应契约换成新的命名测试
+    （`app-shell.test.ts` 的 HOME-LOCATION-CLEAN-001），并把 `app-shell.test.ts` 加进那一步的 vitest。
+
+- **每日登录加积分**（`DAILY-LOGIN-001`，用户原话：「每日登录都默认加积分 比如 5 积分」）。属于积分体系
+  （不是视觉基线），记在这里是因为它改了「我的权益」里积分明细的来源：
+
+  · 固定赚取规则新增 `DAILY_LOGIN`「每日登录」+5（`identitytier.EarnRules`，入账与规则表读同一个常量）。
+  · 命令 `RecordDailyLogin`（growth）：身份只取会话 actor；账本按 `(reason, ref=越南日期)` 去重，一天一笔；
+    重复调返回 `granted=false`。只给正式账号（ACTIVE / REGISTERED / VERIFIED / COMMERCIAL_VERIFIED）加，
+    游客 / 匿名会话不加。「每天」按越南时区（UTC+7）算。
+  · App：登录态下打开与回到前台时静默调一次，不弹提示，积分明细里能看到。
+  · 没有借用 `APP_SESSION` 行为事件：那是受「同意采集」门控的分析数据，用户拒绝采集就没有记录，
+    拿它发奖励会把分析和奖励混在一起。
+  · 只发成长值，不发现金 / 券（INCENTIVE 硬边界）。
+
 ## Revision 361 — 2026-10-11
 
 - **用户侧「我的 → 场景推荐 → 我的店铺」改回 builder 的东西：我推荐、已被运营采纳进平台的店**

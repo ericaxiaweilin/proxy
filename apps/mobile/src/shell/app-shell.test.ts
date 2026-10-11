@@ -60,6 +60,24 @@ describe("app shell guest path", () => {
     expect(pin).toContain('name="mapFold"');
     expect(pin).not.toContain('name="route"');
   });
+
+  // HOME-LOCATION-CLEAN-001（2026-10-11，用户：「home 的地址下面显示地图选点 4 个字 移除 废话，
+  // 把地图 logo 做大点，不需要矩形包裹」）。
+  it("HOME-LOCATION-CLEAN-001: no 地图选点 sub-line, logo is bigger and has no rectangular box", () => {
+    const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8");
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    // 手动选点时副标题也不再是「地图选点」：副标题只来自设备定位状态。
+    expect(code).toContain("const sub = deviceSub;");
+    expect(code).not.toContain("locScopeMapPick");
+    // logo 放大（原来 21 塞在 27 的小格里）。
+    const size = Number(/name="mapFold" size=\{(\d+)\}/.exec(source.slice(source.indexOf("styles.locationPin")))?.[1]);
+    expect(size, "mapFold size").toBeGreaterThanOrEqual(32);
+    // 容器没有底色和圆角（不要矩形包裹）。
+    const style = /locationPin:\s*\{([^}]*)\}/.exec(code)?.[1] ?? "";
+    expect(style, "找不到 locationPin 样式").not.toBe("");
+    expect(style).not.toContain("backgroundColor");
+    expect(style).not.toContain("borderRadius");
+  });
 });
 
 describe("app shell scroll chrome ownership", () => {

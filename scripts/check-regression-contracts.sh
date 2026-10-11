@@ -1474,6 +1474,19 @@ if ! (cd apps/mobile && npx vitest run src/surfaces/my-recommended-stores.test.t
 fi
 echo "    STORE-REC-BUILDER-001: PASS (我的店铺 = 已推荐入平台的店 · 推荐人不建店)"
 
+# DAILY-LOGIN-001（2026-10-11，用户：「每日登录都默认加积分 比如 5 积分」）：每个越南日第一次登录态打开 App
+# 记 5 分，一天只算一次（账本 (reason, ref=日期) 去重）；规则表与入账读同一个常量；游客不加。
+# 钉：行为测试（命令语义 / 越南日边界 / 真库幂等）+ App 登录态下打开与回前台都会调。
+require_test "DAILY-LOGIN-001" ./internal/growth TestRecordDailyLoginGrantsOncePerDayAndIsIdempotent apps/api-go/internal/growth/service_test.go || exit 1
+require_test "DAILY-LOGIN-001" ./internal/growth TestDailyLoginIsAnEarnRuleWithFivePoints apps/api-go/internal/growth/service_test.go || exit 1
+if ! grep -qF 'func TestDailyLoginCreditsFivePointsOncePerHanoiDay' apps/api-go/internal/platform/postgres/identity_points_integration_test.go \
+  || ! grep -qF 'void client.recordDailyLogin()' apps/mobile/src/shell/app-shell.tsx \
+  || ! grep -qF 'if (next === "active") record();' apps/mobile/src/shell/app-shell.tsx; then
+  echo "  FAIL [DAILY-LOGIN-001]: 每日登录的真库测试不见了，或 App 不再在打开 / 回前台时记一次。" >&2
+  exit 1
+fi
+echo "    DAILY-LOGIN-001: PASS (登录态每日一次 · 5 分 · 越南日边界 · 游客不加)"
+
 # DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
 # 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
 # ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。
@@ -11626,13 +11639,16 @@ fi
 # 「首页被我选的圈限住了」的控件。这一档钉的是**控件真的没了**，不是只改了文案。
 # 命名测试必须先存在再跑：vitest 在没匹配到任何断言时照样退 0（本仓踩过），
 # 而这一串判据按 ID 筛的时候也要能被选中，所以 ID 写在这条 grep 的失败语里。
-if ! grep -qF 'keeps the map-pin line free of any coverage claim (HOME-RADIUS-001)' apps/mobile/src/i18n-shell-settings.test.ts; then
-  echo "  FAIL [HOME-RADIUS-001]: 那条命名测试不见了 —— vitest 跑不到任何断言也会报绿。" >&2
+# HOME-LOCATION-CLEAN-001（2026-10-11，用户：「home 的地址下面显示地图选点 4 个字 移除」）：首页地址下面
+# 那一行「地图选点」连同 locScopeMapPick 键一起删了，原来钉那一行「不许带覆盖范围」的命名测试随之
+# 不存在。命名测试换成首页位置行的那条（同样要先存在再跑，vitest 没匹配到断言也退 0）。
+if ! grep -qF 'HOME-LOCATION-CLEAN-001: no 地图选点 sub-line, logo is bigger and has no rectangular box' apps/mobile/src/shell/app-shell.test.ts; then
+  echo "  FAIL [HOME-RADIUS-001 / HOME-LOCATION-CLEAN-001]: 那条命名测试不见了 —— vitest 跑不到任何断言也会报绿。" >&2
   exit 1
 fi
 pnpm --filter @proxy/mobile exec vitest run \
   src/i18n-shell-settings.test.ts src/requester-home-discovery-contract.test.ts \
-  src/components/location-picker-sheet.test.ts || exit $?
+  src/shell/app-shell.test.ts src/components/location-picker-sheet.test.ts || exit $?
 # 注释里会提到被删掉的词，所以判负之前先剥注释（这一坑本仓踩过不止一次）。
 # 文件名必须写在每条命令里：先把源码 assign 给变量再 grep，这一步在 --changed 的索引里
 # 是「不引用任何文件」，于是它永远不参与 —— 只在 --all 才跑的判据等于没有判据。
@@ -11649,18 +11665,13 @@ if perl -0pe 's{/\*.*?\*/}{}gs; s{//[^\n]*}{}g' apps/mobile/src/components/locat
   echo "  FAIL [HOME-RADIUS-001]: 面板又开始凭空地画覆盖圈。" >&2
   exit 1
 fi
-# 六种语言里不许残留 {radius} 占位符 —— 漏一个就原样印在界面上。
-if grep -qE 'locScopeMapPick: "[^"]*\{radius\}' apps/mobile/src/i18n.ts; then
-  echo "  FAIL [HOME-RADIUS-001]: 有种语言的地图选点那句还带着 {radius}（占位符会印成字面量）。" >&2
-  exit 1
-fi
 # saved id 里的 `_r<半径>` 是历史记录的键：控件删了，键必须还是那个常量，
 # 否则同一个点再存一次就多出一条重复项。
 if ! grep -qE 'custom_geo_\$\{coordinateKey\}_r\$\{radius\}' apps/mobile/src/components/location-picker-sheet.tsx; then
   echo "  FAIL [HOME-RADIUS-001]: 自定义地点的 id 不再带 _r<半径> —— 老历史记录会和新存的分裂成两条。" >&2
   exit 1
 fi
-echo "    HOME-RADIUS-001: PASS (半径控件/圈/文案三处都没了 · 六种语言无占位符 · saved id 的键保持稳定)"
+echo "    HOME-RADIUS-001: PASS (半径控件/圈/文案三处都没了 · saved id 的键保持稳定)"
 
 for shellkey in guestMeTitle guestMeSub guestMeCta \
                ctxRequesterTitle ctxRequesterDesc ctxBusinessTitle ctxBusinessDesc \
