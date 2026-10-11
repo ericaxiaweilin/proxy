@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
   chip: { color: color.muted, fontSize: 12, lineHeight: 17 },
   banner: { backgroundColor: color.warnBannerBg, borderColor: color.warnBannerBorder, borderRadius: 10, borderWidth: 1, gap: 8, marginHorizontal: 16, marginVertical: 8, padding: 10 },
   bannerWarn: { borderColor: "#BD3434" },
-  attribution: { color: color.muted, fontSize: 10 },
+  attribution: { color: color.muted, fontSize: 11 },
   bannerText: { color: color.warnBannerText, fontSize: 13, lineHeight: 18 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   option: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 5 },

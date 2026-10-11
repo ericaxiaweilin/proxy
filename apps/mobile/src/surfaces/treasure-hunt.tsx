@@ -261,7 +261,7 @@ function Radar({ fix, targets, selectedId, onSelect, reduceMotion }: { fix: Devi
         {[100, 500, 1500].map((m) => (
           <View key={m} style={[styles.ring, { width: ring(m), height: ring(m), borderRadius: ring(m) / 2, left: half - ring(m) / 2, top: half - ring(m) / 2 }, m === 100 && styles.ringOpen]} />
         ))}
-        <Text style={[styles.north, { left: half - 5 }]}>北</Text>
+        <Text style={[styles.north, { left: half - 5.5 }]}>北</Text>
         {!reduceMotion ? (
           <Animated.View pointerEvents="none" style={[styles.sweep, { left: half - 1, top: 0, height: half, transform: [{ translateY: half / 2 }, { rotate: sweep.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }, { translateY: -half / 2 }] }]} />
         ) : null}
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
   radar: { backgroundColor: "#171321", overflow: "hidden" },
   ring: { borderColor: "rgba(255,255,255,0.14)", borderWidth: 1, position: "absolute" },
   ringOpen: { borderColor: GOLD, borderStyle: "dashed", borderWidth: 1.5 },
-  north: { color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: "700", position: "absolute", top: 4 },
+  north: { color: "rgba(255,255,255,0.5)", fontSize: 11, fontWeight: "700", position: "absolute", top: 4 },
   sweep: { backgroundColor: "rgba(31,200,169,0.35)", position: "absolute", width: 2 },
   me: { backgroundColor: color.mint, borderColor: color.white, borderRadius: 7, borderWidth: 2, height: 14, position: "absolute", width: 14 },
   glow: { borderRadius: 20, bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
