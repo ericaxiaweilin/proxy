@@ -18,6 +18,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/compliance"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/decisionengine"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/emergency"
@@ -184,6 +185,9 @@ type Server struct {
 	Research *research.Service
 	// Gravity：引力状态存储（GRAVITY-001）。nil = 没配库，相关页返回 NOT_CONNECTED。
 	Gravity gravity.Store
+	// Decisions：决策引擎（DECISION-ENGINE-001）。nil = 没配库，/v1/operator/decisions/evaluate 返回 NOT_CONNECTED。
+	Decisions     *decisionengine.Engine
+	DecisionStats DecisionStatsSource
 	// Matching：撮合排序的旋钮存储与决策留痕读模型（OPS-MATCHING-TUNABLES-001）。
 	// nil = 没配库，/v1/operator/matching 返回 NOT_CONNECTED，引擎按出厂默认跑。
 	Matching matching.ConsoleStore
@@ -324,6 +328,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/operator/matching", s.operatorConsole(s.operatorMatching))
 	mux.HandleFunc("/v1/operator/matching/trace", s.operatorConsole(s.operatorMatchingTrace))
 	mux.HandleFunc("/v1/operator/matching/explain", s.operatorConsole(s.operatorMatchingExplain))
+	// DECISION-ENGINE-001：干预决策引擎试算（运营；caller 由服务端写死为 operator_console）。
+	// 不是 /v1/decisions/evaluate —— 那是 OPS-ENGINE-API-001 的上下文规则判定，另一回事。
+	mux.HandleFunc("/v1/operator/decisions/evaluate", s.operatorConsoleMethod(http.MethodPost, s.decisionsEvaluate))
 	mux.HandleFunc("/v1/operator/identity-tiers", s.operatorConsole(s.operatorIdentityTiers))
 	mux.HandleFunc("/v1/operator/matching/tunables", s.operatorConsoleGated(http.MethodPost, ScopeMarketplace, s.operatorMatchingTunables))
 	mux.HandleFunc("/v1/operator/dispatch", s.operatorConsole(s.operatorDispatch))

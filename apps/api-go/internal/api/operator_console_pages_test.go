@@ -71,8 +71,13 @@ func TestOperatorDecisionEngineServesEligibilityAndRefusesFakeThroughput(t *test
 		t.Errorf("people = %d, want 38", p.Totals.People)
 	}
 	joined := strings.Join(p.Notes, "\n")
-	if !strings.Contains(joined, "/v1/decisions/evaluate") || !strings.Contains(joined, "没有注册路由") {
-		t.Errorf("必须说明引擎的调用面不存在（否则运营会把状态分档当成引擎吞吐）: %q", p.Notes)
+	// DECISION-ENGINE-001：引擎调用面现在存在了（decision.evaluations）。吞吐只能来自 runtime 这一块，
+	// 不能从状态分档推；没接留痕时 runtime 是 null 且说明「不给数」—— 旧的「没有注册路由」不许回来。
+	if strings.Contains(joined, "没有注册路由") {
+		t.Errorf("「没有注册路由」已经不成立，不许再出现: %q", p.Notes)
+	}
+	if !strings.Contains(string(body), `"runtime":null`) || !strings.Contains(joined, "不给数") {
+		t.Errorf("没接决策留痕时 runtime 必须是 null 并说明不给数（不是 0）: %s", string(body))
 	}
 	// 旧的假遥测字段一个都不许回来。查 JSON 键不是散文 —— note 里提到它们是对的，
 	// 禁的是「又变成了一个字段」。

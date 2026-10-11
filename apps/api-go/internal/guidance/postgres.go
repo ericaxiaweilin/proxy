@@ -64,3 +64,11 @@ func (p *Postgres) SetNudgesEnabled(ctx context.Context, userID string, enabled 
 	_, err := p.pool.Exec(ctx, `INSERT INTO notification.nudge_optouts (user_account_id, opted_out_at) VALUES ($1, $2) ON CONFLICT DO NOTHING`, userID, now.UTC())
 	return err
 }
+
+// AlreadyNudged：这一种引导推送是否已经发到过这个人的收件箱（终身一次）。
+func (p *Postgres) AlreadyNudged(ctx context.Context, userID, nudgeKey string) (bool, error) {
+	var ok bool
+	err := p.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM notification.inbox_items WHERE recipient_id = $1 AND type = $2)`,
+		userID, "NUDGE_"+nudgeKey).Scan(&ok)
+	return ok, err
+}

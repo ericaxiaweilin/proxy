@@ -1394,6 +1394,19 @@ if grep -qF 'sceneUnknown' "$tags_page" || grep -nE '[a-zA-Z_)]\.toLocaleString\
 fi
 echo "    OPS-TAGS-CRASH-001: PASS (标签中心缺字段显示「—」不崩)"
 
+# DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
+# 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
+# ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。
+require_test "DECISION-ENGINE-001" ./internal/decisionengine TestDecisionEngine_BudgetExhaustedIsPassiveNotBlocked apps/api-go/internal/decisionengine/engine_test.go || exit 1
+require_test "DECISION-ENGINE-001" ./internal/decisionengine TestDecisionEngine_UnreadableSourceFailsClosed apps/api-go/internal/decisionengine/engine_test.go || exit 1
+require_test "DECISION-ENGINE-001" ./internal/decisionengine TestDecisionEngine_NeverActiveOrchestrate apps/api-go/internal/decisionengine/engine_test.go || exit 1
+require_test "DECISION-ENGINE-001" ./internal/guidance TestNudgesGoThroughTheGateOncePerRunAndSkipAlreadyNudged apps/api-go/internal/guidance/guidance_test.go || exit 1
+require_test "DECISION-ENGINE-001" ./internal/api TestOperatorDecisionEvaluateIsOperatorOnlyAndCallerIsServerSide apps/api-go/internal/api/decisions_engine_test.go || exit 1
+if ! grep -qF 'nudgeGate, time.Now().UTC(), 200)' apps/api-go/cmd/worker/main.go; then
+  echo "  FAIL [DECISION-ENGINE-001]: worker 的引导推送不再经过决策引擎 —— 干预预算形同虚设。" >&2
+  exit 1
+fi
+
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \

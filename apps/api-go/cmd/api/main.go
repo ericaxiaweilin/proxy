@@ -23,6 +23,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/compliance"
 	"github.com/proxy-app/proxy-api/internal/contribution"
 	"github.com/proxy-app/proxy-api/internal/conversation"
+	"github.com/proxy-app/proxy-api/internal/decisionengine"
 	"github.com/proxy-app/proxy-api/internal/demand"
 	"github.com/proxy-app/proxy-api/internal/dispatch"
 	"github.com/proxy-app/proxy-api/internal/emergency"
@@ -742,6 +743,10 @@ func main() {
 		// OPS-RESTRICT-001：账号受限 / 封禁在命令边界执行。
 		accountPG := accountstatus.NewPostgres(pool)
 		server.AccountStatus = &accountstatus.Service{Store: accountPG}
+		// DECISION-ENGINE-001：干预决策引擎 + 留痕（引擎总览的调用量 / 延迟 / 拦截分布都从这里读）。
+		decisionPG := decisionengine.NewPostgres(pool, server.AccountStatus)
+		server.Decisions = decisionengine.New(decisionPG, decisionPG)
+		server.DecisionStats = decisionPG
 		server.AccountInFlight = accountPG.InFlightOrders
 		tagPG := tagging.NewPostgres(pool)
 		server.Tagging = &tagging.Commands{Sink: tagPG, Store: tagPG}

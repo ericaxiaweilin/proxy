@@ -69,7 +69,7 @@ func TestNudgesSkipPeopleWhoDidItWhoseProfileIsIncompleteAndTheRestricted(t *tes
 		},
 	}
 	rec := &recorder{}
-	sent, err := RunNudges(context.Background(), src, rec, func(_ context.Context, id string) bool { return id == "banned" }, time.Now(), 100)
+	sent, err := RunNudges(context.Background(), src, rec, func(_ context.Context, id string) bool { return id == "banned" }, nil, time.Now(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,5 +96,52 @@ func TestGetNextStepsReadsOnlyTheCallersOwnState(t *testing.T) {
 	}
 	if anon := c.HandleContext(context.Background(), command.Envelope{CommandType: "GetNextSteps"}); anon.Error == nil || anon.Error.ErrorCode != "NEXT_STEPS_REQUIRES_ACTOR" {
 		t.Fatalf("anonymous refused: %+v", anon.Error)
+	}
+}
+
+type historySource struct {
+	fakeSource
+	done map[string]bool // user|key
+}
+
+func (h historySource) AlreadyNudged(_ context.Context, user, key string) (bool, error) {
+	return h.done[user+"|"+key], nil
+}
+
+// DECISION-ENGINE-001：推送先过引擎；已经推过的人不再进引擎；同一轮一个人最多一条。
+func TestNudgesGoThroughTheGateOncePerRunAndSkipAlreadyNudged(t *testing.T) {
+	src := historySource{
+		fakeSource: fakeSource{
+			cand: map[string][]string{(24 * time.Hour).String(): {"idle", "old", "denied"}, (72 * time.Hour).String(): {"idle", "old"}},
+			state: map[string]State{
+				"idle": {ProfileComplete: true}, "old": {ProfileComplete: true}, "denied": {ProfileComplete: true},
+			},
+		},
+		done: map[string]bool{"old|FIRST_POST": true},
+	}
+	asked := []string{}
+	gate := func(_ context.Context, id, key string) (bool, error) {
+		asked = append(asked, id+"|"+key)
+		return id != "denied", nil
+	}
+	rec := &recorder{}
+	sent, err := RunNudges(context.Background(), src, rec, nil, gate, time.Now(), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// idle：FIRST_POST 发出后，同一轮的 FIRST_DEMAND 不再问引擎、不发。
+	// old：FIRST_POST 已经推过 → 不进引擎；FIRST_DEMAND 进引擎并发出。
+	// denied：引擎拒绝 → 不发。
+	if sent["FIRST_POST"] != 1 || sent["FIRST_DEMAND"] != 1 || len(rec.calls) != 2 {
+		t.Fatalf("sent=%v calls=%v", sent, rec.calls)
+	}
+	want := []string{"idle|FIRST_POST", "denied|FIRST_POST", "old|FIRST_DEMAND"}
+	if len(asked) != len(want) {
+		t.Fatalf("gate asked %v, want %v", asked, want)
+	}
+	for i := range want {
+		if asked[i] != want[i] {
+			t.Fatalf("gate asked %v, want %v", asked, want)
+		}
 	}
 }

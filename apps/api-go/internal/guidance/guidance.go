@@ -92,9 +92,25 @@ type Emitter interface {
 // RestrictedFn 报告某人是否被限制（被限制的账号不推）。
 type RestrictedFn func(ctx context.Context, userID string) bool
 
+// NudgeHistory 是可选能力：这个人是否已经收到过这一种推送（终身一次）。Source 实现了它，
+// 已经推过的人就不再进入后面的判断 —— 以前每小时把同一批人整批送进通知管道，靠管道去重
+// 挡住，日志里的 sent 因此一直是「尝试数」而不是真发出去的数。
+type NudgeHistory interface {
+	AlreadyNudged(ctx context.Context, userID, nudgeKey string) (bool, error)
+}
+
+// Gate 是推送前的决策引擎关口（DECISION-ENGINE-001）：返回 false = 这次不推。
+// 返回 error 也不推（宁可少推）。nil = 不经引擎（老行为）。
+type Gate func(ctx context.Context, userID, nudgeKey string) (bool, error)
+
 // RunNudges 跑一轮推送，返回每种推送实际发出的条数。单个用户读状态失败只跳过这个人。
-func RunNudges(ctx context.Context, src Source, out Emitter, restricted RestrictedFn, now time.Time, perNudgeLimit int) (map[string]int, error) {
+//
+// 有 gate 时，同一轮里一个人最多推一条：引擎的干预预算按收件箱计数，而收件箱写入可能晚于
+// 这一轮里的下一次判断，单靠引擎会在同一轮里放过第二条。
+func RunNudges(ctx context.Context, src Source, out Emitter, restricted RestrictedFn, gate Gate, now time.Time, perNudgeLimit int) (map[string]int, error) {
 	sent := map[string]int{}
+	history, _ := src.(NudgeHistory)
+	nudgedThisRun := map[string]bool{}
 	for _, n := range Nudges {
 		ids, err := src.Candidates(ctx, now, n.MinAge, n.MaxAge, perNudgeLimit)
 		if err != nil {
@@ -104,15 +120,29 @@ func RunNudges(ctx context.Context, src Source, out Emitter, restricted Restrict
 			if restricted != nil && restricted(ctx, id) {
 				continue
 			}
+			if history != nil {
+				if done, err := history.AlreadyNudged(ctx, id, n.Key); err != nil || done {
+					continue
+				}
+			}
 			st, err := src.LoadState(ctx, id)
 			if err != nil || !st.ProfileComplete || n.StepDone(st) {
 				// 资料没完善的人先不推「发帖」——他点进去会被资料门拦住；完善资料由首页的下一步卡片引导。
 				continue
 			}
+			if gate != nil {
+				if nudgedThisRun[id] {
+					continue
+				}
+				if ok, err := gate(ctx, id, n.Key); err != nil || !ok {
+					continue
+				}
+			}
 			if err := out.Nudge(ctx, id, n.Key, n.Title, n.Body, n.Target); err != nil {
 				return sent, err
 			}
 			sent[n.Key]++
+			nudgedThisRun[id] = true
 		}
 	}
 	return sent, nil

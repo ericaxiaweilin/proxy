@@ -17,6 +17,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/accountstatus"
 	"github.com/proxy-app/proxy-api/internal/benefit"
 	"github.com/proxy-app/proxy-api/internal/command"
+	"github.com/proxy-app/proxy-api/internal/decisionengine"
 	"github.com/proxy-app/proxy-api/internal/event"
 	"github.com/proxy-app/proxy-api/internal/gravity"
 	"github.com/proxy-app/proxy-api/internal/guidance"
@@ -678,11 +679,18 @@ func main() {
 	accountGate := &accountstatus.Service{Store: accountstatus.NewPostgres(pool)}
 	nudgeTicker := time.NewTicker(time.Hour)
 	defer nudgeTicker.Stop()
+	// DECISION-ENGINE-001：引导推送是今天唯一的「主动打扰」，先过决策引擎（安全 → 用户退订 →
+	// 每人每天 1 次干预预算 → 证据门），每次判断都记进 decision.evaluations。
+	decider := decisionengine.New(decisionengine.NewPostgres(pool, accountGate), decisionengine.NewPostgres(pool, accountGate))
+	nudgeGate := func(c context.Context, id, key string) (bool, error) {
+		d, err := decider.Evaluate(c, decisionengine.Request{UserID: id, Action: decisionengine.ActionNudge, Caller: "guidance_worker", Subject: key})
+		return d.Allowed, err
+	}
 	runNudges := func() {
 		sent, err := guidance.RunNudges(ctx, nudgeSource, nudger, func(c context.Context, id string) bool {
 			lvl, err := accountGate.LevelOf(c, id)
 			return err != nil || lvl != "" // 读不出来也不推：引导推送不是必须的，宁可少推
-		}, time.Now().UTC(), 200)
+		}, nudgeGate, time.Now().UTC(), 200)
 		if err != nil {
 			log.Printf("nudges failed: %v", err)
 			return

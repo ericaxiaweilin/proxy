@@ -49,9 +49,24 @@ func (s *Server) operatorDecisionEngine(w http.ResponseWriter, r *http.Request) 
 	}
 
 	notes := []string{
-		// 这一页最容易被误解的地方：它叫「决策引擎」，但引擎的**调用面**不存在。
-		"/v1/decisions/evaluate 没有注册路由，所以这里没有调用量 / 延迟 / 通过率 —— 那三样不存在，不给。",
-		"给的是 spec §11 的 Decision Eligibility 状态机：引擎今天把每个人判到哪一档、证据够不够。",
+		"下半部分是 spec §11 的 Decision Eligibility 状态机：引力 worker 把每个人判到哪一档、证据够不够。",
+	}
+	// DECISION-ENGINE-001：干预决策引擎的调用面。调用量 / 延迟 / 拦截分布只从 decision.evaluations
+	// 读；读不出来就给 null 并说明，不给 0（0 会被读成「引擎没被调用」）。
+	var runtimeStats any
+	if s.DecisionStats != nil {
+		st, err := s.DecisionStats.Stats(r.Context(), now)
+		if err != nil {
+			log.Printf("operator decision-engine runtime: %v", err)
+			notes = append(notes, "引擎调用留痕（decision.evaluations）读取失败 —— 调用量这一块不给数。")
+		} else {
+			runtimeStats = st
+			if st.Calls == 0 {
+				notes = append(notes, "近 30 天引擎没有被调用过：今天唯一的调用方是引导推送 worker（每小时一轮），没有候选人时不会调用 —— 0 是「查过了没有」。")
+			}
+		}
+	} else {
+		notes = append(notes, "决策引擎没有接库 —— 调用量这一块不给数。")
 	}
 	if e.ActiveOrchestrate > 0 {
 		// §12/§13 不自动进入主动编排（gravity 包里有 TestNeverAutoActiveOrchestrate 钉着）。
@@ -71,6 +86,7 @@ func (s *Server) operatorDecisionEngine(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dataSource": OperatorLiveSource,
+		"runtime":    runtimeStats,
 		"states":     e.States,
 		"eventTypes": e.EventTypes,
 		"totals": map[string]any{
