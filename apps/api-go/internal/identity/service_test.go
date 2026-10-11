@@ -70,9 +70,11 @@ func TestCreatesAndRevokesAllSessions(t *testing.T) {
 	if first.Outcome != "ACCEPTED" || second.Outcome != "ACCEPTED" {
 		t.Fatalf("expected two accepted sessions, got %#v %#v", first, second)
 	}
+	// SESSION-SAME-DEVICE-001: both logins are on device_001, so the second one already
+	// replaced the first; RevokeAllSessions only has the one remaining ACTIVE session left.
 	revoked := service.Handle(testEnvelope("RevokeAllSessions", map[string]any{"reason": "USER_LOGOUT"}, command.Target{Type: "SessionBatch", ID: "all"}))
-	if revoked.Outcome != "ACCEPTED" || len(revoked.EventRefs) != 2 {
-		t.Fatalf("expected two revoked session events, got %#v", revoked)
+	if revoked.Outcome != "ACCEPTED" || len(revoked.EventRefs) != 1 {
+		t.Fatalf("expected one revoked session event (the same-device re-login replaced the first), got %#v", revoked)
 	}
 	sessions, _ := service.Snapshot()
 	for _, session := range sessions {

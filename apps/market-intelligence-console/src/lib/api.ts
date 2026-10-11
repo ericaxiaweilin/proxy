@@ -80,10 +80,16 @@ export function clearOpsSession(): void {
 // 莫名其妙被登出（2026-10-06 实测：手机会话 REVOKED 与 ops_web 新会话 issued
 // 相差 5–6 毫秒，两次）。
 //
-// 修法就是把这句承诺做实：关标签页时真的发 RevokeSession。keepalive 让请求能在
-// 页面卸载之后发出去；失败也不要紧（最坏退回今天的行为，多占一个槽位）。
-// 会话仍然只在 sessionStorage —— 不引入持久登录，这条是原本就写明的意图。
-function releaseOpsSession(): void {
+// 第一版修法是在 pagehide 时发 RevokeSession。但 pagehide 分不清「关标签页」和
+// 「刷新」—— 运营按一下 F5 就被注销，得重新收验证码（2026-10-11 实测）。
+//
+// SESSION-SAME-DEVICE-001（2026-10-11）把槽位问题挪到服务端解决：同一台设备再登录
+// 时先替换这台设备自己的旧会话，不再挤掉别的设备。配合下面 deviceIdentity 改存
+// localStorage（同一浏览器 = 同一台设备），控制台无论开关多少次标签页都只占一个
+// 槽位，所以不再需要在 pagehide 注销：刷新保持登录，关标签页仍然忘掉 token
+// （会话只在 sessionStorage），留在服务端的那条会在下次登录时被替换。
+// 只有点「退出」才主动注销。
+export function releaseOpsSession(): void {
   const session = readOpsSession();
   clearOpsSession();
   if (!session?.sessionId || !session.accessToken) return;
@@ -109,14 +115,7 @@ function releaseOpsSession(): void {
         payload: { reason: "USER_LOGOUT" }
       })
     }).catch(() => undefined);
-  } catch { /* 卸载阶段尽力而为，失败退回旧行为 */ }
-}
-
-let opsReleaseInstalled = false;
-if (typeof window !== "undefined" && !opsReleaseInstalled) {
-  opsReleaseInstalled = true;
-  // pagehide 比 beforeunload 可靠（后者在移动端/bfcache 场景常不触发）。
-  window.addEventListener("pagehide", releaseOpsSession);
+  } catch { /* 尽力而为：失败时服务端那条会在这台设备下次登录时被替换 */ }
 }
 
 export class OpStatusError extends Error {
@@ -142,16 +141,24 @@ export async function opFetch<T = any>(path: string): Promise<T> {
   return body as T;
 }
 
-// 一个控制台标签页 = 一台 WEB 设备；deviceCredential 只在本标签页里。
+// 一个浏览器 = 一台 WEB 设备（SESSION-SAME-DEVICE-001）。以前是一个标签页一台设备，
+// 每开一次标签页就多一台设备、多占一个会话槽位。存 localStorage 让同一浏览器每次
+// 登录都是同一个 deviceId，服务端据此替换这台设备的旧会话。只存设备身份，
+// 访问令牌仍然只在 sessionStorage。旧的 sessionStorage 记录迁移过来一次。
 function deviceIdentity(): { deviceId: string; deviceCredential: string } {
   const key = "proxy.ops.device";
   try {
-    const saved = sessionStorage.getItem(key);
-    if (saved) return JSON.parse(saved) as { deviceId: string; deviceCredential: string };
+    const saved = localStorage.getItem(key) ?? sessionStorage.getItem(key);
+    if (saved) {
+      try { localStorage.setItem(key, saved); } catch { /* ignore */ }
+      return JSON.parse(saved) as { deviceId: string; deviceCredential: string };
+    }
   } catch { /* ignore */ }
   const random = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
   const identity = { deviceId: `ops_web_${random(8)}`, deviceCredential: random(24) };
-  try { sessionStorage.setItem(key, JSON.stringify(identity)); } catch { /* ignore */ }
+  try { localStorage.setItem(key, JSON.stringify(identity)); } catch {
+    try { sessionStorage.setItem(key, JSON.stringify(identity)); } catch { /* ignore */ }
+  }
   return identity;
 }
 

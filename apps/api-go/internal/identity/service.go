@@ -337,7 +337,7 @@ func (s *Service) createAnonymousSession(ctx context.Context, e command.Envelope
 		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_USER_ACTION", "identity.account_not_active", nil)
 	}
 	now := s.clock.Now().UTC()
-	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, device.ID, e); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
 	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
@@ -844,7 +844,7 @@ func (s *Service) createSession(ctx context.Context, e command.Envelope) command
 		return command.Rejected(e, "DEVICE_PROOF_REGISTRATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.device_proof_registration_failed", nil)
 	}
 	now := s.clock.Now().UTC()
-	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, device.ID, e); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
 	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: p.RequestedPrincipal, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
@@ -1181,7 +1181,7 @@ func (s *Service) resumeTrustedDeviceSession(ctx context.Context, e command.Enve
 		return command.Rejected(e, "ACCOUNT_NOT_ACTIVE", "ACCOUNT_STATE", "AFTER_REAUTH", "identity.account_not_active", nil)
 	}
 	now := s.clock.Now().UTC()
-	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, device.ID, e); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
 	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
@@ -1235,7 +1235,7 @@ func (s *Service) authenticateWithGoogle(ctx context.Context, e command.Envelope
 		return command.Rejected(e, "DEVICE_PROOF_REGISTRATION_FAILED", "INTERNAL", "SAFE_RETRY", "identity.device_proof_registration_failed", nil)
 	}
 	now := s.clock.Now().UTC()
-	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, e); err != nil {
+	if err := s.enforceMaxConcurrentSessions(ctx, user.ID, device.ID, e); err != nil {
 		return command.Rejected(e, "SESSION_CREATE_FAILED", "INTERNAL", "SAFE_RETRY", "identity.session_create_failed", nil)
 	}
 	session := Session{ID: newID("session_"), UserAccountID: user.ID, DeviceID: device.ID, Status: "ACTIVE", Principal: command.Principal{Type: "INDIVIDUAL", ID: user.ID}, IssuedAt: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Version: 1}
@@ -1865,23 +1865,44 @@ func (s *Service) listMySessions(ctx context.Context, e command.Envelope) comman
 // It is called inside the service mutex, so List + Revoke is atomic vs
 // concurrent logins in this process. PG callers get transactional outbox via
 // persistUpdateSession.
-func (s *Service) enforceMaxConcurrentSessions(ctx context.Context, userID string, e command.Envelope) error {
+//
+// SESSION-SAME-DEVICE-001: the cap counts DEVICES, so a new login on deviceID
+// first replaces that device's own ACTIVE sessions instead of evicting another
+// device. Before this, every re-login from the ops console (a page reload had to
+// revoke-and-relogin to avoid piling up sessions) cost one slot and pushed the
+// developer's phone out.
+func (s *Service) enforceMaxConcurrentSessions(ctx context.Context, userID, deviceID string, e command.Envelope) error {
 	sessions, err := s.repository.ListSessionsByUser(ctx, userID)
 	if err != nil {
 		return err
 	}
+	now := s.clock.Now().UTC()
 	active := make([]Session, 0, len(sessions))
 	for _, sess := range sessions {
-		if sess.Status == "ACTIVE" {
-			active = append(active, sess)
+		if sess.Status != "ACTIVE" {
+			continue
 		}
+		if deviceID != "" && sess.DeviceID == deviceID {
+			prev := sess.Version
+			sess.Status = "REVOKED"
+			sess.Version++
+			ev := event.New("SessionRevoked", "Session", sess.ID, sess.Version, userID, e.CorrelationID, e.CommandID, now, map[string]any{
+				"reason":        "REPLACED_SAME_DEVICE",
+				"userAccountId": userID,
+				"deviceId":      deviceID,
+			})
+			if err := s.persistUpdateSession(ctx, sess, prev, []event.DomainEvent{ev}); err != nil {
+				return err
+			}
+			continue
+		}
+		active = append(active, sess)
 	}
 	if len(active) < MaxConcurrentSessions {
 		return nil
 	}
 	sort.Slice(active, func(i, j int) bool { return active[i].IssuedAt.Before(active[j].IssuedAt) })
 	toEvict := len(active) - MaxConcurrentSessions + 1
-	now := s.clock.Now().UTC()
 	for i := 0; i < toEvict; i++ {
 		sess := active[i]
 		prev := sess.Version

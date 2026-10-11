@@ -40,7 +40,7 @@ func TestLotus_MaxConcurrentSessions_EvictsOldest(t *testing.T) {
 	// Workaround: use the public API: Create a challenge via login flow is complex, so test enforceMaxConcurrentSessions directly via unexported method call.
 	// Since enforceMaxConcurrentSessions is unexported but same package, we can call it directly.
 	env := command.Envelope{CommandID: "cmd_c", CorrelationID: "corr_c", Actor: command.Actor{Type: "USER", ID: "user_lotus_e2e"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_lotus_e2e"}}
-	if err := svc.enforceMaxConcurrentSessions(ctx, "user_lotus_e2e", env); err != nil {
+	if err := svc.enforceMaxConcurrentSessions(ctx, "user_lotus_e2e", "dev_c", env); err != nil {
 		t.Fatalf("enforce: %v", err)
 	}
 	// after enforce, oldest sess_a should be REVOKED
@@ -60,3 +60,37 @@ func TestLotus_MaxConcurrentSessions_EvictsOldest(t *testing.T) {
 
 type fixedLotusClock struct{ now time.Time }
 func (c *fixedLotusClock) Now() time.Time { return c.now }
+
+// SESSION-SAME-DEVICE-001: a phone (oldest) + the ops console are signed in; the ops
+// console logs in again on the SAME device id. Its own old session is replaced and the
+// phone stays ACTIVE — before the fix the oldest (the phone) was evicted instead.
+func TestSessionSameDevice_ReloginReplacesOwnSessionNotOldest(t *testing.T) {
+	clk := &fixedLotusClock{now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)}
+	repo := NewMemoryRepository(&Seed{
+		User: UserAccount{ID: "user_same_dev", Status: "ACTIVE"},
+		Devices: []DeviceRegistration{
+			{ID: "dev_phone", UserAccountID: "user_same_dev", Platform: "IOS", Status: "ACTIVE"},
+			{ID: "dev_ops", UserAccountID: "user_same_dev", Platform: "WEB", Status: "ACTIVE"},
+		},
+	})
+	svc := NewWithRepositoryAndClock(repo, clk)
+	ctx := context.Background()
+	pr := command.Principal{Type: "INDIVIDUAL", ID: "user_same_dev"}
+	phone := Session{ID: "sess_phone", UserAccountID: "user_same_dev", DeviceID: "dev_phone", Status: "ACTIVE", Principal: pr, IssuedAt: clk.now.Add(-2 * time.Hour), ExpiresAt: clk.now.Add(24 * time.Hour), Version: 1}
+	ops := Session{ID: "sess_ops", UserAccountID: "user_same_dev", DeviceID: "dev_ops", Status: "ACTIVE", Principal: pr, IssuedAt: clk.now.Add(-1 * time.Hour), ExpiresAt: clk.now.Add(24 * time.Hour), Version: 1}
+	for _, s := range []Session{phone, ops} {
+		if err := repo.CreateSession(ctx, s); err != nil {
+			t.Fatalf("seed %s: %v", s.ID, err)
+		}
+	}
+	env := command.Envelope{CommandID: "cmd_relogin", CorrelationID: "corr_relogin", Actor: command.Actor{Type: "USER", ID: "user_same_dev"}, Principal: pr}
+	if err := svc.enforceMaxConcurrentSessions(ctx, "user_same_dev", "dev_ops", env); err != nil {
+		t.Fatalf("enforce: %v", err)
+	}
+	if got, _ := repo.GetSession(ctx, "sess_ops"); got.Status != "REVOKED" {
+		t.Fatalf("ops console's own old session = %s, want REVOKED (replaced)", got.Status)
+	}
+	if got, _ := repo.GetSession(ctx, "sess_phone"); got.Status != "ACTIVE" {
+		t.Fatalf("phone session = %s, want ACTIVE — re-login on another device must not evict it", got.Status)
+	}
+}

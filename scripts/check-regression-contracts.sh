@@ -1346,26 +1346,43 @@ echo "    MOBILE-SESSION-EVICTED-RECOVERY-001: PASS (被驱逐不再销毁恢复
 # 于是每开一次控制台标签页就多压一个槽位、FIFO 挤掉最老的那条 —— 最老的通常就是手机上那条。
 # 2026-10-06 实测：手机会话 REVOKED 与 ops_web 新会话 issued 相差 5–6 毫秒，两次。
 #
-# 钉「把承诺做实的三个部件」：关标签页的钩子、真的发 RevokeSession、带得上 sessionId。
+# SESSION-SAME-DEVICE-001（2026-10-11）改了「怎么做到」，没改「要做到什么」：
+# 第一版靠 pagehide 发 RevokeSession，但 pagehide 分不清关标签页和刷新 —— 运营按 F5
+# 就被注销、得重新收验证码。现在槽位在服务端解决：同一台设备再登录先替换自己的旧会话
+# （identity.enforceMaxConcurrentSessions），控制台的 deviceId 存 localStorage（一个浏览器
+# 一台设备）。于是控制台怎么开关都只占一个槽位，手机不会被挤掉，刷新也不掉登录。
+#
+# 钉四件事：服务端同设备替换（行为测试真的跑）、deviceId 在 localStorage、不再在 pagehide
+# 注销（否则刷新又掉登录）、「退出」仍然真的发 RevokeSession 且带得上 sessionId。
 # 文件路径写全（不用 glob）：pins 靠路径把 step 关联到改动文件，glob 选不中这条判据。
-if ! grep -qF 'addEventListener("pagehide", releaseOpsSession)' apps/market-intelligence-console/src/lib/api.ts; then
-  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 控制台关标签页不再释放服务端会话 ——" >&2
-  echo "        「关掉标签页就退出」退回成只忘 token，每开一次标签页就白占一个设备位。" >&2
+require_test "SESSION-SAME-DEVICE-001" ./internal/identity TestSessionSameDevice_ReloginReplacesOwnSessionNotOldest apps/api-go/internal/identity/lotus_e2e_test.go || exit 1
+if ! grep -qF 'localStorage.setItem(key, JSON.stringify(identity))' apps/market-intelligence-console/src/lib/api.ts; then
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 控制台 deviceId 不在 localStorage —— 每个标签页又是一台新设备，" >&2
+  echo "        服务端的同设备替换对不上，每开一次标签页就白占一个设备位、挤掉手机。" >&2
+  exit 1
+fi
+if grep -qF '"pagehide"' apps/market-intelligence-console/src/lib/api.ts; then
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 又在 pagehide 注销会话 —— pagehide 分不清刷新和关标签页，F5 就掉登录。" >&2
   exit 1
 fi
 if ! grep -qF 'commandType: "RevokeSession"' apps/market-intelligence-console/src/lib/api.ts; then
-  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 关标签页时不再发 RevokeSession —— 设备位没还回去。" >&2
-  exit 1
-fi
-if ! grep -qF 'keepalive: true' apps/market-intelligence-console/src/lib/api.ts; then
-  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 卸载阶段的请求没带 keepalive —— 页面走了请求就断，等于没发。" >&2
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 「退出」不再发 RevokeSession —— 只忘 token，服务端会话还活着。" >&2
   exit 1
 fi
 if ! grep -qF 'sessionId: auth.sessionId' apps/market-intelligence-console/src/lib/api.ts; then
-  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 登录时不再存 sessionId —— RevokeSession 没有 target，释放会静默失效。" >&2
+  echo "  FAIL [OPS-SESSION-SLOT-RELEASE-001]: 登录时不再存 sessionId —— RevokeSession 没有 target，退出会静默失效。" >&2
   exit 1
 fi
-echo "    OPS-SESSION-SLOT-RELEASE-001: PASS (关标签页真的把服务端设备位还回去)"
+echo "    OPS-SESSION-SLOT-RELEASE-001: PASS (同设备替换 · 刷新不掉登录 · 退出真的注销)"
+
+# OPS-PAGE-BOUNDARY-001（2026-10-11）：控制台以前没有错误边界，任何一页渲染抛错就卸掉
+# 整棵树 —— 侧栏一起没了，整站白屏，只能刷新。钉：页面区外面包着 PageBoundary，且按页重挂。
+if ! grep -qF '<PageBoundary key={page} page={page}>' apps/market-intelligence-console/src/App.tsx \
+  || ! grep -qF 'getDerivedStateFromError' apps/market-intelligence-console/src/components/PageBoundary.tsx; then
+  echo "  FAIL [OPS-PAGE-BOUNDARY-001]: 控制台页面区没有错误边界 —— 一页出错就整站白屏。" >&2
+  exit 1
+fi
+echo "    OPS-PAGE-BOUNDARY-001: PASS (一页出错只坏这一页)"
 
 
 require_test "UI-SOCIAL-002" "./internal/identity" \

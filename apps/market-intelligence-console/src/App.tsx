@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { OpsGate } from "./components/OpsGate";
-import { clearOpsSession, onOpStatus, readOpsSession, type OpStatus } from "./lib/api";
+import { PageBoundary } from "./components/PageBoundary";
+import { onOpStatus, readOpsSession, releaseOpsSession, type OpStatus } from "./lib/api";
 import { Overview } from "./pages/Overview";
 import { ContextField } from "./pages/ContextField";
 import { Surface } from "./pages/Surface";
@@ -160,13 +161,15 @@ export function App() {
             <div className="subtitle">Proxy 运营控制台 · 仅运营可见 · 没有数据源的页面显示「未接入」，不显示任何数字</div>
           </div>
           {who ? (
-            <button className="ops-logout" onClick={() => { clearOpsSession(); setWho(undefined); setStatus({ kind: "auth" }); }}>
+            <button className="ops-logout" onClick={() => { releaseOpsSession(); setWho(undefined); setStatus({ kind: "auth" }); }}>
               运营 {who.slice(0, 14)}… · 退出
             </button>
           ) : null}
         </div>
         {status ? <OpsGate onLoggedIn={() => { setWho(readOpsSession()?.userAccountId); setStatus(undefined); setReload((n) => n + 1); }} status={status} /> : null}
         <div className="content" key={reload} style={status ? { display: "none" } : undefined}>
+          {/* OPS-PAGE-BOUNDARY-001：一页出错只坏这一页，侧栏和其他页照常；换页即重置 */}
+          <PageBoundary key={page} page={page}>
           {page === "overview" && <Overview />}
           {page === "contextfield" && <ContextField />}
           {page === "surface" && <Surface />}
@@ -221,6 +224,7 @@ export function App() {
               <b>{TITLES[page]}</b> — 已接线 19 页（v9 全量）。
             </div>
           )}
+          </PageBoundary>
         </div>
       </main>
     </div>
