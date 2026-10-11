@@ -1394,6 +1394,19 @@ if grep -qF 'sceneUnknown' "$tags_page" || grep -nE '[a-zA-Z_)]\.toLocaleString\
 fi
 echo "    OPS-TAGS-CRASH-001: PASS (标签中心缺字段显示「—」不崩)"
 
+# OPS-SESSION-IDLE-2H-001（2026-10-11，用户：「为什么频繁登录 做 2H 的持久」）：控制台会话以前只在
+# sessionStorage，新标签页 / 重启浏览器都要重新收验证码。钉：存 localStorage、空闲 2 小时过期、
+# 请求成功会续期、过期时真的注销服务端会话（不是只忘掉本地 token）。
+ops_api=apps/market-intelligence-console/src/lib/api.ts
+if ! grep -qF 'const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;' "$ops_api" \
+  || ! grep -qF 'localStorage.setItem(SESSION_KEY, raw)' "$ops_api" \
+  || [ "$(grep -c 'touchOpsSession();' "$ops_api")" -lt 4 ] \
+  || ! grep -qF 'if (Date.now() - s.lastActiveAt > SESSION_IDLE_MS) {' "$ops_api"; then
+  echo "  FAIL [OPS-SESSION-IDLE-2H-001]: 控制台登录不再是「localStorage + 空闲 2 小时」—— 又会频繁要验证码，或过期了不注销。" >&2
+  exit 1
+fi
+echo "    OPS-SESSION-IDLE-2H-001: PASS (登录保持到空闲 2 小时)"
+
 # DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
 # 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
 # ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。

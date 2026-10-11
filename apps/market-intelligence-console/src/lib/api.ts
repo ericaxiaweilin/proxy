@@ -31,7 +31,7 @@ export async function fetchDecisionTrace(decisionId: string): Promise<unknown> {
 //
 // /v1/operator/* 现在只给运营（会话 + PROXY_OPERATOR_PRINCIPALS 白名单 + ANALYTICS scope）。
 // 登录走 App 同一条邮箱验证码流程（BeginPasswordlessAuthentication → VerifyLoginChallenge → CreateSession），
-// 平台报 WEB。会话只放 sessionStorage（关掉标签页就退出），不进 localStorage。
+// 平台报 WEB。会话存 localStorage，空闲 2 小时过期（OPS-SESSION-IDLE-2H-001，见 readOpsSession）。
 //
 // opFetch 统一处理三种非正常态，页面不用各写一遍：
 //   - 没登录 / 会话过期（401）→ 广播 auth，App 显示登录框；
@@ -55,17 +55,55 @@ function emit(status: OpStatus): void {
 }
 
 type OpsSession = { accessToken: string; userAccountId: string; sessionId?: string };
+type StoredSession = OpsSession & { lastActiveAt?: number };
 
-export function readOpsSession(): OpsSession | undefined {
+// OPS-SESSION-IDLE-2H-001（2026-10-11，用户：「为什么频繁登录 做 2H 的持久」）：
+// 以前会话只在 sessionStorage —— 新开标签页、关掉再开、重启浏览器都要重新收验证码，
+// 而服务端那条会话其实 30 天有效。现在存 localStorage（同浏览器所有标签页共用），
+// 空闲 2 小时过期：每次请求成功就续上；超过 2 小时没操作，下次打开时本地作废并通知
+// 服务端注销这条会话（token 不在本地放着等人捡）。
+const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
+
+function readStoredSession(): StoredSession | undefined {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as OpsSession) : undefined;
+    const raw = localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as StoredSession) : undefined;
   } catch {
     return undefined;
   }
 }
 
+function writeStoredSession(s: StoredSession): void {
+  const raw = JSON.stringify(s);
+  try { localStorage.setItem(SESSION_KEY, raw); } catch {
+    try { sessionStorage.setItem(SESSION_KEY, raw); } catch { /* ignore */ }
+  }
+}
+
+export function readOpsSession(): OpsSession | undefined {
+  const s = readStoredSession();
+  if (!s) return undefined;
+  // 旧格式（sessionStorage、没有 lastActiveAt）按「刚活动过」接过来，并迁到 localStorage。
+  if (typeof s.lastActiveAt !== "number") {
+    writeStoredSession({ ...s, lastActiveAt: Date.now() });
+    try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    return s;
+  }
+  if (Date.now() - s.lastActiveAt > SESSION_IDLE_MS) {
+    releaseOpsSession();
+    return undefined;
+  }
+  return s;
+}
+
+// 请求成功 = 运营还在用：把空闲计时续到现在。
+function touchOpsSession(): void {
+  const s = readStoredSession();
+  if (s) writeStoredSession({ ...s, lastActiveAt: Date.now() });
+}
+
 export function clearOpsSession(): void {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
   try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
 }
 
@@ -86,11 +124,11 @@ export function clearOpsSession(): void {
 // SESSION-SAME-DEVICE-001（2026-10-11）把槽位问题挪到服务端解决：同一台设备再登录
 // 时先替换这台设备自己的旧会话，不再挤掉别的设备。配合下面 deviceIdentity 改存
 // localStorage（同一浏览器 = 同一台设备），控制台无论开关多少次标签页都只占一个
-// 槽位，所以不再需要在 pagehide 注销：刷新保持登录，关标签页仍然忘掉 token
-// （会话只在 sessionStorage），留在服务端的那条会在下次登录时被替换。
-// 只有点「退出」才主动注销。
+// 槽位，所以不再需要在 pagehide 注销：刷新保持登录，留在服务端的旧会话会在这台
+// 设备下次登录时被替换。主动注销只有两处：点「退出」，以及空闲超过 2 小时
+// （OPS-SESSION-IDLE-2H-001，见 readOpsSession）。
 export function releaseOpsSession(): void {
-  const session = readOpsSession();
+  const session = readStoredSession();
   clearOpsSession();
   if (!session?.sessionId || !session.accessToken) return;
   const id = `ops_release_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -132,6 +170,7 @@ export async function opFetch<T = any>(path: string): Promise<T> {
   if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
   if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
   if (!r.ok) throw new Error(`${path} ${r.status}`);
+  touchOpsSession();
   const body = (await r.json()) as { dataSource?: string; missing?: string; spec?: string };
   if (body.dataSource === "NOT_CONNECTED") {
     const status: OpStatus = { kind: "notConnected", missing: body.missing ?? "", spec: body.spec ?? "" };
@@ -195,11 +234,12 @@ export async function completeEmailLogin(challengeId: string, code: string): Pro
   // sessionId 必须一起存：关标签页时要拿它发 RevokeSession，把这条会话的
   // 设备位真的还回去（OPS-SESSION-SLOT-RELEASE-001）。只存 token 的话
   // 服务端那条 ACTIVE 会一直占着账号 2 个槽位里的一个。
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+  writeStoredSession({
     accessToken: auth.accessToken,
     userAccountId: auth.userAccountId,
-    ...(auth.sessionId ? { sessionId: auth.sessionId } : {})
-  }));
+    ...(auth.sessionId ? { sessionId: auth.sessionId } : {}),
+    lastActiveAt: Date.now()
+  });
 }
 
 // 运营看私有图（如接单申请的证件 / 自拍）：<img> 带不了 Authorization，所以取成 blob 再给 object URL。
@@ -209,6 +249,7 @@ export async function opBlobUrl(path: string): Promise<string> {
   if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
   if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
   if (!r.ok) throw new Error(`${path} ${r.status}`);
+  touchOpsSession();
   return URL.createObjectURL(await r.blob());
 }
 
@@ -222,6 +263,7 @@ export async function opPost<T = any>(path: string, body?: unknown): Promise<T> 
   if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
   if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
   if (!r.ok) throw new Error(`${path} ${r.status}`);
+  touchOpsSession();
   return (await r.json()) as T;
 }
 
@@ -251,5 +293,6 @@ export async function opCommand(commandType: string, target: { type: string; id:
   if (r.status === 401) { clearOpsSession(); emit({ kind: "auth" }); throw new OpStatusError({ kind: "auth" }); }
   if (r.status === 403) { emit({ kind: "forbidden" }); throw new OpStatusError({ kind: "forbidden" }); }
   if (r.status >= 500 && r.status !== 503) throw new Error(`${commandType} ${r.status}`);
+  touchOpsSession();
   return (await r.json()) as OpCommandResult;
 }
