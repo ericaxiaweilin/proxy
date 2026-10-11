@@ -94,10 +94,15 @@ describe("STORE-HUB-NAV-001 建店闭环", () => {
     expect(hubCode).not.toContain("店铺资料与二维码");
   });
 
-  it("店铺推荐摆体系接入两行：建店走建店流程，二维码看门店名片", () => {
-    expect(manageCode).toContain("建店 / 添加门店");
-    expect(manageCode).toContain("店铺资料与二维码");
-    expect(manageCode).toContain("onOpenStoreProfile");
+  // STORE-REC-BUILDER-001（2026-10-11，用户：「我的店铺 是已经推荐入平台的 list，目前做成跟商家侧的
+  // 功能了」）：对 STORE-HUB-MOVE-001 的**再次反转**。店铺推荐是 builder 的模块，不是商家的 ——
+  // 推荐被采纳后由平台跟进接入，推荐人不建店，也没有门店资料 / 二维码要管。
+  it("店铺推荐不再摆建店 / 店铺资料与二维码（那是商家侧的功能）", () => {
+    expect(manageCode).not.toContain("建店 / 添加门店");
+    expect(manageCode).not.toContain("店铺资料与二维码");
+    expect(manageCode).not.toContain("onOpenStoreProfile");
+    expect(manageCode).not.toContain("onOpenStore");
+    expect(manageCode).not.toContain("去建店");
   });
 
   it("空态不再承诺「推荐被签约后自动进来」—— 那是跟服务端相反的说法", () => {
@@ -161,24 +166,33 @@ describe("STORE-HUB-003 我的店铺里没有店铺推荐", () => {
 //   「我的店铺」= 只放**已经处理完**的店（真实存在的店）。
 // 推论：还没建出来的店不在「我的店铺」里 ⇒ 任何把它指过去的入口都是空指；
 // 反过来，「我的店铺」也不许把在飞的推荐掺进来（那不是"处理完的"）。
-describe("STORE-HUB-004 建店属于店铺推荐，不属于我的店铺", () => {
-  it("店铺推荐 ACCEPTED 的 CTA 直接落建店流程，不再绕经我的店铺", () => {
-    // 三处挂载（页签① / 页签② / 直落路由）都要改，漏一处就还是空指。
-    expect(countOf(meCode, 'onOpenStore={() => openSubPage("merchantstorefront")}')).toBe(3);
-    expect(meCode).not.toContain('onOpenStore={() => openSubPage("bdash")}');
+// STORE-REC-BUILDER-001（2026-10-11）：上面 STORE-HUB-004 那套分工（建店归店铺推荐）被产品推翻 ——
+// 用户：「我的店铺 是已经推荐入平台的 list，但是目前做成跟商家侧的功能了，不是商家侧的功能」。
+// 现在：店铺推荐 = 推荐 + 看评估进度；我的店铺（用户侧）= 已被采纳的推荐（myrecstores）；
+// 建店 / 经营 / 门店资料是商家侧（bdash / MyStoresHub），builder 这条线上一个都没有。
+describe("STORE-REC-BUILDER-001 builder 不建店，我的店铺是已入平台的推荐", () => {
+  it("店铺推荐的三处挂载都不再传建店 / 资料入口", () => {
+    expect(countOf(meCode, 'onOpenStore={() => openSubPage("merchantstorefront")}')).toBe(0);
+    expect(countOf(meCode, 'onOpenStoreProfile={() => openSubPage("bdashprofile")}')).toBe(0);
   });
 
-  it("按钮和「下一步」文案不再说「去我的店铺」", () => {
+  it("「下一步」文案不再叫推荐人去建店，改说平台跟进", () => {
     expect(manageCode).not.toContain("去我的店铺");
     expect(recModelCode).not.toContain("去「我的店铺」");
-    // 但仍必须说清「要有人把它建出来」—— 采纳 ≠ 店铺已存在。
-    expect(recModelCode).toContain("把店建出来");
+    expect(recModelCode).not.toContain("把店建出来");
+    expect(recModelCode).toContain("由平台跟进接入");
+    // 仍守「采纳 ≠ 店铺已存在」：不写已签约 / 已入驻。
+    expect(recModelCode).toContain("不等于店铺已存在");
   });
 
-  it("店铺推荐 不说「在『我的店铺』里建店」—— 建店不发生在那一屏", () => {
-    // 「出现在「我的店铺」」是对的（建完才会出现在那里）；
-    // 「在「我的店铺」里建出来」是空指 —— 建店入口在 merchantstorefront。
-    expect(recModelCode).not.toContain("在「我的店铺」里");
+  it("用户侧「我的店铺」走 myrecstores 的专属分支，且返回只有一个", () => {
+    expect(meCode).toContain('subPage.route === "myrecstores"');
+    const start = meCode.indexOf('subPage.route === "myrecstores"');
+    const end = meCode.indexOf('subPage.route === "storerecmanage"', start);
+    const branch = meCode.slice(start, end);
+    expect(branch).toContain("<MyRecommendedStores");
+    expect(branch).not.toContain("styles.subPageBack");
+    expect(branch).not.toContain("styles.subPageTitle");
   });
 
   it("我的店铺 只放已经处理完的店 —— 它不读推荐记录", () => {

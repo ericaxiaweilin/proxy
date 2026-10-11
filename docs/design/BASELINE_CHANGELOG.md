@@ -4,6 +4,44 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 361 — 2026-10-11
+
+- **用户侧「我的 → 场景推荐 → 我的店铺」改回 builder 的东西：我推荐、已被运营采纳进平台的店**
+  （`STORE-REC-BUILDER-001`，用户原话：「我的店铺 是已经推荐入平台的 list，但是目前做成跟商家侧的
+  功能了，这个不是商家侧的功能」）。
+
+  根因是产品模型错了，不是样式：Revision 315 之后「我的店铺」指向 `bdash`（`MyStoresHub`），
+  那是**商家名下的店**的经营工作台 —— 订单统计、满意率 / 复购、品类编辑、营业时间、打电话、
+  二维码、建店。「店铺推荐」里还把「采纳之后的下一步」写成**推荐人自己去建店**（`recNextStep`
+  =「下一步：把店建出来」、详情里「去建店」、页首「建店 / 添加门店」「店铺资料与二维码」）。
+  builder 被当成了商家。
+
+  · **新页 `myrecstores`**（`my-recommended-stores.tsx`）：只列 `ListMyStoreRecommendations`
+    里 decision = ACCEPT 的记录（`acceptedRecs`，按采纳时间新到旧）。卡片 = 首字母色块 + 店名 +
+    品类 · 城市 + 地址 + 采纳日期；详情 = 地址（有落点才给「在地图里打开」）/ 推荐于 / 推荐理由 /
+    运营采纳于 / 采纳说明。空态唯一出口是「去推荐一家」→ `storerecmanage`。没有订单统计、品类编辑、
+    营业时间、电话、二维码、建店入口。返回按钮归组件自己管（列表态退出，详情态回列表）。
+  · **用户侧「我的店铺」磁贴 `bdash` → `myrecstores`**（`me.tsx` 的 `biz` 组）。`bdash` /
+    `MyStoresHub` **不动** —— 商家侧「我的」页仍然用它（STORE-CONSOLIDATE-001 那条契约原样成立）。
+  · **「店铺推荐」不再有建店**：删「去建店」按钮、页首「建店 / 添加门店」「店铺资料与二维码」两行、
+    `onOpenStore` / `onOpenStoreProfile` 两个 prop 及 3 处挂载。`recNextStep` 改「已采纳 · 由平台跟进
+    接入，会出现在「我的店铺」」，`recStages` 第三段与 `REC_TIP` 同步。仍守「采纳 ≠ 店铺已存在」，
+    不写「已签约 / 已入驻」。
+  · **这是对 STORE-HUB-004 / STORE-HUB-MOVE-001 的反转**（原分工：建店归店铺推荐，我的店铺只放建出来的
+    店）。相关旧断言已**有意识地**改掉：`store-section-tiles.test.ts`（磁贴路由、REC_TIP 不再点名
+    「店铺推荐」）、`store-hub-nav.test.ts`（建店入口三条反转、新增 myrecstores 分支返回只有一个）、
+    `store-recommendation-manage.test.ts`（下一步 / 进度第三段文案）。「`MyStoresHub` 不读推荐记录」
+    那条原样保留 —— 它说的是商家侧 hub。
+
+  ⚠️ **未对到原型**：用户说的原型（`deepseek_html_20260925_2ef163`「我的店铺 · 推荐管理」）不在仓库
+  里，下载目录也没有。这一版按用户的文字定义做的，视觉用现有 R3 token 和「我推荐的店」同一套语言。
+  拿到原型后只需要改 `my-recommended-stores.tsx` 的版式。
+  ⚠️ **口径待确认**：「已入平台」按「运营已采纳」算（decision = ACCEPT）。若产品要把待评估的也列进来，
+  改 `acceptedRecs` 一处。
+
+  钉：`my-recommended-stores.test.ts`（只留采纳的 / 排序 / 不出现商家侧符号 / 不写已签约已入驻 /
+  空态出口）；`scripts/check-regression-contracts.sh` 新增 `STORE-REC-BUILDER-001`。
+
 ## Revision 360 — 2026-10-09
 
 - **「解释性废话」清扫第三批 —— 商家 Home 的 `sectionHint` 那一层**（把 359 刻意留下的待办做完）。

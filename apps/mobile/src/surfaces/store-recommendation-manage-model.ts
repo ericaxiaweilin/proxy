@@ -144,9 +144,8 @@ export interface RecStage {
 // 设计稿画的是 4 段（提交推荐 → 平台评估 → 线下洽谈 → 签约完成），其中
 // 「线下洽谈」「签约完成」在系统里**没有任何数据源** —— 画出来只能是编的，
 // 而且会顺带承诺一份平台并没有的合同。所以第三段换成系统真正关心的那件事：
-// **店铺接入**。采纳 ≠ 已存在，这一步要有人真的把店建出来
-// （STORE-REC-007 存在的全部理由）。建店属于 workspace（店铺推荐这一屏），
-// 不属于「我的店铺」—— 那一屏只放已经处理完的店。
+// **店铺接入**。采纳 ≠ 已存在：接入由平台跟进（STORE-REC-BUILDER-001，不是推荐人建店）。
+// 被采纳的推荐会列在「我的店铺」（my-recommended-stores.tsx）。
 export function recStages(row: StoreRecommendation): RecStage[] {
   const status = recStatus(row);
   const submitted: RecStage = {
@@ -189,7 +188,7 @@ export function recStages(row: StoreRecommendation): RecStage[] {
       id: "onboard",
       label: "店铺接入",
       state: "active",
-      desc: "采纳只代表批准接入 —— 店铺不会自己出现，需要有人真的把它建出来；建完才会出现在「我的店铺」。"
+      desc: "采纳只代表批准接入 —— 接入由平台跟进，进展会更新在这条记录上；被采纳的店会列在「我的店铺」。"
     };
   } else if (status === "PENDING") {
     onboard = { id: "onboard", label: "店铺接入", state: "todo", desc: "评估通过之后才轮到这里。" };
@@ -204,12 +203,13 @@ export function recStages(row: StoreRecommendation): RecStage[] {
 // 系统里没有奖励模型，也没有任何一笔与推荐挂钩的成长值入账，写金额就是编。
 // 换成这一步**真正该谁做什么**。
 //
-// STORE-HUB-004：不再写「去『我的店铺』把店建出来」。两屏分工是 ——
-// 「店铺推荐」是 workspace（在飞的推荐在这里处理），「我的店铺」只放**已经处理完**
-// 的店（真实存在的店）。所以还没建出来的店**不在**「我的店铺」里，把人指过去是空指。
+// STORE-REC-BUILDER-001（2026-10-11，用户：「我的店铺 是已经推荐入平台的 list，但是目前做成跟
+// 商家侧的功能了，这个不是商家侧的功能」）：builder 推荐一家店，运营评估，采纳后由**平台**跟进
+// 接入 —— 推荐人不建店。以前这里写的是「下一步：把店建出来」，把 builder 当成了商家。
+// 「我的店铺」= 这些被采纳的推荐（见 my-recommended-stores.tsx），不是商家名下的店。
 export function recNextStep(row: StoreRecommendation): string {
   const status = recStatus(row);
-  if (status === "ACCEPTED") return "下一步：把店建出来 —— 建完才会出现在「我的店铺」";
+  if (status === "ACCEPTED") return "已采纳 · 由平台跟进接入，会出现在「我的店铺」";
   if (status === "REJECTED") return "未达成 · 改了信息可以重新推荐";
   return "等运营评估";
 }
@@ -284,13 +284,11 @@ export function recMapsUrl(row: StoreRecommendation): string | undefined {
 }
 
 // 设计稿这条提示写的是「推荐被平台签约后，店铺自动进入我的店铺，你拿成长值奖励。
-// 采纳后店铺前 3 个月独家使用。」——三件事系统里都没有：
-//   ① 没有奖励模型（growth 域里没有任何与推荐挂钩的入账）；
-//   ② 「自动进入我的店铺」跟服务端语义相反：采纳 ≠ 店铺已存在，要人去建；
-//   ③ 没有任何「独家期」字段或规则。
-// 所以这里只写今天真会发生的事。要上奖励/独家条款，得先把规则定下来再改这句话。
+// 采纳后店铺前 3 个月独家使用。」——奖励模型和独家期系统里都没有，所以这里只写今天真会发生的事：
+// 运营评估 → 采纳 → 平台跟进接入；采纳只代表批准，不等于店铺已存在（也就不写「已签约 / 已入驻」）。
+// 要上奖励 / 独家条款，得先把规则定下来再改这句话。
 export const REC_TIP =
-  "推荐先由平台运营评估。采纳后要有人真的把店建出来（在「店铺推荐」里建），建完才会出现在「我的店铺」—— 采纳本身不等于店铺已存在。";
+  "推荐先由平台运营评估。采纳后由平台跟进接入，被采纳的店会列在「我的店铺」—— 采纳只代表批准接入，不等于店铺已存在。";
 
 // 表单里目前**不收**的东西。设计稿有详细地址 / 对接人电话 / 店铺照片三项 ——
 // 详细地址从 STORE-REC-ADDRESS-001（迁移 130）起已经收了，所以这句提示里
@@ -298,3 +296,30 @@ export const REC_TIP =
 // 剩下两项推荐记录里仍然一个字段都没有，收了也只能丢，宁可不收。
 export const REC_UNCOLLECTED_NOTE =
   "对接人电话、店铺照片暂时不收：推荐记录里没有这两个字段，填了也只会丢。要加得先扩服务端。";
+
+// ---------------------------------------------------------------------------
+// STORE-REC-BUILDER-001：「我的店铺」（用户侧 / builder）的读模型。
+//
+// 「我的店铺」= 我推荐、并且已经被运营采纳进平台的店。它**不是**商家名下的店：
+// 没有订单统计、没有品类编辑、没有营业时间、没有二维码 —— 那些是商家侧（bdash /
+// MyStoresHub）的功能。builder 在这里看的是自己推荐的成果：哪些店进了平台、什么时候、
+// 为什么被采纳、在哪。
+//
+// 词汇仍守「采纳 ≠ 店铺已存在」：写「已采纳」，不写「已签约 / 已入驻」。
+// ---------------------------------------------------------------------------
+
+// 已被运营采纳的推荐，按采纳时间新到旧（没有采纳时间的排在后面，再按推荐时间）。
+export function acceptedRecs(rows: readonly StoreRecommendation[]): StoreRecommendation[] {
+  const time = (value: string | undefined): number => {
+    const parsed = value ? Date.parse(value) : NaN;
+    return Number.isFinite(parsed) ? parsed : -Infinity;
+  };
+  return rows
+    .filter((row) => recStatus(row) === "ACCEPTED")
+    .sort((a, b) => time(b.decidedAt) - time(a.decidedAt) || time(b.createdAt) - time(a.createdAt));
+}
+
+// 卡片上那行小字：品类 · 城市（缺哪个就不写哪个，不用占位词顶）。
+export function recMetaLine(row: StoreRecommendation): string {
+  return [row.category, row.city].filter((part) => typeof part === "string" && part.trim() !== "").join(" · ");
+}

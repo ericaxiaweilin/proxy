@@ -83,6 +83,7 @@ import { BenefitRedeemScreen } from "./BenefitRedeemScreen";
 // STORE-REC-MANAGE-001: 店铺推荐整屏（页签 + 列表 + 详情 + 表单）。
 // storeonboarding 的 client 现在只在那一屏里用，me.tsx 不再直接持有它。
 import { StoreRecommendationManage } from "./store-recommendation-manage";
+import { MyRecommendedStores } from "./my-recommended-stores";
 import { OrderPermissionGate, ProviderApplicationSurface } from "./provider-application";
 import { type LocalNetClient } from "../localnet-client";
 import {
@@ -311,12 +312,17 @@ const REQUESTER_ME: PersonaConfig = {
       // 改 id 会让那一路静默断掉。两个磁贴与四个路由一字未动。
       title: "场景推荐",
       // STORE-TILES-001：按产品稿把这组从 4 行平铺整合成 2 个入口磁贴。
-      // 原来的 4 个目的地一个都没丢 —— 我的店铺 → bdash（企业 / 店铺资料）；
+      // 原来的 4 个目的地一个都没丢 —— 我的店铺 → myrecstores（已推荐入平台的店；
+      // STORE-REC-BUILDER-001 起不再是 bdash）；
       // 店铺推荐 → storerecmanage，页内就是 STORE_REC_MANAGE_TABS 那 2 个页签。
       // rows 留空是刻意的：服务端下发的 managed sections 仍按 id 合并进 rows
       // （见 effectiveSections），那一路不能因为这里换成磁贴就断掉。
       tiles: [
-        { icon: "home", label: "我的店铺", route: "bdash" },
+        // STORE-REC-BUILDER-001（2026-10-11，用户：「我的店铺 是已经推荐入平台的 list，目前做成跟
+        // 商家侧的功能了」）：用户侧「我的店铺」= 我推荐、已被运营采纳进平台的店（myrecstores），
+        // 不再指向商家侧的 bdash（MyStoresHub：订单统计 / 品类 / 营业时间 / 建店）。
+        // bdash 与 MyStoresHub 不动 —— 商家侧的「我的」页仍然用它。
+        { icon: "home", label: "我的店铺", route: "myrecstores" },
         { icon: "star", label: "店铺推荐", route: "storerecmanage" }
       ],
       rows: []
@@ -3278,6 +3284,21 @@ export function MeSurface({
     // 它**必须**有专属分支 —— 否则会落到通用兜底，而
     // subpage-generic-fabricated.test.ts 的不变量（菜单可达 + 无专属分支 ⇒ 不许带
     // sections）决定那种页面只渲染诚实空态，等于把入口弄丢。
+    // STORE-REC-BUILDER-001：用户侧「我的店铺」。返回按钮归组件自己管（列表态退出、详情态回列表），
+    // 这一层不画返回和标题 —— 同 bdash 分支的 STORE-HUB-NAV-001 约束。
+    if (subPage.route === "myrecstores") {
+      return contentWrapper(
+        <View style={styles.root}>
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            <MyRecommendedStores
+              onBack={() => setSubPage(undefined)}
+              onOpenRecommend={() => openSubPage("storerecmanage")}
+            />
+          </ScrollView>
+        </View>
+      );
+    }
+
     if (subPage.route === "storerecmanage") {
       return contentWrapper(
         <View style={styles.root}>
@@ -3287,12 +3308,10 @@ export function MeSurface({
             </Pressable>
             <Text selectable style={styles.subPageTitle}>店铺推荐</Text>
             <Text selectable style={styles.subPageDesc}>把好的场地 / 商家推荐进体系；你推荐的那条走到哪一步、运营评估出什么结论，都在这里看。</Text>
-            {/* STORE-HUB-004：建店属于 workspace（本屏），不属于「我的店铺」——
-                那一屏只放**已经处理完**的店，还没建出来的店不在里面，所以不能把人指过去。 */}
+            {/* STORE-REC-BUILDER-001：这里是 builder 的模块 —— 推荐 + 看评估进度。采纳之后由平台跟进
+                接入，被采纳的店列在「我的店铺」；建店 / 店铺资料 / 二维码是商家侧的功能，不在这里。 */}
             <StoreRecommendationManage
               onOpenQueue={() => openSubPage(STORE_REC_QUEUE_ROW.route)}
-              onOpenStore={() => openSubPage("merchantstorefront")}
-              onOpenStoreProfile={() => openSubPage("bdashprofile")}
               tabs={STORE_REC_MANAGE_TABS}
             />
           </ScrollView>
@@ -3377,7 +3396,7 @@ export function MeSurface({
               <ProxyBackGlyph />
             </Pressable>
             <Text selectable style={styles.subPageTitle}>我推荐的店</Text>
-            <StoreRecommendationManage initialTab="mine" onOpenStore={() => openSubPage("merchantstorefront")} onOpenStoreProfile={() => openSubPage("bdashprofile")} tabs={STORE_REC_MANAGE_TABS} />
+            <StoreRecommendationManage initialTab="mine" tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );
@@ -3399,7 +3418,7 @@ export function MeSurface({
               用户一起把好的店铺带进体系，运营评估后接入。推荐记录会留档（append-only），
               后续接入进度在运营侧推进。
             </Text>
-            <StoreRecommendationManage initialTab="new" onOpenStore={() => openSubPage("merchantstorefront")} onOpenStoreProfile={() => openSubPage("bdashprofile")} tabs={STORE_REC_MANAGE_TABS} />
+            <StoreRecommendationManage initialTab="new" tabs={STORE_REC_MANAGE_TABS} />
           </ScrollView>
         </View>
       );

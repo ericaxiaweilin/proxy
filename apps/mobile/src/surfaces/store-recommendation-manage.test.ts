@@ -159,7 +159,9 @@ describe("进度只有 3 段：设计稿那 4 段里有两段系统不知道", (
     expect(accepted.map((s) => s.state)).toEqual(["done", "done", "active"]);
     expect(accepted[1]?.at).toBe("2026-10-09T02:00:00Z");
     // 采纳 ≠ 店铺已存在。第三段必须是「待办」，不能画成完成。
-    expect(accepted[2]?.desc).toContain("不会自己出现");
+    // STORE-REC-BUILDER-001：接入由平台跟进，推荐人不建店。
+    expect(accepted[2]?.desc).toContain("由平台跟进");
+    expect(accepted[2]?.desc).not.toContain("建出来");
 
     const rejected = recStages(rec({ decision: "REJECT", decisionReason: "位置偏" }));
     expect(rejected.map((s) => s.state)).toEqual(["done", "fail", "todo"]);
@@ -381,7 +383,8 @@ describe("小工具", () => {
   });
 
   it("tells the recommender what to do next in each state", () => {
-    expect(recNextStep(rec({ decision: "ACCEPT" }))).toContain("把店建出来");
+    expect(recNextStep(rec({ decision: "ACCEPT" }))).toContain("平台跟进");
+    expect(recNextStep(rec({ decision: "ACCEPT" }))).not.toContain("建"); // 推荐人不建店
     expect(recNextStep(rec({ decision: "REJECT" }))).toContain("重新推荐");
     expect(recNextStep(rec())).toContain("评估");
   });

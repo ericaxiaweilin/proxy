@@ -49,10 +49,10 @@ export interface StoreRecommendationManageProps {
   tabs: readonly StoreRecManageTab[];
   initialTab?: "mine" | "new" | undefined;
   onOpenQueue?: (() => void) | undefined;
-  onOpenStore?: (() => void) | undefined;
-  // STORE-HUB-MOVE-001（用户：建店/二维码归推荐管理）：体系接入区把去建店
-  // （= onOpenStore，建店流程）和店铺资料与二维码摆在一起。缺省不画。
-  onOpenStoreProfile?: (() => void) | undefined;
+  // STORE-REC-BUILDER-001（2026-10-11）：这里不再有 onOpenStore / onOpenStoreProfile。
+  // 「店铺推荐」是 builder 的模块 —— 推荐一家店、看它被运营评估到哪一步；店被采纳之后
+  // 由平台跟进接入，**不是推荐人去建店**。建店 / 门店资料 / 二维码是商家侧的功能，
+  // 不属于这里。
 }
 
 const STAGE_BG: Record<RecStageState, string> = {
@@ -80,8 +80,6 @@ export function StoreRecommendationManage({
   tabs,
   initialTab,
   onOpenQueue,
-  onOpenStore,
-  onOpenStoreProfile,
 }: StoreRecommendationManageProps): React.JSX.Element {
   const [tab, setTab] = useState<"mine" | "new">(initialTab ?? "mine");
   const [detail, setDetail] = useState<StoreRecommendation | undefined>(undefined);
@@ -262,12 +260,6 @@ export function StoreRecommendationManage({
           </Pressable>
         ) : null}
 
-        {status === "ACCEPTED" && onOpenStore ? (
-          <Pressable onPress={onOpenStore} style={[styles.lightCta, { marginTop: 8 }]}>
-            <Text selectable style={styles.lightCtaText}>去建店</Text>
-          </Pressable>
-        ) : null}
-
         {status === "REJECTED" ? (
           <View style={s.btnRow}>
             <Pressable
@@ -317,24 +309,6 @@ export function StoreRecommendationManage({
 
   return (
     <View>
-      {/* STORE-HUB-MOVE-001：体系接入行原来在「我的店铺」hub 里 —— 建店/二维码
-          是把店弄进体系的动作，不是已有店铺的数据，归店铺推荐。 */}
-      {onOpenStore || onOpenStoreProfile ? (
-        <View style={s.accessSection}>
-          {onOpenStore ? (
-            <Pressable accessibilityLabel="建店或添加门店" onPress={onOpenStore} style={s.accessRow}>
-              <Text selectable style={s.accessText}>建店 / 添加门店</Text>
-              <Text selectable style={s.accessArrow}>›</Text>
-            </Pressable>
-          ) : null}
-          {onOpenStoreProfile ? (
-            <Pressable accessibilityLabel="店铺资料与二维码" onPress={onOpenStoreProfile} style={s.accessRow}>
-              <Text selectable style={s.accessText}>店铺资料与二维码</Text>
-              <Text selectable style={s.accessArrow}>›</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
       <View style={s.tabBar}>
         {tabs.map((entry) => {
           const active = tab === entry.id;
@@ -529,10 +503,6 @@ export function StoreRecommendationManage({
 }
 
 const s = StyleSheet.create({
-  accessSection: { gap: 8, marginBottom: 4 },
-  accessRow: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 13 },
-  accessText: { color: color.ink, fontSize: 13, fontWeight: "800" },
-  accessArrow: { color: color.muted, fontSize: 18, fontWeight: "800" },
   tabBar: {
     backgroundColor: color.surface,
     borderRadius: 14,

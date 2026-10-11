@@ -1454,6 +1454,26 @@ if ! (cd apps/mobile && npx vitest run src/surfaces/activity-wizard-draft.test.t
 fi
 echo "    ACTIVITY-DRAFT-RESTORE-001: PASS (草稿读取只在挂载时跑，保存有顶部反馈)"
 
+# STORE-REC-BUILDER-001（2026-10-11，用户：「我的店铺 是已经推荐入平台的 list，但是目前做成跟商家侧的功能了，
+# 这个不是商家侧的功能」）：用户侧「我的店铺」= 我推荐、已被运营采纳的店（myrecstores），不是商家名下的店
+# （bdash / MyStoresHub，商家侧仍在用）；店铺推荐里没有建店 / 门店资料入口，推荐人不建店。
+if [ ! -f apps/mobile/src/surfaces/my-recommended-stores.tsx ] \
+  || ! grep -qF '{ icon: "home", label: "我的店铺", route: "myrecstores" }' apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [STORE-REC-BUILDER-001]: 用户侧「我的店铺」又不指向 myrecstores —— 回到商家侧的店铺工作台了。" >&2
+  exit 1
+fi
+# 查代码形状，不查字样：注释里会解释「不再有 onOpenStoreProfile」。文案那半由 store-hub-nav.test.ts
+# 剥掉注释后断言（recModelCode 不含「把店建出来」）。
+if grep -qE 'onOpenStore(Profile)?\?:|onOpenStore(Profile)?=\{' apps/mobile/src/surfaces/store-recommendation-manage.tsx apps/mobile/src/surfaces/me.tsx; then
+  echo "  FAIL [STORE-REC-BUILDER-001]: 店铺推荐又在叫推荐人建店 / 管门店资料 —— builder 被当成商家。" >&2
+  exit 1
+fi
+if ! (cd apps/mobile && npx vitest run src/surfaces/my-recommended-stores.test.ts src/surfaces/store-hub-nav.test.ts src/surfaces/store-section-tiles.test.ts >/dev/null 2>&1); then
+  echo "  FAIL [STORE-REC-BUILDER-001]: 我的店铺（builder）相关测试不通过。" >&2
+  exit 1
+fi
+echo "    STORE-REC-BUILDER-001: PASS (我的店铺 = 已推荐入平台的店 · 推荐人不建店)"
+
 # DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
 # 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
 # ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。

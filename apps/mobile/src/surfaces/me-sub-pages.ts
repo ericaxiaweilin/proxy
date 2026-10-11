@@ -207,6 +207,12 @@ export const SUB_PAGE_CONTENT: Record<string, { title: string; desc?: string; ic
   // 见 ./store-recommendation-manage），这里只放页面的身份文案。
   // 页签文案在 me.tsx 的 STORE_REC_MANAGE_TABS —— 它归产品承诺，跟这一页的
   // title/desc 一样属于「文案」而不是「行为」。
+  // STORE-REC-BUILDER-001：用户侧「我的店铺」= 我推荐、已被运营采纳进平台的店。
+  // 专属分支渲染（返回 / 标题归 MyRecommendedStores 自己管）。bdash 仍是商家侧的店铺 hub。
+  myrecstores: {
+    title: "我的店铺",
+    icon: "star"
+  },
   storerecmanage: {
     title: "店铺推荐",
     icon: "star"
