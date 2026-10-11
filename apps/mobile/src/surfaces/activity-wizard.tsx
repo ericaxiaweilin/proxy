@@ -72,12 +72,34 @@ const DAYS_AHEAD = 14;
 const CAT_COPY: Record<CreateCategoryId, { name: MessageKey; example: MessageKey }> = {
   cafe: { name: "catCafe", example: "createExCafe" },
   food: { name: "catFood", example: "createExFood" },
-  drink: { name: "catDrink", example: "createExDrink" },
-  sport: { name: "catSport", example: "createExSport" },
-  walk: { name: "catWalk", example: "createExWalk" },
-  art: { name: "catArt", example: "createExArt" },
   photo: { name: "catPhoto", example: "createExPhoto" },
+  makeup: { name: "catMakeup", example: "createExMakeup" },
+  familyPhoto: { name: "catFamilyPhoto", example: "createExFamilyPhoto" },
+  shopping: { name: "catShopping", example: "createExShopping" },
+  art: { name: "catArt", example: "createExArt" },
+  movie: { name: "catMovie", example: "createExMovie" },
   music: { name: "catMusic", example: "createExMusic" },
+  esports: { name: "catEsports", example: "createExEsports" },
+  walk: { name: "catWalk", example: "createExWalk" },
+  sport: { name: "catSport", example: "createExSport" },
+};
+
+// ACTIVITY-CAT-ICONS-001（2026-10-11，用户「那 logo 就用现在的吧」）：分类图标用已经设计好的
+// 场景活动图标（assets/scene-activity/actions，首页场景活动入口同一套），不用 emoji、不另画。
+// 化妆 / 亲子拍照 / 电竞三张是同一规格（64 画布、#151515 线条、#F0A11C 点缀）补的。
+const CAT_ICON: Record<CreateCategoryId, number> = {
+  cafe: require("../../assets/scene-activity/actions/coffee.svg"),
+  food: require("../../assets/scene-activity/actions/dining.svg"),
+  photo: require("../../assets/scene-activity/actions/photo.svg"),
+  makeup: require("../../assets/scene-activity/actions/makeup.svg"),
+  familyPhoto: require("../../assets/scene-activity/actions/family-photo.svg"),
+  shopping: require("../../assets/scene-activity/actions/shopping.svg"),
+  art: require("../../assets/scene-activity/actions/exhibition.svg"),
+  movie: require("../../assets/scene-activity/actions/movie.svg"),
+  music: require("../../assets/scene-activity/actions/music.svg"),
+  esports: require("../../assets/scene-activity/actions/esports.svg"),
+  walk: require("../../assets/scene-activity/actions/city-walk.svg"),
+  sport: require("../../assets/scene-activity/actions/sport.svg"),
 };
 
 const WEEKDAY_LOCALE: Record<string, string> = { zh: "zh-CN", vi: "vi", en: "en", lo: "lo", ko: "ko", ja: "ja" };
@@ -150,6 +172,13 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
   const restoredRef = useRef(false);
 
   // 目录 + 草稿恢复 + 定位（各管各，失败互不挡）。
+  //
+  // ACTIVITY-DRAFT-RESTORE-001（2026-10-11，用户：「存草稿功能似乎没有用」）：这段 effect 以前依赖
+  // [t]，而 useI18n() 每次渲染都返回新的 t 函数 —— 于是**每次渲染都重跑**：目录加载成功
+  // → setSpots（新数组）→ 渲染 → 重跑 → 再请求目录……无限循环；更要命的是每次重跑都把上一轮
+  // 还没读完的草稿读取置为 cancelled。本机 API 响应很快，钥匙串读取比目录请求慢时，草稿读取
+  // 永远被取消、永远恢复不出来 —— 保存是写进去了，下次进来读不回来。
+  // 只在挂载时跑一次；t 只用来取「已恢复草稿」那句文案，挂载时的语言就够了。
   useEffect(() => {
     let cancelled = false;
     void loadSceneSpots(fetch, localApiBaseUrl)
@@ -170,7 +199,8 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       if (!cancelled && fix) setOrigin({ latitude: fix.latitude, longitude: fix.longitude });
     });
     return () => { cancelled = true; };
-  }, [t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 全页地图期间藏底栏（底栏只有一级模块有）：打开上报 true，关闭/卸载上报 false。
   // 未接线时保持原样。注意不能走 onChromeVisibilityChange —— market 滚动显隐的
@@ -410,11 +440,11 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
   if (result) {
     return (
       <View style={styles.success}>
-        <View style={styles.successIcon}><Text selectable style={styles.successCheck}>✓</Text></View>
+        <View style={styles.successIcon}><ProxyIcon color={color.factConfirmedFg} name="check" size={40} /></View>
         <Text selectable style={styles.successTitle}>{t("publishedTitle")}</Text>
         <Text selectable style={styles.successSub}>{t("publishedSub")}</Text>
         <View style={styles.successCard}>
-          <Text selectable style={styles.successEmoji}>{cat?.emoji ?? "📅"}</Text>
+          <View style={styles.successCatIcon}>{cat ? <Image contentFit="contain" source={CAT_ICON[cat.id]} style={styles.successCatImg} transition={0} /> : null}</View>
           <View style={styles.successBody}>
             <Text selectable style={styles.successName} numberOfLines={1}>{result.title}</Text>
             <Text selectable style={styles.successMeta} numberOfLines={1}>{resultMeta}</Text>
@@ -432,8 +462,6 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
     );
   }
 
-  const nameActive = form.cat !== undefined;
-  const restActive = nameActive && form.name.trim().length > 0;
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.head}>
@@ -449,9 +477,10 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
       </View>
       <Text selectable style={styles.heroSub}>{t("createSub")}</Text>
+      {draftMsg && !error ? <Text selectable style={styles.draftMsg}>{draftMsg}</Text> : null}
 
       {/* 1. 分类 */}
-      <View style={[styles.block, styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createCat")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -464,7 +493,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
               onPress={() => patch({ cat: c.id, name: "", placeId: form.placeId, placeName: form.placeName })}
               style={[styles.cat, form.cat === c.id && styles.catOn]}
             >
-              <Text selectable style={styles.catEmoji}>{c.emoji}</Text>
+              <Image contentFit="contain" source={CAT_ICON[c.id]} style={styles.catIcon} transition={0} />
               <Text selectable style={[styles.catName, form.cat === c.id && styles.catNameOn]}>{t(CAT_COPY[c.id].name)}</Text>
             </Pressable>
           ))}
@@ -472,7 +501,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 2. 名称 */}
-      <View style={[styles.block, nameActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createName")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -480,7 +509,6 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
         </View>
         <TextInput
           accessibilityLabel={t("createName")}
-          editable={nameActive}
           maxLength={24}
           onChangeText={(v) => patch({ name: v })}
           placeholder={namePlaceholder}
@@ -505,7 +533,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 3. 人数 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createPeople")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -527,7 +555,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 4. 日期 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createDate")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -543,7 +571,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 5. 时间 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createTime")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -582,7 +610,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       ) : null}
 
       {/* 6. 时长 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createDuration")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -597,7 +625,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 7. 地点 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createPlace")}</Text>
           <Text selectable style={styles.blockReq}>*</Text>
@@ -636,7 +664,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 8. 报名方式 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createSignup")}</Text>
         </View>
@@ -650,7 +678,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 9. 费用 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createFee")}</Text>
         </View>
@@ -674,7 +702,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
       </View>
 
       {/* 10. 说明 */}
-      <View style={[styles.block, restActive && styles.blockActive]}>
+      <View style={styles.block}>
         <View style={styles.blockLabel}>
           <Text selectable style={styles.blockName}>{t("createNote")}</Text>
           <Text selectable style={styles.blockHint}>{t("optionalHint")}</Text>
@@ -693,34 +721,38 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
 
       {/* ACTIVITY-COVER-001：封面选择器。有图就显示缩略图 + 换一张 / 移除，
           没有就显示"加封面"。空着也能发布 —— 封面是可选的，不该拦住活动本身。 */}
-      <View style={styles.coverBox}>
-        {coverUri ? (
-          <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: coverUri }} style={styles.coverPreview} transition={0} />
-        ) : (
-          <View style={styles.coverEmpty}><ProxyIcon color={color.muted} name="camera" size={22} /></View>
-        )}
-        <View style={styles.coverActions}>
-          <Text selectable style={styles.coverLabel}>{coverUri ? "活动封面" : "加一张封面（可选）"}</Text>
-          <View style={styles.coverRow}>
-            <Pressable accessibilityLabel="更换封面" disabled={coverBusy} onPress={() => void pickCover()} style={styles.coverBtn}>
-              <Text selectable style={styles.coverBtnText}>{coverBusy ? "上传中…" : coverUri ? "换一张" : "选择图片"}</Text>
+      <View style={styles.block}>
+        <View style={styles.blockLabel}>
+          <Text selectable style={styles.blockName}>活动封面</Text>
+          <Text selectable style={styles.blockHint}>{t("optionalHint")}</Text>
+        </View>
+        <View style={styles.coverBox}>
+          {coverUri ? (
+            <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: coverUri }} style={styles.coverPreview} transition={0} />
+          ) : (
+            <Pressable accessibilityLabel="选择封面" disabled={coverBusy} onPress={() => void pickCover()} style={styles.coverEmpty}>
+              <ProxyIcon color={color.muted} name="camera" size={24} />
             </Pressable>
-            {coverUri ? <Pressable accessibilityLabel="移除封面" disabled={coverBusy} onPress={() => setCoverAssetId(undefined)} style={styles.coverBtnGhost}>
-              <Text selectable style={styles.coverBtnGhostText}>移除</Text>
+          )}
+          <View style={styles.coverRow}>
+            <Pressable accessibilityLabel="更换封面" disabled={coverBusy} onPress={() => void pickCover()} style={styles.pill}>
+              <Text selectable style={styles.pillText}>{coverBusy ? "上传中…" : coverUri ? "换一张" : "选择图片"}</Text>
+            </Pressable>
+            {coverUri ? <Pressable accessibilityLabel="移除封面" disabled={coverBusy} onPress={() => setCoverAssetId(undefined)} style={styles.pill}>
+              <Text selectable style={styles.coverRemoveText}>移除</Text>
             </Pressable> : null}
           </View>
         </View>
       </View>
 
       {error ? <Text selectable style={styles.error}>{error}</Text> : null}
-      {draftMsg && !error ? <Text selectable style={styles.draftMsg}>{draftMsg}</Text> : null}
       <Pressable
         accessibilityLabel={t("publishCta")}
         disabled={publishing || !canPublishForm(form) || !placeValid}
         onPress={() => void publish()}
         style={[styles.cta, (publishing || !canPublishForm(form) || !placeValid) && styles.ctaDisabled]}
       >
-        <Text selectable style={styles.ctaText}>{publishing ? t("posting") : t("publishCta")}</Text>
+        <Text selectable style={[styles.ctaText, (publishing || !canPublishForm(form) || !placeValid) && styles.ctaTextDisabled]}>{publishing ? t("posting") : t("publishCta")}</Text>
       </Pressable>
 
       {/* 场景列表 sheet */}
@@ -787,7 +819,7 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
                         </Text>
                       </View>
                       <View style={[styles.spotCheck, on && styles.spotCheckOn]}>
-                        {on ? <Text selectable style={styles.spotCheckText}>✓</Text> : null}
+                        {on ? <ProxyIcon color={color.white} name="check" size={12} /> : null}
                       </View>
                     </Pressable>
                   );
@@ -802,129 +834,126 @@ export function ActivityWizard({ activities, scenes, onBack, onPublished, onMapP
   );
 }
 
+// ACTIVITY-CREATE-UI-R3-001（2026-10-11，用户「优化下创建活动的UI logo 排版 字体」）：全表按 R3 收口。
+//   字号：Section 17/800（页标题）· Card Title 15/800（区块名）· Object/Button 14/800（选项、按钮）·
+//         Body 14/500 · Meta 12/500 · Caption 11/600；Number XL 28/900、Number L 20/900，数字 tabular-nums。
+//         例外：可输入的文本框 16px（iOS 小于 16 聚焦自动放大）。
+//   排版：左右 16、区块间 20、1px Line 边框、小卡 / 输入 16 圆角、pill 999、无阴影。
+//   颜色：只用 theme token；必填星号 = magenta，「已选场景」用 fact-confirmed 状态色。
+//   以前未填分类 / 名称时下面九块整块 opacity 0.32 —— 看起来像坏了、而且照样能点；现在全部常亮，
+//   必填由 canPublishForm / publish() 拦。
+const H = 16;
 const styles = StyleSheet.create({
-  // ACTIVITY-COVER-001：封面选择器。78px 缩略图 + 说明 + 两个按钮；空着也能发。
-  coverBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 14, padding: 12 },
-  coverPreview: { backgroundColor: color.surface, borderRadius: 12, height: 78, width: 78 },
-  coverEmpty: { alignItems: "center", backgroundColor: color.surface, borderRadius: 12, height: 78, justifyContent: "center", width: 78 },
-  coverActions: { flex: 1, gap: 7, minWidth: 0 },
-  coverLabel: { color: color.ink, fontSize: 12, fontWeight: "800" },
-  coverRow: { flexDirection: "row", gap: 8 },
-  coverBtn: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-  coverBtnText: { color: color.white, fontSize: 11, fontWeight: "800" },
-  coverBtnGhost: { borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
-  coverBtnGhostText: { color: color.muted, fontSize: 11, fontWeight: "800" },
   content: { paddingBottom: 40, paddingTop: 8 },
-  head: { alignItems: "center", flexDirection: "row", paddingHorizontal: 16, paddingVertical: 8 },
-  backBtn: { alignItems: "center", height: 38, justifyContent: "center", width: 38 },
-  title: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "800", textAlign: "center" },
-  draftBtn: { paddingHorizontal: 8, paddingVertical: 8 },
-  draftText: { color: color.muted, fontSize: 13, fontWeight: "800" },
-  progressBar: { backgroundColor: color.offWhite, borderRadius: 2, height: 3, marginHorizontal: 20, marginVertical: 12, overflow: "hidden" },
-  progressFill: { backgroundColor: color.ink, borderRadius: 2, height: "100%" },
-  // ACTIVITY-TYPE-001（2026-09-28）：全表按 R3 字体 Token 对齐 —— Number XL 28/900、
-  // Body 14/500、Meta 12/500、Caption 11/600、Button 14/800；数字加 tabular-nums。
-  // 两个例外：name/place 输入框用 16px（iOS 小于 16 自动 zoom）；sheetTitle 20/800
-  // 跟仓里现有 sheet 同口径。
-  heroSub: { color: color.muted, fontSize: 12, fontWeight: "500", marginBottom: 8, marginTop: 6, paddingHorizontal: 20 },
-  block: { marginBottom: 24, opacity: 0.32, paddingHorizontal: 20 },
-  blockActive: { opacity: 1 },
-  blockLabel: { alignItems: "baseline", flexDirection: "row", gap: 6, marginBottom: 12 },
-  blockName: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  blockReq: { color: "#E85C7A", fontSize: 14, fontWeight: "800" },
-  blockHint: { color: color.muted, fontSize: 11, fontWeight: "600", marginLeft: "auto" },
+  head: { alignItems: "center", flexDirection: "row", paddingHorizontal: 8, paddingVertical: 4 },
+  backBtn: { alignItems: "center", height: 44, justifyContent: "center", width: 44 },
+  title: { color: color.ink, flex: 1, fontSize: 17, fontWeight: "800", letterSpacing: -0.25, lineHeight: 24, textAlign: "center" },
+  draftBtn: { alignItems: "center", height: 44, justifyContent: "center", paddingHorizontal: 8 },
+  draftText: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 18 },
+  progressBar: { backgroundColor: color.line, borderRadius: 999, height: 3, marginHorizontal: H, marginTop: 8, overflow: "hidden" },
+  progressFill: { backgroundColor: color.ink, borderRadius: 999, height: "100%" },
+  heroSub: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginBottom: 20, marginTop: 10, paddingHorizontal: H },
+  draftMsg: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginBottom: 12, marginTop: -12, paddingHorizontal: H },
+  block: { marginBottom: 20, paddingHorizontal: H },
+  blockLabel: { alignItems: "baseline", flexDirection: "row", gap: 4, marginBottom: 10 },
+  blockName: { color: color.ink, fontSize: 15, fontWeight: "800", letterSpacing: -0.15, lineHeight: 21 },
+  blockReq: { color: color.magenta, fontSize: 15, fontWeight: "800", lineHeight: 21 },
+  blockHint: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15, marginLeft: "auto" },
   catGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  cat: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1.5, gap: 6, paddingBottom: 11, paddingTop: 13, width: "23%" },
-  catOn: { backgroundColor: color.ink, borderColor: color.ink },
-  catEmoji: { fontSize: 23 },
-  catName: { color: color.ink, fontSize: 11, fontWeight: "600" },
-  catNameOn: { color: color.white },
-  nameInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1.5, color: color.ink, fontSize: 16, fontWeight: "800", height: 58, paddingHorizontal: 18 },
-  suggestRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
-  suggest: { backgroundColor: color.white, borderColor: color.line, borderRadius: 18, borderWidth: 1.5, paddingHorizontal: 13, paddingVertical: 8 },
+  cat: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 6, height: 80, justifyContent: "center", width: "23%" },
+  // 选中：浅底 + 深色描边（图标是深色线条，填黑会看不见）。
+  catOn: { backgroundColor: color.surface, borderColor: color.ink, borderWidth: 1.5 },
+  catIcon: { height: 32, width: 32 },
+  catName: { color: color.ink, fontSize: 12, fontWeight: "600", lineHeight: 15 },
+  catNameOn: { color: color.ink, fontWeight: "800" },
+  nameInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, color: color.ink, fontSize: 16, fontWeight: "700", height: 52, paddingHorizontal: 16 },
+  suggestRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  suggest: { backgroundColor: color.surface, borderColor: color.surface, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
   suggestOn: { backgroundColor: color.ink, borderColor: color.ink },
-  suggestText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  suggestText: { color: color.ink, fontSize: 12, fontWeight: "600", lineHeight: 17 },
   suggestTextOn: { color: color.white },
-  peopleDisplay: { alignItems: "baseline", flexDirection: "row", gap: 8, marginBottom: 12 },
-  peopleValue: { color: color.ink, fontSize: 28, fontVariant: ["tabular-nums"], fontWeight: "900", letterSpacing: -0.5 },
-  peopleUnit: { color: color.muted, fontSize: 12, fontWeight: "500" },
+  peopleDisplay: { alignItems: "baseline", flexDirection: "row", gap: 6, marginBottom: 10 },
+  peopleValue: { color: color.ink, fontSize: 28, fontVariant: ["tabular-nums"], fontWeight: "900", letterSpacing: -0.55, lineHeight: 32 },
+  peopleUnit: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17 },
   pills: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  pill: { backgroundColor: color.white, borderColor: color.line, borderRadius: 20, borderWidth: 1.5, paddingHorizontal: 16, paddingVertical: 9 },
+  pill: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 40, paddingHorizontal: 16 },
   pillOn: { backgroundColor: color.ink, borderColor: color.ink },
-  pillText: { color: color.ink, fontSize: 14, fontWeight: "800" },
+  pillText: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 18 },
   pillTextOn: { color: color.white },
-  chipRail: { gap: 8, paddingRight: 20 },
-  dateChip: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1.5, gap: 3, paddingBottom: 9, paddingTop: 11, width: 58 },
-  dateWeek: { color: color.muted, fontSize: 11, fontWeight: "600" },
-  dateDay: { color: color.ink, fontSize: 20, fontVariant: ["tabular-nums"], fontWeight: "900" },
+  chipRail: { gap: 8, paddingRight: H },
+  dateChip: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, gap: 2, height: 64, justifyContent: "center", width: 56 },
+  dateWeek: { color: color.muted, fontSize: 11, fontWeight: "600", lineHeight: 15 },
+  dateDay: { color: color.ink, fontSize: 20, fontVariant: ["tabular-nums"], fontWeight: "900", letterSpacing: -0.3, lineHeight: 24 },
   dateWeekend: {},
   chipOn: { backgroundColor: color.ink, borderColor: color.ink },
   chipTextOn: { color: color.white },
-  timeChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1.5, minWidth: 66, paddingHorizontal: 14, paddingVertical: 11 },
-  timeText: { color: color.ink, fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "800", textAlign: "center" },
-  chipDisabled: { opacity: 0.28 },
-  placeRow: { flexDirection: "row", gap: 8 },
-  // 输入框 16px：iOS 小于 16 聚焦自动 zoom，这里是功能性例外（R3 无 16 token）。
-  placeInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1.5, color: color.ink, flex: 1, fontSize: 16, fontWeight: "800", height: 56, paddingHorizontal: 16 },
-  mapBtn: { alignItems: "center", height: 56, justifyContent: "center", width: 48 },
+  timeChip: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 40, minWidth: 68, paddingHorizontal: 14 },
+  timeText: { color: color.ink, fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "800", lineHeight: 18, textAlign: "center" },
+  chipDisabled: { opacity: 0.35 },
+  placeRow: { alignItems: "center", flexDirection: "row", gap: 8 },
+  placeInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, color: color.ink, flex: 1, fontSize: 16, fontWeight: "700", height: 52, paddingHorizontal: 16 },
+  mapBtn: { alignItems: "center", height: 52, justifyContent: "center", width: 44 },
   mapPage: { flex: 1 },
-  pickedCard: { alignItems: "center", borderColor: "#2E9B58", borderRadius: 14, borderWidth: 1.5, flexDirection: "row", gap: 12, marginTop: 12, padding: 12 },
-  pickedBadge: { backgroundColor: "#E8F4EA", borderRadius: 4, color: "#1E6E3E", fontSize: 11, fontWeight: "900", paddingHorizontal: 7, paddingVertical: 2 },
-  pickedBody: { flex: 1 },
-  pickedName: { color: color.ink, fontSize: 14, fontWeight: "800" },
-  pickedMeta: { color: color.muted, fontSize: 11, fontWeight: "600", marginTop: 3 },
-  pickedChange: { backgroundColor: color.offWhite, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  pickedChangeText: { color: color.ink, fontSize: 11, fontWeight: "600" },
-  hintRow: { color: color.muted, fontSize: 11, fontWeight: "600", marginTop: 10 },
-  textInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1.5, color: color.ink, fontSize: 14, fontWeight: "500", marginTop: 10, paddingHorizontal: 16, paddingVertical: 13 },
-  textArea: { backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1.5, color: color.ink, fontSize: 14, fontWeight: "500", lineHeight: 20, minHeight: 70, paddingHorizontal: 16, paddingVertical: 13, textAlignVertical: "top" },
-  error: { color: "#E85C7A", fontSize: 12, fontWeight: "500", marginBottom: 8, paddingHorizontal: 20, textAlign: "center" },
-  draftMsg: { color: color.muted, fontSize: 12, fontWeight: "500", marginBottom: 8, paddingHorizontal: 20, textAlign: "center" },
-  cta: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, justifyContent: "center", marginHorizontal: 20, minHeight: 54, paddingVertical: 15 },
-  ctaDisabled: { backgroundColor: "#D6D2C8" },
-  ctaText: { color: color.white, fontSize: 14, fontWeight: "800" },
-  sheetBackdrop: { backgroundColor: "rgba(0,0,0,0.32)", bottom: 0, justifyContent: "flex-end", left: 0, position: "absolute", right: 0, top: 0, zIndex: 50 },
-  sheet: { backgroundColor: color.white, borderTopLeftRadius: 28, borderTopRightRadius: 28, bottom: 0, left: 0, maxHeight: "85%", padding: 18, paddingBottom: 32, position: "absolute", right: 0 },
-  sheetGrab: { alignSelf: "center", backgroundColor: "#DDD", borderRadius: 4, height: 4, marginBottom: 14, width: 42 },
-  sheetTitle: { color: color.ink, fontSize: 20, fontWeight: "800", marginBottom: 12 },
-  sheetSearch: { backgroundColor: color.offWhite, borderRadius: 12, color: color.ink, fontSize: 14, fontWeight: "500", height: 44, marginBottom: 10, paddingHorizontal: 14 },
-  filterRow: { gap: 6, marginBottom: 10, paddingRight: 8 },
-  filterChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
+  pickedCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 10, marginTop: 10, padding: 12 },
+  pickedBadge: { backgroundColor: color.factConfirmedBg, borderRadius: 999, color: color.factConfirmedFg, fontSize: 11, fontWeight: "600", lineHeight: 15, overflow: "hidden", paddingHorizontal: 8, paddingVertical: 2 },
+  pickedBody: { flex: 1, minWidth: 0 },
+  pickedName: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
+  pickedMeta: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginTop: 2 },
+  pickedChange: { backgroundColor: color.surface, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  pickedChangeText: { color: color.ink, fontSize: 12, fontWeight: "600", lineHeight: 17 },
+  hintRow: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginTop: 8 },
+  textInput: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, color: color.ink, fontSize: 16, fontWeight: "500", marginTop: 10, minHeight: 48, paddingHorizontal: 16, paddingVertical: 12 },
+  textArea: { backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, color: color.ink, fontSize: 16, fontWeight: "500", lineHeight: 22, minHeight: 88, paddingHorizontal: 16, paddingVertical: 12, textAlignVertical: "top" },
+  coverBox: { alignItems: "center", flexDirection: "row", gap: 12 },
+  coverPreview: { backgroundColor: color.surface, borderRadius: 16, height: 72, width: 72 },
+  coverEmpty: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderStyle: "dashed", borderWidth: 1, height: 72, justifyContent: "center", width: 72 },
+  coverRow: { flexDirection: "row", gap: 8 },
+  coverRemoveText: { color: color.muted, fontSize: 14, fontWeight: "800", lineHeight: 18 },
+  error: { color: color.magenta, fontSize: 12, fontWeight: "500", lineHeight: 17, marginBottom: 10, paddingHorizontal: H, textAlign: "center" },
+  cta: { alignItems: "center", backgroundColor: color.ink, borderRadius: 16, justifyContent: "center", marginHorizontal: H, marginTop: 4, minHeight: 52 },
+  ctaDisabled: { backgroundColor: color.line },
+  ctaText: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 18 },
+  ctaTextDisabled: { color: color.muted },
+  sheetBackdrop: { backgroundColor: "rgba(23,19,31,0.32)", bottom: 0, justifyContent: "flex-end", left: 0, position: "absolute", right: 0, top: 0, zIndex: 50 },
+  sheet: { backgroundColor: color.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, bottom: 0, left: 0, maxHeight: "85%", padding: H, paddingBottom: 32, position: "absolute", right: 0 },
+  sheetGrab: { alignSelf: "center", backgroundColor: color.line, borderRadius: 999, height: 4, marginBottom: 14, width: 40 },
+  sheetTitle: { color: color.ink, fontSize: 17, fontWeight: "800", letterSpacing: -0.25, lineHeight: 24, marginBottom: 12 },
+  sheetSearch: { backgroundColor: color.surface, borderRadius: 16, color: color.ink, fontSize: 16, fontWeight: "500", height: 44, marginBottom: 10, paddingHorizontal: 14 },
+  filterRow: { gap: 8, marginBottom: 10, paddingRight: 8 },
+  filterChip: { backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
   filterChipOn: { backgroundColor: color.ink, borderColor: color.ink },
-  // 筛选 chips 跟仓里现有 chip 同口径（13/600）。
-  filterText: { color: color.muted, fontSize: 13, fontWeight: "600" },
+  filterText: { color: color.muted, fontSize: 12, fontWeight: "600", lineHeight: 17 },
   filterTextOn: { color: color.white },
   sheetList: { maxHeight: 320 },
-  sheetEmpty: { color: color.muted, fontSize: 13, fontWeight: "700", lineHeight: 20, paddingVertical: 32, textAlign: "center" },
+  sheetEmpty: { color: color.muted, fontSize: 14, fontWeight: "500", lineHeight: 20, paddingVertical: 32, textAlign: "center" },
   // UI-SCENE-LOAD-001：读取失败与「没有场景」分开，失败态必须给重试入口。
   sheetEmptyWrap: { alignItems: "center", gap: 12, paddingVertical: 32 },
   sheetRetry: { backgroundColor: color.ink, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 10 },
-  sheetRetryText: { color: color.white, fontSize: 13, fontWeight: "800" },
-  spotRow: { alignItems: "center", borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 8, padding: 12 },
+  sheetRetryText: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 18 },
+  spotRow: { alignItems: "center", borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginBottom: 8, padding: 10 },
   spotRowOn: { backgroundColor: color.offWhite, borderColor: color.ink },
-  spotImg: { borderRadius: 12, height: 104, width: 104 },
-  spotFallback: { alignItems: "center", backgroundColor: color.offWhite, justifyContent: "center" },
-  spotInitial: { color: color.muted, fontSize: 20, fontWeight: "900" },
-  spotBody: { flex: 1 },
-  spotName: { color: color.ink, fontSize: 14, fontWeight: "900" },
-  spotMeta: { color: color.muted, fontSize: 11, fontWeight: "700", marginTop: 4 },
-  spotCheck: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 11, borderWidth: 1.5, height: 22, justifyContent: "center", width: 22 },
+  spotImg: { borderRadius: 12, height: 72, width: 72 },
+  spotFallback: { alignItems: "center", backgroundColor: color.surface, justifyContent: "center" },
+  spotInitial: { color: color.muted, fontSize: 20, fontWeight: "900", lineHeight: 24 },
+  spotBody: { flex: 1, minWidth: 0 },
+  spotName: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20 },
+  spotMeta: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17, marginTop: 2 },
+  spotCheck: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 999, borderWidth: 1, height: 22, justifyContent: "center", width: 22 },
   spotCheckOn: { backgroundColor: color.ink, borderColor: color.ink },
-  spotCheckText: { color: color.white, fontSize: 11, fontWeight: "900" },
-  success: { alignItems: "center", flex: 1, justifyContent: "center", paddingHorizontal: 32 },
-  successIcon: { alignItems: "center", backgroundColor: "#E8F4EA", borderRadius: 44, height: 88, justifyContent: "center", marginBottom: 24, width: 88 },
-  successCheck: { color: "#2E9B58", fontSize: 44, fontWeight: "900" },
-  successTitle: { color: color.ink, fontSize: 24, fontWeight: "900", marginBottom: 10 },
-  successSub: { color: color.muted, fontSize: 13.5, fontWeight: "700", lineHeight: 20, marginBottom: 8, textAlign: "center" },
-  successCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 24, padding: 14, width: "100%" },
-  successEmoji: { fontSize: 22 },
-  successBody: { flex: 1 },
-  successName: { color: color.ink, fontSize: 14, fontWeight: "900", marginBottom: 3 },
-  successMeta: { color: color.muted, fontSize: 11.5, fontWeight: "700" },
-  successBtns: { flexDirection: "row", gap: 10, marginTop: 24, width: "100%" },
-  successBtn: { alignItems: "center", borderRadius: 14, flex: 1, justifyContent: "center", minHeight: 52 },
-  successGhost: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1.5 },
-  successBtnGhostText: { color: color.ink, fontSize: 14.5, fontWeight: "900" },
+  success: { alignItems: "center", flex: 1, justifyContent: "center", paddingHorizontal: 24 },
+  successIcon: { alignItems: "center", backgroundColor: color.factConfirmedBg, borderRadius: 999, height: 80, justifyContent: "center", marginBottom: 20, width: 80 },
+  successTitle: { color: color.ink, fontSize: 24, fontWeight: "900", letterSpacing: -0.7, lineHeight: 30, marginBottom: 8 },
+  successSub: { color: color.muted, fontSize: 14, fontWeight: "500", lineHeight: 20, marginBottom: 8, textAlign: "center" },
+  successCard: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 16, borderWidth: 1, flexDirection: "row", gap: 12, marginTop: 20, padding: 14, width: "100%" },
+  successCatIcon: { alignItems: "center", backgroundColor: color.surface, borderRadius: 14, height: 44, justifyContent: "center", width: 44 },
+  successCatImg: { height: 30, width: 30 },
+  successBody: { flex: 1, minWidth: 0 },
+  successName: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 20, marginBottom: 2 },
+  successMeta: { color: color.muted, fontSize: 12, fontWeight: "500", lineHeight: 17 },
+  successBtns: { flexDirection: "row", gap: 10, marginTop: 20, width: "100%" },
+  successBtn: { alignItems: "center", borderRadius: 16, flex: 1, justifyContent: "center", minHeight: 52 },
+  successGhost: { backgroundColor: color.white, borderColor: color.line, borderWidth: 1 },
+  successBtnGhostText: { color: color.ink, fontSize: 14, fontWeight: "800", lineHeight: 18 },
   successPrimary: { backgroundColor: color.ink },
-  successBtnPrimaryText: { color: color.white, fontSize: 14.5, fontWeight: "900" },
+  successBtnPrimaryText: { color: color.white, fontSize: 14, fontWeight: "800", lineHeight: 18 },
 });

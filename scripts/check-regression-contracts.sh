@@ -1440,6 +1440,20 @@ if ! grep -qF 'localNetService.WithFeedSignals(postgres.NewFeedSignals(pool))' a
 fi
 echo "    FEED-RANK-001: PASS"
 
+# ACTIVITY-DRAFT-RESTORE-001（2026-10-11，用户：「存草稿功能似乎没有用」）：创建活动表单读草稿 / 加载目录的
+# effect 依赖 [t]（每次渲染都是新函数）⇒ 每次渲染重跑、把上一轮没读完的草稿读取取消，草稿读不回来，
+# 目录还在无限重请求。钉：只在挂载时跑；保存后的反馈在表单顶部（存草稿键在顶栏，放底部看不见）。
+if [ ! -f apps/mobile/src/surfaces/activity-wizard-draft.test.ts ] \
+  || ! grep -qF 'ACTIVITY-DRAFT-RESTORE-001' apps/mobile/src/surfaces/activity-wizard.tsx; then
+  echo "  FAIL [ACTIVITY-DRAFT-RESTORE-001]: 创建活动草稿恢复的回归测试或修复标记不见了。" >&2
+  exit 1
+fi
+if ! (cd apps/mobile && npx vitest run src/surfaces/activity-wizard-draft.test.ts >/dev/null 2>&1); then
+  echo "  FAIL [ACTIVITY-DRAFT-RESTORE-001]: 草稿恢复又会被重渲染打断（effect 依赖 [t]）或反馈不在顶部。" >&2
+  exit 1
+fi
+echo "    ACTIVITY-DRAFT-RESTORE-001: PASS (草稿读取只在挂载时跑，保存有顶部反馈)"
+
 # DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
 # 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
 # ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。

@@ -5,18 +5,28 @@
 // 沿用 activity-moments.buildActivityPublishInput（capacity 取上沿、
 // AA/自定义→SPLIT + 金额进 desc），这里只产出 specs。
 
+// ACTIVITY-CATEGORIES-002（2026-10-11，用户：「活动要多一点 比如化妆 亲子拍照 不用搞喝酒 没意义 风险高
+// 咖啡 美食 拍照 化妆...现代女孩喜欢的活动搞 电竞活动也可以」）：去掉喝酒，按「现代女生爱做的事」排序，
+// 4 列 × 3 行。图标统一用 assets/scene-activity/actions 那套（见 activity-wizard 的 CAT_ICON）。
+// 旧草稿里的 drink 由 decodeDraft 当作「未选分类」处理，不会报错。
 export type CreateCategoryId =
-  | "cafe" | "food" | "drink" | "sport" | "walk" | "art" | "photo" | "music";
+  | "cafe" | "food" | "photo" | "makeup" | "familyPhoto" | "shopping"
+  | "art" | "movie" | "music" | "esports" | "walk" | "sport";
 
+// emoji 只随发布数据走（buildActivityPublishInput 的 emoji / venueIcon），界面不显示。
 export const CREATE_CATEGORIES: ReadonlyArray<{ id: CreateCategoryId; emoji: string }> = [
   { id: "cafe", emoji: "☕" },
   { id: "food", emoji: "🍜" },
-  { id: "drink", emoji: "🍻" },
-  { id: "sport", emoji: "🏸" },
-  { id: "walk", emoji: "🚶" },
-  { id: "art", emoji: "🎨" },
   { id: "photo", emoji: "📷" },
+  { id: "makeup", emoji: "💄" },
+  { id: "familyPhoto", emoji: "👨‍👩‍👧" },
+  { id: "shopping", emoji: "🛍️" },
+  { id: "art", emoji: "🎨" },
+  { id: "movie", emoji: "🎬" },
   { id: "music", emoji: "🎵" },
+  { id: "esports", emoji: "🎮" },
+  { id: "walk", emoji: "🚶" },
+  { id: "sport", emoji: "🏸" },
 ];
 
 export type CreateSignupId = "OPEN" | "REVIEW" | "INVITE_ONLY";
