@@ -205,8 +205,13 @@ export const styles = StyleSheet.create({
   // STORE-TILES-001：「企业 / 店铺」的入口磁贴。产品稿里就是「品牌绿圆角方块 +
   // 黑图标 + 粗标题 + 灰色副标题」，方块明显大于菜单行那枚 44×44，且没有卡片底 /
   // 描边 —— 所以这里不套 serviceRow 那层白卡。
-  tileGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 10 },
-  tile: { gap: 8, paddingVertical: 4, width: "48%" },
+  //
+  // STORE-TILES-004（2026-10-11，用户：「我的推荐 2 个横放改为竖」）：两个磁贴原来左右并排
+  // （row + wrap + 48%），改成上下竖排：一个磁贴一整行，方块在左、标题在右。方块与标题的
+  // 外观（64 绿块、无卡片底）不变，只换排列。
+  tileGrid: { flexDirection: "column", gap: 10, marginTop: 10 },
+  tile: { alignItems: "center", flexDirection: "row", gap: 14, minHeight: 64, paddingVertical: 4 },
+  tileBody: { flex: 1, gap: 2, minWidth: 0 },
   tileIcon: { alignItems: "center", backgroundColor: color.lime, borderRadius: 20, height: 64, justifyContent: "center", width: 64 },
   tileLabel: { color: color.ink, fontSize: 15, fontWeight: "800", lineHeight: 21 },
   tileDesc: { color: color.muted, fontSize: 11, lineHeight: 15 },

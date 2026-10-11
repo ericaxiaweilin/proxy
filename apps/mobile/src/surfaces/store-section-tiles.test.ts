@@ -168,3 +168,24 @@ describe("STORE-TILES-003 分组标题改为「场景推荐」，id 与磁贴不
     expect(bizSection).toContain('route: "storerecmanage"');
   });
 });
+
+// STORE-TILES-004（2026-10-11，用户：「我的推荐 2 个横放改为竖」）：「场景推荐」这一组的两个磁贴
+// 从左右并排改成上下竖排（一个磁贴一整行，方块在左、标题在右）。
+describe("STORE-TILES-004 两个磁贴竖排，不是左右并排", () => {
+  const stylesCode = stripComments(readFileSync(here("./me-styles.ts"), "utf8"));
+  const grid = /tileGrid:\s*\{([^}]*)\}/.exec(stylesCode)?.[1] ?? "";
+  const tile = /\btile:\s*\{([^}]*)\}/.exec(stylesCode)?.[1] ?? "";
+
+  it("磁贴容器是纵向的，不再 row + wrap", () => {
+    expect(grid, "找不到 tileGrid 样式").not.toBe("");
+    expect(grid).toContain('flexDirection: "column"');
+    expect(grid).not.toContain('"row"');
+    expect(grid).not.toContain("flexWrap");
+  });
+
+  it("单个磁贴占满一行（不再是 48% 宽的半格）", () => {
+    expect(tile, "找不到 tile 样式").not.toBe("");
+    expect(tile).not.toContain("48%");
+    expect(tile).toContain('flexDirection: "row"'); // 方块在左、标题在右
+  });
+});

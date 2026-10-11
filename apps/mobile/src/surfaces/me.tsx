@@ -3591,8 +3591,10 @@ export function MeSurface({
                     <View style={styles.tileIcon}>
                       <ProxySymbolIcon color={color.ink} size={28} symbol={tile.icon} />
                     </View>
-                    <Text selectable style={styles.tileLabel}>{tile.label}</Text>
-                    {tile.desc ? <Text selectable style={styles.tileDesc}>{tile.desc}</Text> : null}
+                    <View style={styles.tileBody}>
+                      <Text selectable style={styles.tileLabel}>{tile.label}</Text>
+                      {tile.desc ? <Text selectable style={styles.tileDesc}>{tile.desc}</Text> : null}
+                    </View>
                   </Pressable>
                 ))}
               </View>
