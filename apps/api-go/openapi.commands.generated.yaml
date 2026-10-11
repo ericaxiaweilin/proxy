@@ -511,6 +511,8 @@ commands:
     domain: Safety
   - command: RecordContributionValue
     domain: Contribution
+  - command: RecordDailyLogin
+    domain: Growth
   - command: RecordDirectSettlement
     domain: Fulfillment
   - command: RecordEmergencyEvent

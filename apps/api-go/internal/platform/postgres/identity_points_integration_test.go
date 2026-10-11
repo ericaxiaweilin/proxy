@@ -618,3 +618,46 @@ func TestTreasurePrizesDropCoffeeVouchers(t *testing.T) {
 		t.Fatalf("the reserved prize was given back: awarded=%d want %d", awarded, before)
 	}
 }
+
+// DAILY-LOGIN-001（用户：「每日登录都默认加积分 比如 5 积分」）：每个越南日第一次登录态打开记 5 分。
+// 对真库钉：同一天只新增一笔 / 跨越南午夜再记 / 游客（ANONYMOUS）不加 / 不存在的人不加 / 积分进总账。
+func TestDailyLoginCreditsFivePointsOncePerHanoiDay(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	stamp := time.Now().Format("150405.000000")
+	member, guest := "u_dl_"+stamp, "u_dlg_"+stamp
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM growth.point_ledger WHERE subject_id = ANY($1)`, []string{member, guest, "u_dl_ghost_" + stamp})
+		_, _ = pool.Exec(bg, `DELETE FROM identity.user_accounts WHERE id = ANY($1)`, []string{member, guest})
+	})
+	for id, status := range map[string]string{member: "ACTIVE", guest: "ANONYMOUS"} {
+		if _, err := pool.Exec(ctx, `INSERT INTO identity.user_accounts (id, status, created_at, updated_at) VALUES ($1,$2,now(),now())`, id, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tier := identitytier.NewPostgres(pool)
+	// 越南日 2026-10-11 的两个时刻（UTC 09:00 / 16:30 = 越南 16:00 / 23:30）和次日 00:10（UTC 17:10）。
+	morning := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+	night := time.Date(2026, 10, 11, 16, 30, 0, 0, time.UTC)
+	nextDay := time.Date(2026, 10, 11, 17, 10, 0, 0, time.UTC)
+
+	if ok, err := tier.CreditDailyLogin(ctx, member, morning); err != nil || !ok {
+		t.Fatalf("first open of the day credits: ok=%v err=%v", ok, err)
+	}
+	if ok, err := tier.CreditDailyLogin(ctx, member, night); err != nil || ok {
+		t.Fatalf("same Hanoi day must not credit twice: ok=%v err=%v", ok, err)
+	}
+	if ok, err := tier.CreditDailyLogin(ctx, member, nextDay); err != nil || !ok {
+		t.Fatalf("a new Hanoi day credits again: ok=%v err=%v", ok, err)
+	}
+	if pts, err := tier.Points(ctx, identitytier.User, member); err != nil || pts != 10 {
+		t.Fatalf("two days = 10 points: pts=%d err=%v", pts, err)
+	}
+	if ok, err := tier.CreditDailyLogin(ctx, guest, morning); err != nil || ok {
+		t.Fatalf("an anonymous guest has no login to reward: ok=%v err=%v", ok, err)
+	}
+	if ok, err := tier.CreditDailyLogin(ctx, "u_dl_ghost_"+stamp, morning); err != nil || ok {
+		t.Fatalf("an unknown account is not credited: ok=%v err=%v", ok, err)
+	}
+}

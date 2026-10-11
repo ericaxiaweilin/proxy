@@ -316,6 +316,11 @@ type ledgerReader interface {
 
 // ledgerRefresher：读自己的成长值之前，先把这个人已经做成的事折进账本（幂等）。
 // 后台任务也会定时收，但读的时候补一次，用户看到的就一定是最新的，不依赖任务刚好跑过。
+// dailyLoginCrediter：每日登录入账（DAILY-LOGIN-001）。ledger 实现了它才会入账；没接账本就老实回「没记」。
+type dailyLoginCrediter interface {
+	CreditDailyLogin(ctx context.Context, userID string, now time.Time) (bool, error)
+}
+
 type ledgerRefresher interface {
 	CollectUserFor(ctx context.Context, userID string, now time.Time) (int, error)
 	CollectProviderFor(ctx context.Context, userID string, now time.Time) (int, error)
@@ -354,7 +359,7 @@ func NewWithClock(repo orderReader, c clock.Clock) *Service {
 }
 
 func (s *Service) Supports(commandType string) bool {
-	return commandType == "GetMyGrowthSummary"
+	return commandType == "GetMyGrowthSummary" || commandType == "RecordDailyLogin"
 }
 
 func (s *Service) Handle(e command.Envelope) command.Result {
@@ -380,6 +385,29 @@ func (s *Service) HandleContext(ctx context.Context, e command.Envelope) command
 		}
 		result := command.Accepted(e, "GrowthSummary", e.Actor.ID, 1, "READY", nil)
 		result.Body = map[string]any{"summary": summary}
+		return result
+	case "RecordDailyLogin":
+		// DAILY-LOGIN-001（用户：「每日登录都默认加积分 比如 5 积分」）：App 在登录态下打开时静默调一次。
+		// 幂等：同一天（越南时区）只新增一笔；重复调返回 granted=false，不是错误。
+		// 身份只取会话里的 actor —— payload 里没有、也不接受别的 userId。
+		if e.Actor.ID == "" || e.Actor.Type == "PUBLIC" {
+			return command.Rejected(e, "DAILY_LOGIN_REQUIRES_ACTOR", "AUTHORIZATION", "AFTER_REAUTH", "growth.daily_login_requires_actor", nil)
+		}
+		c, ok := s.ledger.(dailyLoginCrediter)
+		if !ok {
+			return command.Rejected(e, "DAILY_LOGIN_UNAVAILABLE", "INTERNAL", "SAFE_RETRY", "growth.daily_login_unavailable", nil)
+		}
+		now := s.clock.Now()
+		granted, err := c.CreditDailyLogin(ctx, e.Actor.ID, now)
+		if err != nil {
+			return command.Rejected(e, "DAILY_LOGIN_FAILED", "INTERNAL", "SAFE_RETRY", "growth.daily_login_failed", nil)
+		}
+		result := command.Accepted(e, "DailyLogin", e.Actor.ID, 1, "RECORDED", nil)
+		result.Body = map[string]any{
+			"granted": granted,
+			"points":  identitytier.DailyLoginPoints,
+			"date":    identitytier.DailyLoginRef(now),
+		}
 		return result
 	default:
 		return command.Rejected(e, "GROWTH_UNSUPPORTED", "VALIDATION", "AFTER_USER_ACTION", "growth.unsupported", nil)

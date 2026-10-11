@@ -8,6 +8,7 @@ import (
 	"github.com/proxy-app/proxy-api/internal/clock"
 	"github.com/proxy-app/proxy-api/internal/command"
 	"github.com/proxy-app/proxy-api/internal/fulfillment"
+	"github.com/proxy-app/proxy-api/internal/identitytier"
 )
 
 var fixedNow = time.Date(2026, 9, 24, 15, 0, 0, 0, time.UTC) // Thursday
@@ -280,3 +281,113 @@ func TestSummaryFromLedgerDoesNotDoubleCountOrderPoints(t *testing.T) {
 		t.Fatalf("order stats still come from the orders: %+v", fromLedger.Stats)
 	}
 }
+
+// ---- DAILY-LOGIN-001（用户：「每日登录都默认加积分 比如 5 积分」）----
+
+type dailyLedger struct {
+	seen map[string]bool // userID|ref
+	fail error
+}
+
+func (d *dailyLedger) Points(context.Context, identitytier.Kind, string) (int, error) { return 0, nil }
+
+func (d *dailyLedger) CreditDailyLogin(_ context.Context, userID string, now time.Time) (bool, error) {
+	if d.fail != nil {
+		return false, d.fail
+	}
+	key := userID + "|" + identitytier.DailyLoginRef(now)
+	if d.seen[key] {
+		return false, nil
+	}
+	d.seen[key] = true
+	return true, nil
+}
+
+type emptyOrders struct{}
+
+func (emptyOrders) Snapshot(context.Context) ([]fulfillment.Order, error) { return nil, nil }
+
+func dailyEnvelope(actorType, actorID string) command.Envelope {
+	return command.Envelope{
+		CommandID: "cmd_daily", CommandType: "RecordDailyLogin", CommandVersion: 1,
+		Actor:     command.Actor{Type: actorType, ID: actorID},
+		Principal: command.Principal{Type: "INDIVIDUAL", ID: actorID},
+		Target:    command.Target{Type: "DailyLogin", ID: "me"},
+		Purpose:   "daily_login", CorrelationID: "corr_daily", IdempotencyKey: "idem_daily",
+	}
+}
+
+func TestRecordDailyLoginGrantsOncePerDayAndIsIdempotent(t *testing.T) {
+	ledger := &dailyLedger{seen: map[string]bool{}}
+	// 2026-09-24 15:00 UTC = 22:00 越南时区（同一个越南日）；+5h = 次日 03:00 越南。
+	clk := &mutableClock{now: fixedNow}
+	svc := NewWithClock(emptyOrders{}, clk)
+	svc.SetLedger(ledger)
+
+	body := func() map[string]any {
+		res := svc.Handle(dailyEnvelope("USER", "user_1"))
+		if res.Outcome != "ACCEPTED" {
+			t.Fatalf("rejected: %+v", res.Error)
+		}
+		return res.Body
+	}
+	first := body()
+	if first["granted"] != true || first["points"] != 5 || first["date"] != "2026-09-24" {
+		t.Fatalf("first open of the day grants 5: %+v", first)
+	}
+	if again := body(); again["granted"] != false {
+		t.Fatalf("a second open the same day must not grant again: %+v", again)
+	}
+	// 跨过越南时区午夜（15:00 UTC + 10h = 次日 01:00 UTC+7... 取 +6h = 21:00 UTC = 04:00 越南次日）
+	clk.now = fixedNow.Add(6 * time.Hour)
+	if next := body(); next["granted"] != true || next["date"] != "2026-09-25" {
+		t.Fatalf("a new Hanoi day grants again: %+v", next)
+	}
+}
+
+// 「每天」按越南时区算，不按 UTC：UTC 的 17:30 已经是越南次日 00:30。
+func TestDailyLoginDayBoundaryIsHanoiNotUTC(t *testing.T) {
+	before := time.Date(2026, 9, 24, 16, 59, 0, 0, time.UTC) // 越南 23:59
+	after := time.Date(2026, 9, 24, 17, 0, 0, 0, time.UTC)   // 越南 00:00 次日
+	if identitytier.DailyLoginRef(before) != "2026-09-24" || identitytier.DailyLoginRef(after) != "2026-09-25" {
+		t.Fatalf("Hanoi day boundary: %s / %s", identitytier.DailyLoginRef(before), identitytier.DailyLoginRef(after))
+	}
+}
+
+func TestRecordDailyLoginRefusesAnonymousAndUnavailableLedger(t *testing.T) {
+	svc := NewWithClock(emptyOrders{}, clock.System{})
+	svc.SetLedger(&dailyLedger{seen: map[string]bool{}})
+	if res := svc.Handle(dailyEnvelope("PUBLIC", "anonymous_reader")); res.Error == nil || res.Error.ErrorCode != "DAILY_LOGIN_REQUIRES_ACTOR" {
+		t.Fatalf("a public reader never earns points: %+v", res)
+	}
+	if res := svc.Handle(dailyEnvelope("USER", "")); res.Error == nil {
+		t.Fatalf("no actor id is refused")
+	}
+	// 没接账本：老实说没记，不假装成功。
+	if res := NewWithClock(emptyOrders{}, clock.System{}).Handle(dailyEnvelope("USER", "user_1")); res.Error == nil || res.Error.ErrorCode != "DAILY_LOGIN_UNAVAILABLE" {
+		t.Fatalf("no ledger => unavailable: %+v", res)
+	}
+	// 账本写失败：报错，让 App 下次再试，不是「今天已经记过」。
+	boom := &dailyLedger{seen: map[string]bool{}, fail: context.DeadlineExceeded}
+	s2 := NewWithClock(emptyOrders{}, clock.System{})
+	s2.SetLedger(boom)
+	if res := s2.Handle(dailyEnvelope("USER", "user_1")); res.Error == nil || res.Error.ErrorCode != "DAILY_LOGIN_FAILED" {
+		t.Fatalf("ledger failure must surface: %+v", res)
+	}
+}
+
+func TestDailyLoginIsAnEarnRuleWithFivePoints(t *testing.T) {
+	for _, r := range identitytier.EarnRules(identitytier.User) {
+		if r.Reason == identitytier.DailyLoginReason {
+			if r.Points != 5 || r.Label != "每日登录" {
+				t.Fatalf("daily login rule: %+v", r)
+			}
+			return
+		}
+	}
+	t.Fatal("DAILY_LOGIN must be in the user earn rules (the rules table and the credit share one constant)")
+}
+
+type mutableClock struct{ now time.Time }
+
+func (c *mutableClock) Now() time.Time { return c.now }

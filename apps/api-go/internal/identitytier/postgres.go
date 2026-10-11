@@ -27,6 +27,22 @@ func (p *Postgres) Credit(ctx context.Context, k Kind, id string, delta int, rea
 	return tag.RowsAffected() == 1, err
 }
 
+// CreditDailyLogin：给一个已注册的账号记今天（越南时区）的「每日登录」分。幂等：同一天只新增一次，
+// 返回是否真的新增（false = 今天已经记过）。
+//
+// 只给正式账号加：游客 / 匿名会话（status ANONYMOUS 等）没有「登录」，不加 —— 与 collectUser 同一份状态白名单。
+// 分值取自 DailyLoginPoints（规则表同一个常量）。
+func (p *Postgres) CreditDailyLogin(ctx context.Context, userID string, now time.Time) (bool, error) {
+	tag, err := p.pool.Exec(ctx, `
+		INSERT INTO growth.point_ledger (id, subject_kind, subject_id, delta, reason, ref, created_at)
+		SELECT 'pl_' || md5('USER|' || u.id || '|' || $2 || '|' || $3), 'USER', u.id, $4, $2, $3, $5
+		  FROM identity.user_accounts u
+		 WHERE u.id = $1 AND u.status IN ('ACTIVE','REGISTERED','VERIFIED','COMMERCIAL_VERIFIED')
+		ON CONFLICT (subject_kind, subject_id, reason, ref) DO NOTHING`,
+		userID, DailyLoginReason, DailyLoginRef(now), DailyLoginPoints, now.UTC())
+	return tag.RowsAffected() == 1, err
+}
+
 const collectWindow = 35 * 24 * time.Hour
 
 // CollectUser：把用户已经做成的事折成积分（固定规则，见 EarnRules）。幂等，可以每轮重跑；只看最近 35 天。

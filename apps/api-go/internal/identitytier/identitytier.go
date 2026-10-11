@@ -5,6 +5,8 @@
 // 按分数、在时间窗口里由运营开启。积分不是钱，不能提现。
 package identitytier
 
+import "time"
+
 type Kind string
 
 const (
@@ -85,6 +87,19 @@ func Resolve(k Kind, points int) Level {
 	return out
 }
 
+// 每日登录：账本原因码与分值。单独导出，是因为入账（Postgres.CreditDailyLogin）和规则表（EarnRules）
+// 必须读同一个数 —— 不然改了规则表、实际入账还是旧值。
+const (
+	DailyLoginReason = "DAILY_LOGIN"
+	DailyLoginPoints = 5
+)
+
+// MarketZone 是「每天」的边界：越南时区（UTC+7，无夏令时），与发帖每日上限、引力模型同一口径。
+var MarketZone = time.FixedZone("ICT", 7*3600)
+
+// DailyLoginRef 是每日登录在账本里的 ref：越南时区的日期。同一天的 ref 相同 ⇒ 只算一次。
+func DailyLoginRef(now time.Time) string { return now.In(MarketZone).Format("2006-01-02") }
+
 // 固定的积分赚取规则（用户）。reason 是账本里的原因码；每条在账本里按 (reason, ref) 只算一次。
 type EarnRule struct {
 	Reason string `json:"reason"`
@@ -108,6 +123,9 @@ func EarnRules(k Kind) []EarnRule {
 		return []EarnRule{}
 	}
 	return []EarnRule{
+		// DAILY-LOGIN-001（2026-10-11，用户：「每日登录都默认加积分 比如 5 积分」）：每个自然日（越南时区）
+		// 第一次登录态打开 App 记一笔，不用做任何操作。账本按 (reason, ref=日期) 去重，一天只算一次。
+		{DailyLoginReason, "每日登录", DailyLoginPoints},
 		{"PROFILE_COMPLETE", "完善资料（头像 + 昵称）", 30},
 		{"POST_PUBLISHED", "发布一条帖文（每天最多算 3 条）", 5},
 		{"ACTIVITY_JOINED", "参加一场活动", 30},

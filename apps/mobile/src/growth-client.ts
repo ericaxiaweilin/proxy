@@ -132,6 +132,22 @@ export class GrowthClient {
     }
   ) {}
 
+  /**
+   * DAILY-LOGIN-001（用户：「每日登录都默认加积分 比如 5 积分」）：今天（越南时区）第一次登录态打开 App 记一笔。
+   * 幂等：服务端按日期去重，重复调返回 granted=false，不是错误。
+   *
+   * 静默调用 —— 调用方不要弹提示：积分明细里能看到「每日登录」。拿不到登录态（游客）时服务端
+   * 不加分、客户端这里直接抛 GrowthError，调用方吞掉即可。
+   */
+  public async recordDailyLogin(): Promise<{ granted: boolean; points: number; date: string }> {
+    const body = this.payload(await this.command("RecordDailyLogin", { type: "DailyLogin", id: "me" }, {}));
+    return {
+      granted: body.granted === true,
+      points: typeof body.points === "number" ? body.points : 0,
+      date: typeof body.date === "string" ? body.date : ""
+    };
+  }
+
   public async getMySummary(): Promise<GrowthSummary> {
     const body = this.payload(await this.command("GetMyGrowthSummary", { type: "GrowthSummary", id: "me" }, {}));
     return body.summary as GrowthSummary;
@@ -158,7 +174,7 @@ export class GrowthClient {
       target,
       idempotencyKey: `growth_${commandType}_${Date.now()}_${this.commandSequence}`,
       authContext: { sessionId: session.auth.sessionId },
-      purpose: "growth_summary_read",
+      purpose: commandType === "RecordDailyLogin" ? "daily_login" : "growth_summary_read",
       correlationId: `corr_${Date.now()}`,
       requestedAt: now.toISOString(),
       payload,
