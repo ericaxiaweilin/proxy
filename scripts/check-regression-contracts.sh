@@ -1384,6 +1384,16 @@ if ! grep -qF '<PageBoundary key={page} page={page}>' apps/market-intelligence-c
 fi
 echo "    OPS-PAGE-BOUNDARY-001: PASS (一页出错只坏这一页)"
 
+# OPS-TAGS-CRASH-001（2026-10-11）：89ea7e2f 在后端删了 totals.sceneUnknown，标签中心还在
+# `t.sceneUnknown.toLocaleString()` ⇒ 整页 TypeError（当时没有错误边界 ⇒ 整站白屏）。
+# 钉：不再读 sceneUnknown；数字一律走 num()（缺字段显示「—」），不直接 .toLocaleString()。
+tags_page=apps/market-intelligence-console/src/pages/Tags.tsx
+if grep -qF 'sceneUnknown' "$tags_page" || grep -nE '[a-zA-Z_)]\.toLocaleString\(\)' "$tags_page" | grep -vF 'new Date(' | grep -vF 'x.toLocaleString() :' | grep -q .; then
+  echo "  FAIL [OPS-TAGS-CRASH-001]: 标签中心又在读已删字段或直接 .toLocaleString() —— 后端少一个数整页就崩。" >&2
+  exit 1
+fi
+echo "    OPS-TAGS-CRASH-001: PASS (标签中心缺字段显示「—」不崩)"
+
 
 require_test "UI-SOCIAL-002" "./internal/identity" \
   "TestAccountPreferencesRejectsAnonymousActorAndOversizedContact" \

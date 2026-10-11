@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 // 桩不发这两个字段 ⇒ TypeError），而且标签体系本身不存在（全库 0 张 tag 表）。
 //
 // 所以这一页不是「标签热度榜」，给的是**已落库的标签词典盘点**：
-//   - 7 个轴（4 个供给侧 + 3 个内容侧），每个轴多少词、覆盖多少主体、词表受不受控；
+//   - 若干个轴（供给侧 + 内容侧；帖子场景轴已于 89ea7e2f 下线），每个轴多少词、覆盖多少主体、词表受不受控；
 //   - 语种轴大小写没归一（vi/VI 算两个词）—— dirty 轴，合并前别拿它做筛选；
 //   - context_id 是自由文本（有「日常」也有带地址的店名），不能当标签用；
 //   - activity.interests 是事件表且只有个位数行 —— 兴趣画像没有数据源。
@@ -24,7 +24,7 @@ type Payload = {
   totals?: {
     agents: number; posts: number; terms: number; termsShown: number;
     languageRawTerms: number; languageNormTerms: number;
-    caseCollisions: string[]; sceneUnknown: number;
+    caseCollisions: string[] | null;
     contextPosts: number; contextIdTerms: number; interestRows: number;
   };
   notes?: string[];
@@ -44,6 +44,10 @@ const unitLabel: Record<string, string> = {
 const vocabLabel: Record<string, string> = {
   controlled: "受控词表", dirty: "没归一", free_text: "自由文本",
 };
+
+// OPS-TAGS-CRASH-001：后端去掉一个字段（89ea7e2f 删了「场景未识别」计数）前端就整页抛错。
+// 缺的数显示「—」，不显示 0（0 是「查过了没有」），也不让整页崩。
+const num = (x: number | null | undefined): string => (typeof x === "number" ? x.toLocaleString() : "—");
 
 export function Tags() {
   const [d, setD] = useState<Payload | null>(null);
@@ -67,20 +71,19 @@ export function Tags() {
       </div>
 
       <div className="kpi-grid">
-        <div className="kpi"><div className="label">服务者</div><div className="value">{t.agents.toLocaleString()}</div><div className="meta">supply.agent_profiles</div></div>
-        <div className="kpi"><div className="label">内容</div><div className="value">{t.posts.toLocaleString()}</div><div className="meta">localnet.posts</div></div>
-        <div className="kpi"><div className="label">词数合计</div><div className="value">{t.terms.toLocaleString()}</div><div className="meta">7 个轴去重后的词</div></div>
-        <div className="kpi"><div className="label">带语境标签的帖子</div><div className="value">{t.contextPosts.toLocaleString()}</div><div className="meta">context_refs 非空的帖子 · 覆盖率 {(t.posts > 0 ? (t.contextPosts / t.posts) * 100 : 0).toFixed(1)}%</div></div>
-        <div className="kpi"><div className="label">场景未识别</div><div className="value">{t.sceneUnknown.toLocaleString()}</div><div className="meta">scene_type=UNKNOWN · 分类器没打上</div></div>
+        <div className="kpi"><div className="label">服务者</div><div className="value">{num(t.agents)}</div><div className="meta">supply.agent_profiles</div></div>
+        <div className="kpi"><div className="label">内容</div><div className="value">{num(t.posts)}</div><div className="meta">localnet.posts</div></div>
+        <div className="kpi"><div className="label">词数合计</div><div className="value">{num(t.terms)}</div><div className="meta">{d.axes.length} 个轴去重后的词</div></div>
+        <div className="kpi"><div className="label">带语境标签的帖子</div><div className="value">{num(t.contextPosts)}</div><div className="meta">context_refs 非空的帖子 · 覆盖率 {(t.posts > 0 ? (t.contextPosts / t.posts) * 100 : 0).toFixed(1)}%</div></div>
       </div>
 
-      <div className="section-title"><h2>七个轴</h2><span>词表受不受控决定能不能直接当标签用</span></div>
+      <div className="section-title"><h2>{d.axes.length} 个轴</h2><span>词表受不受控决定能不能直接当标签用</span></div>
       <div className="engine-status">
         {d.axes.map((a) => (
           <div className="engine-mini" key={a.axis}>
             <div className="k">{axisLabel[a.axis] ?? a.axis} <span style={{ opacity: 0.55 }}>{a.side === "supply" ? "供给侧" : "内容侧"}</span></div>
             <div className="v">{a.terms} 词 · {(a.coverage * 100).toFixed(1)}%</div>
-            <div className="d">{vocabLabel[a.vocabulary] ?? a.vocabulary} · {a.carriers.toLocaleString()}/{a.universe.toLocaleString()} 主体</div>
+            <div className="d">{vocabLabel[a.vocabulary] ?? a.vocabulary} · {num(a.carriers)}/{num(a.universe)} 主体</div>
           </div>
         ))}
       </div>
@@ -92,14 +95,14 @@ export function Tags() {
       <div className="tagcloud">
         {terms.map((x) => (
           <span key={`${x.type}:${x.tag}`} className={`rawtag ${x.type}`}>
-            {x.tag} · {x.count.toLocaleString()} {unitLabel[x.unit] ?? x.unit}
+            {x.tag} · {num(x.count)} {unitLabel[x.unit] ?? x.unit}
           </span>
         ))}
       </div>
 
-      {(t.caseCollisions.length > 0) && (
+      {((t.caseCollisions ?? []).length > 0) && (
         <div className="notice" style={{ marginTop: 10 }}>
-          <b>语种没归一：</b>{t.caseCollisions.join("、")} —— 同一个语种在库里算两个词
+          <b>语种没归一：</b>{(t.caseCollisions ?? []).join("、")} —— 同一个语种在库里算两个词
           （原始 {t.languageRawTerms} 个 / 归一后 {t.languageNormTerms} 个）。合并前别拿语种数做筛选。
         </div>
       )}
@@ -130,8 +133,8 @@ function UserTagLayer({ u }: { u: UserTags }) {
         <span>规则 {u.ruleVersion} · 每小时按事件重算</span>
       </div>
       <div className="kpi-grid">
-        <div className="kpi"><div className="label">有标签的人</div><div className="value">{u.usersWithTags.toLocaleString()}</div><div className="meta">没同意过的人没有标签，这是设计</div></div>
-        <div className="kpi"><div className="label">标签条数</div><div className="value">{u.totalTags.toLocaleString()}</div><div className="meta">未过期的</div></div>
+        <div className="kpi"><div className="label">有标签的人</div><div className="value">{num(u.usersWithTags)}</div><div className="meta">没同意过的人没有标签，这是设计</div></div>
+        <div className="kpi"><div className="label">标签条数</div><div className="value">{num(u.totalTags)}</div><div className="meta">未过期的</div></div>
         <div className="kpi"><div className="label">上次重算</div><div className="value">{u.lastComputedAt ? new Date(u.lastComputedAt).toLocaleString() : "—"}</div><div className="meta">{u.lastComputedAt ? "" : "还没有任何标签"}</div></div>
       </div>
       <div className="table-wrap"><table>
@@ -140,8 +143,8 @@ function UserTagLayer({ u }: { u: UserTags }) {
           <tr key={a.axis}>
             <td><b>{a.label}</b><div style={{ color: "#8a8190", fontSize: 11 }}>{a.axis}</div></td>
             <td>{polarityLabel[a.polarity] ?? a.polarity}</td>
-            <td className="numc">{a.users.toLocaleString()}</td>
-            <td className="numc">{a.tags.toLocaleString()}</td>
+            <td className="numc">{num(a.users)}</td>
+            <td className="numc">{num(a.tags)}</td>
             <td className="numc">{a.tags ? a.avgConfidence.toFixed(2) : "—"}</td>
             <td>{a.top.length ? a.top.map((v) => `${v.value}（${v.users}）`).join("、") : <span style={{ color: "#8a8190" }}>—</span>}</td>
           </tr>
