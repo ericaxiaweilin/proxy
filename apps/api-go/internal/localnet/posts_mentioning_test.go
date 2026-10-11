@@ -3,6 +3,7 @@ package localnet
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -121,8 +122,9 @@ func TestListPostsMentioningFindsMentionsBeyondTheFirstFeedPage(t *testing.T) {
 	s := New()
 	// 先发的帖子 = 最旧 = 一定落在第一页之外。
 	oldest := createPostAs(t, s, "user_002", "好久不见 @thanh 最近怎么样", "PUBLIC")
+	// 40 个不同作者：同一作者连发会被全局时间流折叠成一条（FEED-AUTHOR-DISPERSE-001），挤不出第一页。
 	for i := 0; i < 40; i++ {
-		createPostAs(t, s, "user_003", "无关的日常更新", "PUBLIC")
+		createPostAs(t, s, fmt.Sprintf("user_filler_%02d", i), "无关的日常更新", "PUBLIC")
 	}
 
 	// 先证明这个提及确实在第一页之外 —— 否则这条测试就是空转。

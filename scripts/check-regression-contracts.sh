@@ -1407,6 +1407,25 @@ if ! grep -qF 'const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;' "$ops_api" \
 fi
 echo "    OPS-SESSION-IDLE-2H-001: PASS (登录保持到空闲 2 小时)"
 
+# FEED-AUTHOR-DISPERSE-001 / FEED-VIEWER-001 / FEED-NOT-INTERESTED-001 / MUTED-AUTHORS-003（2026-10-11，帖文曝光审计）：
+#   - 全局时间流同一作者一页只露最新一条，其余折叠成 moreFromAuthor；顺序仍是时间倒序（FEED-TIME-SORT-001 不变）；
+#     读者自己的帖子不折叠；关注 tab 与搜索不打散；
+#   - /v1/feed 带有效会话就按人读（屏蔽 / 不感兴趣在 SQL 按 actor 过滤），这种页 private no-store；
+#     会话无效照旧匿名可缓存；App 登录了就带会话读，失败退回匿名；
+#   - 「不感兴趣」在 ListFeedPage SQL 里过滤；客户端 mutedAuthors 真的参与过滤。
+require_test "FEED-AUTHOR-DISPERSE-001" ./internal/localnet TestListFeedPosts_DispersesSameAuthorWithinAPage apps/api-go/internal/localnet/hot_update_regression_test.go || exit 1
+require_test "FEED-VIEWER-001" ./internal/api TestPublicFeedReadsAsTheViewerWhenSignedInAndNeverSharesThatPage apps/api-go/internal/api/server_test.go || exit 1
+if ! grep -qF "fp.action='NOT_INTERESTED'" apps/api-go/internal/platform/postgres/network.go; then
+  echo "  FAIL [FEED-NOT-INTERESTED-001]: ListFeedPage 不再过滤「不感兴趣」—— 刷新就回来。" >&2
+  exit 1
+fi
+if ! grep -qF 'if (mutedAuthors.has(post.authorId)) return false;' apps/mobile/src/surfaces/feed.tsx \
+  || ! grep -qF 'await this.readFeedAsViewer(`/v1/feed?' apps/mobile/src/localnet-client.ts; then
+  echo "  FAIL [MUTED-AUTHORS-003 / FEED-VIEWER-001]: App 不再按会话读 feed 或本地屏蔽名单不参与过滤 —— 屏蔽的人刷新就回来。" >&2
+  exit 1
+fi
+echo "    FEED-AUTHOR-DISPERSE-001 / FEED-VIEWER-001 / FEED-NOT-INTERESTED-001 / MUTED-AUTHORS-003: PASS"
+
 # DECISION-ENGINE-001（2026-10-11）：干预决策引擎。钉四条用户定下 / 规格要求的行为：
 # 主动提醒每人每天（河内时间）最多 1 次；数据读不出来就拦（fail-closed）；永远不给
 # ACTIVE_ORCHESTRATE；引导推送真的经过引擎、同一轮一个人最多一条、推过的不再进引擎。

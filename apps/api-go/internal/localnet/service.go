@@ -97,6 +97,8 @@ type Post struct {
 	// posts 表的任何列 —— 票数会变、而且"我投了哪个"因人而异，缓存进帖子
 	// 行里必然是错的。nil = 这条帖子没有投票。
 	Poll *PostPollView `json:"poll,omitempty"`
+	// MoreFromAuthor：这一页里同一作者还有几条被折叠（FEED-AUTHOR-DISPERSE-001）。读时算，不落库。
+	MoreFromAuthor int `json:"moreFromAuthor,omitempty"`
 	// R15.15 P1: SceneType 是 Post 与 Scene aggregate 之间的选择
 	// 门 (ROOFTOP | BRUNCH | SPA | CINEMA | PHOTO | NIGHTLIFE |
 	// OUTDOOR | COFFEE | UNKNOWN). 跟 Scene.SceneType 同样枚举
@@ -346,6 +348,39 @@ type FeedAuthorPageRepository interface {
 
 // 「关注」tab 一次最多带多少个作者。
 const maxFeedAuthorFilter = 200
+
+// feedDisperseScanFactor：作者打散时每页多取几倍候选（limit 50 ⇒ 151，PG 仓的上限）。
+const feedDisperseScanFactor = 3
+
+// disperseByAuthor（FEED-AUTHOR-DISPERSE-001）：在已经按时间倒序排好的 feed 里，同一作者
+// 只保留最新一条，之后的同作者帖子不展示、计进那一条的 MoreFromAuthor。保留够 limit 条
+// 就停，返回扫到的最后一条作为下一页游标的锚点（被折叠的也算扫过，下一页从它之后开始）。
+// 时间顺序不变，没有任何人被提前 —— 只是刷屏的人不再占满一页。
+func disperseByAuthor(feed []Post, limit int, repoFull bool, viewerID string) ([]Post, *Post, bool) {
+	kept := make([]Post, 0, limit)
+	at := map[string]int{}
+	scanned := 0
+	var anchor *Post
+	for i := range feed {
+		if len(kept) == limit {
+			break
+		}
+		scanned++
+		anchor = &feed[i]
+		// 读者自己的帖子不折叠：刚连发几条的人要看得到自己发的每一条（只是不折叠，顺序不变）。
+		if feed[i].AuthorID == viewerID {
+			kept = append(kept, feed[i])
+			continue
+		}
+		if k, ok := at[feed[i].AuthorID]; ok {
+			kept[k].MoreFromAuthor++
+			continue
+		}
+		at[feed[i].AuthorID] = len(kept)
+		kept = append(kept, feed[i])
+	}
+	return kept, anchor, scanned < len(feed) || repoFull
+}
 
 // MentionRepository is the optional narrow read used by the profile TAGGED tab.
 //
@@ -2669,12 +2704,22 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 			return command.Rejected(e, "INVALID_CURSOR", "VALIDATION", "AFTER_USER_ACTION", "localnet.invalid_cursor", nil)
 		}
 	}
+	// FEED-AUTHOR-DISPERSE-001：全局时间流里同一作者一页只露最新一条，其余折叠成
+	// moreFromAuthor。「关注」tab 与搜索不打散（那是用户自己点名要看的）。
+	// 打散会吃掉一部分候选，所以多取几倍，保证一页仍然尽量凑满。
+	disperse := len(request.AuthorIDs) == 0 && search == ""
+	fetch := request.Limit + 1
+	if disperse {
+		fetch = request.Limit*feedDisperseScanFactor + 1
+	}
 	var posts []Post
 	var err error
+	repoFull := false // 仓储按 fetch 截断了 = 后面还有
 	if authorRepo, ok := s.repository.(FeedAuthorPageRepository); ok && len(request.AuthorIDs) > 0 {
-		posts, err = authorRepo.ListFeedPageByAuthors(ctx, e.Actor.ID, request.AuthorIDs, cursor.CreatedAt, cursor.PostID, request.Limit+1)
+		posts, err = authorRepo.ListFeedPageByAuthors(ctx, e.Actor.ID, request.AuthorIDs, cursor.CreatedAt, cursor.PostID, fetch)
 	} else if pageRepository, ok := s.repository.(FeedPageRepository); ok && len(request.AuthorIDs) == 0 {
-		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, request.Limit+1)
+		posts, err = pageRepository.ListFeedPage(ctx, e.Actor.ID, cursor.CreatedAt, cursor.PostID, fetch)
+		repoFull = len(posts) >= fetch
 	} else {
 		posts, err = s.repository.Snapshot(ctx)
 	}
@@ -2743,21 +2788,29 @@ func (s *Service) listFeed(ctx context.Context, e command.Envelope) command.Resu
 		}
 		feed = append(feed, p)
 	}
-	// 按 Utility 排序（时间衰减为主，P0 简化）
+	// 时间倒序（FEED-TIME-SORT-001：谁都不置顶、不加分）。
 	sort.Slice(feed, func(i, j int) bool {
 		if feed[i].CreatedAt.Equal(feed[j].CreatedAt) {
 			return feed[i].ID < feed[j].ID
 		}
 		return feed[i].CreatedAt.After(feed[j].CreatedAt)
 	})
-	hasMore := len(feed) > request.Limit
-	if hasMore {
-		feed = feed[:request.Limit]
+	var hasMore bool
+	var anchor *Post // 游标落在「扫到的最后一条」，被折叠的帖子也算扫过 —— 不重复、不漏
+	if disperse {
+		feed, anchor, hasMore = disperseByAuthor(feed, request.Limit, repoFull, e.Actor.ID)
+	} else {
+		hasMore = len(feed) > request.Limit
+		if hasMore {
+			feed = feed[:request.Limit]
+		}
+		if len(feed) > 0 {
+			anchor = &feed[len(feed)-1]
+		}
 	}
 	nextCursor := ""
-	if hasMore && len(feed) > 0 {
-		last := feed[len(feed)-1]
-		raw, _ := json.Marshal(map[string]any{"createdAt": last.CreatedAt, "postId": last.ID})
+	if hasMore && anchor != nil {
+		raw, _ := json.Marshal(map[string]any{"createdAt": anchor.CreatedAt, "postId": anchor.ID})
 		nextCursor = signCursor(raw)
 	}
 	feed = attachAudienceTargets(feed, e.Actor.ID, feedAudience)

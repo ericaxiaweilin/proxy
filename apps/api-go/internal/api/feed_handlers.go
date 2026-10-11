@@ -71,9 +71,20 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 	if search != "" {
 		feedPayload["search"] = search
 	}
+	// FEED-VIEWER-001：带了有效会话就按这个人读（屏蔽的作者、「不感兴趣」的帖子都在 SQL 里
+	// 按 actor 过滤）。以前 App 一律匿名读，这两条过滤拿到的永远是 anonymous_reader ——
+	// 屏蔽 / 不感兴趣刷新就回来。会话无效或没带：照旧匿名读，绝不因为身份问题让公共 feed 失败。
+	actor := command.Actor{Type: "PUBLIC", ID: "anonymous_reader"}
+	principal := command.Principal{Type: "PUBLIC", ID: "anonymous_reader"}
+	personal := false
+	if raw, ok := bearerToken(r.Header.Get("Authorization")); ok && s.Authenticator != nil {
+		if auth, err := s.Authenticator.Authenticate(r.Context(), raw); err == nil && auth.Actor.ID != "" {
+			actor, principal, personal = auth.Actor, auth.Principal, true
+		}
+	}
 	result := s.LocalNet.HandleContext(readContext, command.Envelope{
 		CommandID: "public_feed_" + strconv.FormatInt(now.UnixNano(), 36), CommandType: "ListFeedPosts", CommandVersion: 1,
-		Actor: command.Actor{Type: "PUBLIC", ID: "anonymous_reader"}, Principal: command.Principal{Type: "PUBLIC", ID: "anonymous_reader"},
+		Actor: actor, Principal: principal,
 		Target: command.Target{Type: "Feed", ID: "public"}, Purpose: "public_feed_read", RequestedAt: now.Format(time.RFC3339Nano),
 		Payload: feedPayload,
 	})
@@ -89,11 +100,16 @@ func (s *Server) publicFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := []byte(result.OperationRef)
 	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(payload))
-	w.Header().Set("Cache-Control", "public, max-age=15, stale-while-revalidate=120, stale-if-error=86400")
+	if personal {
+		// 按人过滤过的页不能进共享缓存（CDN 会把我的屏蔽结果给别人）。
+		w.Header().Set("Cache-Control", "private, no-store")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=15, stale-while-revalidate=120, stale-if-error=86400")
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Vary", "Accept-Encoding")
+	w.Header().Set("Vary", "Accept-Encoding, Authorization")
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return

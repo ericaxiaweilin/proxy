@@ -429,3 +429,54 @@ describe("SEARCH-CORPUS-001 — feed search actually reaches the server", () => 
     expect(page.posts.map((p) => p.postId)).toEqual(["post_by_name"]);
   });
 });
+
+// FEED-VIEWER-001：登录了就带会话读 /v1/feed（服务端按人过滤屏蔽 / 不感兴趣）；
+// 没会话走匿名；带会话那一步失败或非 2xx 一律退回匿名 —— 公共 feed 不因身份问题读不出来。
+describe("LocalNetClient feed reads as the viewer", () => {
+  const okPage = { status: 200, json: async () => ({ posts: [], media: {}, hasMore: false }) };
+
+  it("sends the session when signed in", async () => {
+    const calls: string[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: await authenticatedStore("user_viewer"),
+      authClient: {
+        request: async (path, init) => { calls.push(`viewer ${init.method} ${path}`); return okPage; },
+        requestPublic: async (path) => { calls.push(`public ${path}`); return okPage; }
+      }
+    });
+    await client.listFeedPosts(undefined, 20);
+    expect(calls).toEqual(["viewer GET /v1/feed?limit=20"]);
+  });
+
+  it("stays anonymous without a session", async () => {
+    const calls: string[] = [];
+    const client = new LocalNetClient({
+      baseUrl: "https://api.proxy.test",
+      secureSessionStore: new SecureSessionStore(new InMemorySecureStorageDriver()),
+      authClient: {
+        request: async () => { calls.push("viewer"); return okPage; },
+        requestPublic: async (path) => { calls.push(`public ${path}`); return okPage; }
+      }
+    });
+    await client.listFeedPosts(undefined, 20);
+    expect(calls).toEqual(["public /v1/feed?limit=20"]);
+  });
+
+  it("falls back to the anonymous read when the signed-in read fails", async () => {
+    for (const failure of [async () => { throw new Error("refresh failed"); }, async () => ({ status: 503, json: async () => ({}) })]) {
+      const calls: string[] = [];
+      const client = new LocalNetClient({
+        baseUrl: "https://api.proxy.test",
+        secureSessionStore: await authenticatedStore("user_viewer"),
+        authClient: {
+          request: async () => { calls.push("viewer"); return failure(); },
+          requestPublic: async (path) => { calls.push(`public ${path}`); return okPage; }
+        }
+      });
+      const page = await client.listFeedPosts(undefined, 20);
+      expect(calls).toEqual(["viewer", "public /v1/feed?limit=20"]);
+      expect(page.posts).toEqual([]);
+    }
+  });
+});

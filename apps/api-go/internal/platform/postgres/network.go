@@ -194,7 +194,8 @@ func (r *LocalNetRepository) ListFeedPageByAuthors(ctx context.Context, actorID 
 }
 
 func (r *LocalNetRepository) listFeedPage(ctx context.Context, actorID string, authorIDs []string, before time.Time, beforeID string, limit int) ([]localnet.Post, error) {
-	if limit <= 0 || limit > 51 {
+	// 151 = 作者打散时一页 50 条 × 3 倍候选 + 1（FEED-AUTHOR-DISPERSE-001）。
+	if limit <= 0 || limit > 151 {
 		limit = 26
 	}
 	var beforeValue any
@@ -227,6 +228,12 @@ func (r *LocalNetRepository) listFeedPage(ctx context.Context, actorID string, a
 		  AND NOT EXISTS (
 			SELECT 1 FROM engagement.muted_authors
 			WHERE actor_id=$1 AND author_id=localnet.posts.author_id
+		  )
+		  -- FEED-NOT-INTERESTED-001: 「不感兴趣」以前只在客户端当场摘掉，服务端记了但没有
+		  -- 任何读方 —— 刷新就回来。对这个人永久不再出现（匿名读者 $1 不会命中任何行）。
+		  AND NOT EXISTS (
+			SELECT 1 FROM engagement.feed_preferences fp
+			WHERE fp.actor_id=$1 AND fp.post_id=localnet.posts.id AND fp.action='NOT_INTERESTED'
 		  )
 		  AND ($2::timestamptz IS NULL OR created_at < $2 OR (created_at = $2 AND id > $3))
 		  AND ($5::text[] IS NULL OR author_id = ANY($5))

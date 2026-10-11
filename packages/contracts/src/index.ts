@@ -417,7 +417,9 @@ export const FeedPostSchema = z.object({
   ephemeralUntil: z.string().optional(),
   // R15.24 P0：Post.Poll — 帖内投票。POLL-VOTE-001 起服务端会真的下发
   // （读模型，带票数）；没有投票的帖子不带这个字段。
-  poll: PostPollViewSchema.optional()
+  poll: PostPollViewSchema.optional(),
+  // FEED-AUTHOR-DISPERSE-001：全局时间流里这一页同一作者还有几条被折叠（读时算）。不传 = 0。
+  moreFromAuthor: z.number().int().nonnegative().optional()
 });
 export type FeedPost = z.infer<typeof FeedPostSchema>;
 

@@ -164,6 +164,25 @@ export class LocalNetClient {
     return `${baseUrl}${path}`;
   }
 
+  // FEED-VIEWER-001：登录了就带会话读 /v1/feed —— 服务端按这个人过滤屏蔽的作者和
+  // 「不感兴趣」的帖子（以前一律匿名读，这两样刷新就回来）。带会话那一步出任何问题
+  // （没会话、刷新失败、网络错、非 2xx）都退回匿名读：公共 feed 绝不因为身份问题读不出来
+  // —— 这正是 requestPublic 刻意不带 token 的原因（auth-client.ts）。
+  private async readFeedAsViewer(path: string): Promise<TransportResponse> {
+    const publicRead = (): Promise<TransportResponse> => this.input.authClient.requestPublic!(path, { method: "GET" });
+    try {
+      const session = await this.input.secureSessionStore.read();
+      if (!session) return await publicRead();
+      // 真实的 SessionAuthClient.request 接受 GET（auth-client.ts）；命令传输的类型只声明了 POST。
+      const viewer = this.input.authClient as unknown as { request(p: string, init: { method: "GET" }): Promise<TransportResponse> };
+      const response = await viewer.request(path, { method: "GET" });
+      if (response.status >= 200 && response.status < 300) return response;
+    } catch {
+      // 落到匿名读
+    }
+    return publicRead();
+  }
+
   public async listFeedPosts(cursor?: string, limit = 25, searchQuery?: string, fresh = false): Promise<FeedReadModel> {
     // 动态 ALL 固定读取全局公开时间流。地址只用于用户显式选择的
     // 二级筛选，不能进入服务端 ListFeedPosts payload。
@@ -185,7 +204,7 @@ export class LocalNetClient {
       // 否则刚发的帖子大概率撞上发帖前缓存的那一页、用户当场看不到。
       // _fresh 只换 cache key，服务端忽略该参数。平时不带，缓存照常省流量。
       if (fresh) query.push(`_fresh=${Date.now()}`);
-      const response = await this.input.authClient.requestPublic(`/v1/feed?${query.join("&")}`, { method: "GET" });
+      const response = await this.readFeedAsViewer(`/v1/feed?${query.join("&")}`);
       if (response.status < 200 || response.status >= 300) {
         throw new LocalNetProtocolError(`动态服务暂时不可用（${response.status}），请稍后重试`);
       }

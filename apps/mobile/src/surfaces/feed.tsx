@@ -1518,6 +1518,8 @@ export function FeedSurface({
                     <Text selectable style={styles.postMeta}>· {relativeTime(post.createdAt)}</Text>
                   </View>
                   {meta.label ? <Text selectable style={styles.postMeta}>{meta.label}</Text> : null}
+                  {/* FEED-AUTHOR-DISPERSE-001：同一作者这一页里被折叠的条数；点名字进主页看全部 */}
+                  {post.moreFromAuthor ? <Text selectable style={styles.postMeta}>还发了 {post.moreFromAuthor} 条 ›</Text> : null}
                   {meta.aiBadge ? <Text selectable style={styles.aiBadge}>AI生成</Text> : null}
                 </View>
                 </Pressable>
@@ -1884,6 +1886,10 @@ export function FeedSurface({
   // the count and the filter can never drift apart again.
   const getVisibleForTab = (forTab: FeedTab, scope: FeedScope = feedPrefs.scope): FeedPost[] =>
     posts.filter((post) => {
+      // MUTED-AUTHORS-003：屏蔽作者以前只在点的那一刻从已加载列表里摘掉，mutedAuthors 写了
+      // 却没有任何读方 —— 下一页、刷新回来的同作者帖子照样出现。服务端现在按会话过滤
+      // （FEED-VIEWER-001），这里兜住本次会话里新屏蔽的和匿名读回来的。
+      if (mutedAuthors.has(post.authorId)) return false;
       // 偏好-时间范围：7D/30D 按创建时间过滤，长期不过滤（FEED-SCOPE-001）。
       if (!isPostWithinScope(post.createdAt, scope)) return false;
       // 偏好-不想看：主题切词命中正文/上下文/作者即隐藏。
@@ -1980,7 +1986,7 @@ export function FeedSurface({
         : 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts, tab, feedPrefs, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId]);
+  }, [posts, tab, feedPrefs, following, feedFilter, selectedCustomFeed, customFeedTokens, viewerAccountId, mutedAuthors]);
   // FEED-SCOPE-001: 时间范围是相对 Date.now() 滚动的，帖文会一天天无声消失 ——
   // 实测默认 7D 隐藏了 62% 的帖文，而时间线上没有任何提示，看起来就是「数据丢了」。
   // 生效时把「正在筛选」和「藏了多少」摆出来，并给一个一键看全部的出口。

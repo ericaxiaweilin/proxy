@@ -1205,3 +1205,39 @@ func TestPrivacyRequestsHistory(t *testing.T) {
 		t.Fatalf("expected export + delete in history, got %v", kinds)
 	}
 }
+
+// FEED-VIEWER-001：/v1/feed 带有效会话 = 按这个人读（屏蔽 / 不感兴趣在 SQL 里按 actor 过滤），
+// 这样的页不许进共享缓存；会话无效 = 照旧匿名可缓存，绝不因为身份问题让公共 feed 失败。
+func TestPublicFeedReadsAsTheViewerWhenSignedInAndNeverSharesThatPage(t *testing.T) {
+	localNet := localnet.New()
+	if err := localNet.SeedDemoPosts(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(identity.New(nil), demand.New(nil, nil), citycompanion.New(), localNet, localcontext.New(), conversation.New(), engagement.New(), fulfillment.New(), supply.New(), media.New(), contribution.New())
+	server.Authenticator = strictAuthenticator{validTokens: map[string]identity.AuthenticatedSession{
+		"viewer_token": {Actor: command.Actor{Type: "USER", ID: "user_viewer"}, Principal: command.Principal{Type: "INDIVIDUAL", ID: "user_viewer"}},
+	}}
+	handler := server.Handler()
+	get := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/v1/feed?limit=2", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	signedIn := get("viewer_token")
+	if signedIn.Code != http.StatusOK || signedIn.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("signed-in feed must be private: status=%d cache=%q", signedIn.Code, signedIn.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(signedIn.Header().Get("Vary"), "Authorization") {
+		t.Fatalf("Vary must include Authorization: %q", signedIn.Header().Get("Vary"))
+	}
+	for _, token := range []string{"", "expired_or_forged"} {
+		anon := get(token)
+		if anon.Code != http.StatusOK || !strings.HasPrefix(anon.Header().Get("Cache-Control"), "public") {
+			t.Fatalf("token %q: anonymous feed must stay public and cacheable: status=%d cache=%q", token, anon.Code, anon.Header().Get("Cache-Control"))
+		}
+	}
+}
