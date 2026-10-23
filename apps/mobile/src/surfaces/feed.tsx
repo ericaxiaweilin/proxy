@@ -54,6 +54,7 @@ export { AdaptiveMediaCollection, SinglePostImage, MediaViewer };
 const POST_REPORT_REASONS = ["SPAM", "HARASSMENT", "UNSAFE", "OTHER"] as const;
 export type PostReportReason = (typeof POST_REPORT_REASONS)[number];
 import { ProxyIcon, type ProxyIconName } from "../components/proxy-icon";
+import { SiteSearchEntry } from "../components/site-search-entry";
 import { color, shadows } from "../theme";
 import { CoffeeScenesHub } from "./coffee-scenes";
 import { CustomFeedHub, type CustomFeed } from "./custom-feed";
@@ -263,7 +264,8 @@ export function FeedSurface({
   currentSection,
   onSectionChange,
   initialSearchQuery,
-  onSearchSeedConsumed
+  onSearchSeedConsumed,
+  onOpenSiteSearch
 }: {
   localNet: LocalNetClient;
   mediaClient: MediaClient;
@@ -303,6 +305,9 @@ export function FeedSurface({
   // 防止下次进动态复用旧词。
   initialSearchQuery?: string | undefined;
   onSearchSeedConsumed?: (() => void) | undefined;
+  // SITE-SEARCH-001：动态页的搜索只在动态里找；这个回调把同一个词带去全站搜索页
+  // （人 / 活动 / 场景 / 机会 / 我的订单 / 动态）。
+  onOpenSiteSearch?: ((input?: { query?: string }) => void) | undefined;
 }): React.JSX.Element {
   const [tab, setTab] = useState<FeedTab>(initialTab ?? "RECOMMENDED");
   // R15.23: 优先用 controlled prop (currentSection)，fallback 到内部 state (用于独立 mount / 测试)
@@ -2040,6 +2045,9 @@ export function FeedSurface({
         />
         {searchQuery ? <Pressable accessibilityLabel="清空动态搜索" onPress={() => setSearchQuery("")}><Text selectable style={styles.searchArrow}>×</Text></Pressable> : null}
       </View> : null}
+      {searchOpen && onOpenSiteSearch && searchQuery.trim() !== "" ? (
+        <SiteSearchEntry variant="row" query={searchQuery} onPress={() => onOpenSiteSearch({ query: searchQuery })} style={styles.siteSearchRow} />
+      ) : null}
 
       {/* R15.3 networktabs：2 列（推荐 / 关注） */}
       <View style={styles.tabs}>
@@ -2462,6 +2470,7 @@ const styles = StyleSheet.create({
   },
   feedFabText: { color: color.white, fontSize: 24 },
 
+  siteSearchRow: { marginBottom: 8, marginHorizontal: 12 },
   // 基线 .r153search：white border ln radius 17 padding 11。
   r153search: {
     alignItems: "center",

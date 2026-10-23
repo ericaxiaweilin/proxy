@@ -32,6 +32,7 @@ import { nativeSecureStorageDriver } from "../native-secure-storage";
 import type { ExperienceAction, ExperienceMenuSection, FeedMediaItem, FeedPost, Memory, RegisteredExperienceRoute } from "@proxy/contracts";
 import type { PersonaGalleryItem } from "../ai-persona-client";
 import { ProxyIcon, ProxySymbolIcon } from "../components/proxy-icon";
+import { SiteSearchEntry } from "../components/site-search-entry";
 import { CircularAvatarImage } from "../components/circular-avatar-image";
 import { MerchantMeR21Replacement } from "./merchant-me-r21-replacement";
 import { MyStoresHub } from "./my-stores-hub";
@@ -405,6 +406,7 @@ export function MeSurface({
   // 打开时直接落到某个子页。调用方给请求，本页消费后回调清掉。
   requestedSubPage,
   onRequestedSubPageConsumed,
+  onOpenSiteSearch,
 }: {
   context: ActiveContext;
   localNet: LocalNetClient;
@@ -441,8 +443,10 @@ export function MeSurface({
   socialSettingsClient?: SocialSettingsClient | undefined;
   moderation: ModerationClient;
   // 这里曾声明过一个全站搜索回调（(query: string) => void）：全仓库没有任何
-  // 调用方传它，本组件也没有任何地方读它 —— 纯粹的声明，不是半截接线。
-  // 已删。全站搜索真要做时，入口和消费者一起进来，不留空壳 prop。
+  // 调用方传它，本组件也没有任何地方读它 —— 纯粹的声明，不是半截接线，所以删过。
+  // SITE-SEARCH-001：全站搜索真做了，入口和消费者一起进来（不留空壳 prop）：
+  // 个人主页的搜索只在「我的帖子 / 回复」里找，搜索浮层里多一行把同一个词带去全站搜索页。
+  onOpenSiteSearch?: ((input?: { query?: string }) => void) | undefined;
   /** 外部请求打开的子页（跨模块入口）。undefined = 没有请求。 */
   requestedSubPage?: MeSubPage;
   /** 请求已被消费：调用方必须清掉它，否则重进 Me 会又弹回子页。 */
@@ -2402,6 +2406,14 @@ export function MeSurface({
                       ))
                     )}
                   </View>
+                ) : null}
+                {onOpenSiteSearch && searchQuery.trim() !== "" ? (
+                  <SiteSearchEntry
+                    variant="row"
+                    query={searchQuery}
+                    onPress={() => { const query = searchQuery; openModalAfterClose(closeProfileSearch, () => onOpenSiteSearch({ query })); }}
+                    style={styles.profileSiteSearchRow}
+                  />
                 ) : null}
               </View>
             </View>

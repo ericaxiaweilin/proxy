@@ -10,6 +10,7 @@ import { useScrollChrome } from "../shell/scroll-chrome";
 import { IdentitySwitcher } from "../components/identity-switcher";
 import { parseCommandResult } from "../login-client";
 import { ProxyIcon } from "../components/proxy-icon";
+import { SiteSearchEntry } from "../components/site-search-entry";
 import { color, shadows } from "../theme";
 import type { ConversationClient, ConversationInboxItem } from "../conversation-client";
 import type { PlatformAIAccount } from "../ai-account-client";
@@ -182,6 +183,7 @@ export function MessagesSurface({
   apiBaseUrl,
   relationship,
   viewer,
+  onOpenSiteSearch,
 }: {
   onOpenConversation: (author: string, conversationId?: string, aiAccount?: PlatformAIAccount, avatarSource?: number | { uri: string }, peerUserId?: string) => void;
   // ROOM-CREATE-001: 房间（GROUP + roomScene）走专门的房间聊天页（场景banner/
@@ -195,6 +197,8 @@ export function MessagesSurface({
   // 之后真的发好友请求要靠它。
   relationship?: RelationshipClient | undefined;
   viewer?: { name: string; handle: string } | undefined;
+  // SITE-SEARCH-001：消息页的搜索只筛已有会话；这个回调把同一个词带去全站搜索页。
+  onOpenSiteSearch?: ((input?: { query?: string }) => void) | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   bottomNavVisible?: boolean;
   // 这里曾声明过一个 "CHAT" | "FRIENDS" 的初始 tab：app-shell 一直在传，本组件
@@ -611,6 +615,9 @@ export function MessagesSurface({
             {search ? <Pressable accessibilityLabel="清除搜索" onPress={() => setSearch("")}><Text selectable style={styles.inlineClearText}>清除</Text></Pressable> : null}
           </View>
         ) : null}
+        {searchOpen && onOpenSiteSearch && search.trim() !== "" ? (
+          <SiteSearchEntry variant="row" query={search} onPress={() => onOpenSiteSearch({ query: search })} style={styles.siteSearchRow} />
+        ) : null}
 
         {/* 对话/群组两页签并列。MSG-GROUPS-TAB-001: 摘掉了"文件夹"（自建
             文件夹 + 媒体墙，没意义的组织负担）和"Convo"这个名字（消息支线，
@@ -813,6 +820,7 @@ const styles = StyleSheet.create({
   inlineSearch: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: "#fffefa", borderBottomWidth: 1, borderBottomColor: "#e8e3da" },
   inlineSearchInput: { flex: 1, height: 34, borderWidth: 1, borderColor: "#e8e3da", borderRadius: 12, backgroundColor: "#fff", paddingHorizontal: 11, fontSize: 13 },
   inlineClear: { paddingHorizontal: 8, paddingVertical: 6 },
+  siteSearchRow: { marginBottom: 10 },
   inlineClearText: { fontSize: 11, fontWeight: "700", color: "#f2ad29" },
   homeBody: { flex: 1, backgroundColor: "#f1eee8" },
   sectionLabel: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 7, fontSize: 11, fontWeight: "700", color: "#9b978f", letterSpacing: 0.3 },

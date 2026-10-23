@@ -478,6 +478,37 @@ export interface Messages {
   searchingServerSub: string;
   imageNeedsChat: string;
   notFoundQuerySub2: string;
+  // SITE-SEARCH-001：全站搜索页 / 入口。
+  siteSearchPlaceholder: string;
+  siteSearchScopeAll: string;
+  siteSearchScopePerson: string;
+  siteSearchScopeActivity: string;
+  siteSearchScopePlace: string;
+  siteSearchScopeOpportunity: string;
+  siteSearchScopeOrder: string;
+  siteSearchScopePost: string;
+  siteSearchSeeAll: string;
+  siteSearchIdle: string;
+  siteSearchIdleNumber: string;
+  siteSearchSearching: string;
+  siteSearchEmptySub: string;
+  siteSearchFailed: string;
+  siteSearchRetry: string;
+  siteSearchNeedsLogin: string;
+  siteSearchTooShort: string;
+  siteSearchListSep: string;
+  siteSearchBadgeOwned: string;
+  siteSearchBadgePending: string;
+  siteSearchBadgeConfirmed: string;
+  siteSearchBadgeOngoing: string;
+  siteSearchBadgeCompleted: string;
+  siteSearchBadgeCancelled: string;
+  siteSearchBadgeWaitlisted: string;
+  siteSearchBadgeAttended: string;
+  siteSearchBadgeNoShow: string;
+  siteSearchNumber: string;
+  siteSearchEntry: string;
+  siteSearchEntryFor: string;
 }
 
 const ZH: Messages = {
@@ -896,6 +927,37 @@ const ZH: Messages = {
   searchingServerSub: "本地推荐没有命中，正在问服务端。",
   imageNeedsChat: "图片需要在 Proxy AI 对话中发送",
   notFoundQuerySub2: "换个关键词继续搜索，或点左侧 AI 标识进入模型对话。",
+  // SITE-SEARCH-001
+  siteSearchPlaceholder: "搜索人、活动、地点、机会、订单、动态",
+  siteSearchScopeAll: "全部",
+  siteSearchScopePerson: "人",
+  siteSearchScopeActivity: "活动",
+  siteSearchScopePlace: "地点",
+  siteSearchScopeOpportunity: "机会",
+  siteSearchScopeOrder: "订单",
+  siteSearchScopePost: "动态",
+  siteSearchSeeAll: "查看全部 {n} 条",
+  siteSearchIdle: "输入关键词，一次搜遍人、活动、地点、机会、我的订单和动态。",
+  siteSearchIdleNumber: "也可以直接输入订单、活动或机会编号。",
+  siteSearchSearching: "正在搜索“{q}”…",
+  siteSearchEmptySub: "换个关键词，或换个范围试试。",
+  siteSearchFailed: "{kinds}暂时没搜到，请重试。",
+  siteSearchRetry: "重试",
+  siteSearchNeedsLogin: "登录后可搜索{kinds}。",
+  siteSearchTooShort: "搜人至少输入 2 个字。",
+  siteSearchListSep: "、",
+  siteSearchBadgeOwned: "我发布的",
+  siteSearchBadgePending: "待确认",
+  siteSearchBadgeConfirmed: "已确认",
+  siteSearchBadgeOngoing: "进行中",
+  siteSearchBadgeCompleted: "已完成",
+  siteSearchBadgeCancelled: "已取消",
+  siteSearchBadgeWaitlisted: "候补中",
+  siteSearchBadgeAttended: "已到场",
+  siteSearchBadgeNoShow: "未到场",
+  siteSearchNumber: "编号 {n}",
+  siteSearchEntry: "全站搜索",
+  siteSearchEntryFor: "全站搜索“{q}”",
 };
 
 const VI: Messages = {
@@ -1314,6 +1376,37 @@ const VI: Messages = {
   searchingServerSub: "Gợi ý cục bộ không khớp, đang hỏi máy chủ.",
   imageNeedsChat: "Ảnh cần được gửi trong cuộc trò chuyện Proxy AI",
   notFoundQuerySub2: "Đổi từ khóa để tìm tiếp, hoặc chạm biểu tượng AI bên trái để vào hội thoại với mô hình.",
+  // SITE-SEARCH-001
+  siteSearchPlaceholder: "Tìm người, hoạt động, địa điểm, cơ hội, đơn, bài đăng",
+  siteSearchScopeAll: "Tất cả",
+  siteSearchScopePerson: "Người",
+  siteSearchScopeActivity: "Hoạt động",
+  siteSearchScopePlace: "Địa điểm",
+  siteSearchScopeOpportunity: "Cơ hội",
+  siteSearchScopeOrder: "Đơn hàng",
+  siteSearchScopePost: "Bài đăng",
+  siteSearchSeeAll: "Xem tất cả {n}",
+  siteSearchIdle: "Nhập từ khóa để tìm cùng lúc người, hoạt động, địa điểm, cơ hội, đơn của tôi và bài đăng.",
+  siteSearchIdleNumber: "Cũng có thể nhập trực tiếp mã đơn, mã hoạt động hoặc mã cơ hội.",
+  siteSearchSearching: "Đang tìm “{q}”…",
+  siteSearchEmptySub: "Thử từ khóa khác hoặc đổi phạm vi tìm kiếm.",
+  siteSearchFailed: "Chưa tìm được {kinds}. Vui lòng thử lại.",
+  siteSearchRetry: "Thử lại",
+  siteSearchNeedsLogin: "Đăng nhập để tìm {kinds}.",
+  siteSearchTooShort: "Tìm người cần ít nhất 2 ký tự.",
+  siteSearchListSep: ", ",
+  siteSearchBadgeOwned: "Của tôi",
+  siteSearchBadgePending: "Chờ xác nhận",
+  siteSearchBadgeConfirmed: "Đã xác nhận",
+  siteSearchBadgeOngoing: "Đang diễn ra",
+  siteSearchBadgeCompleted: "Hoàn thành",
+  siteSearchBadgeCancelled: "Đã hủy",
+  siteSearchBadgeWaitlisted: "Danh sách chờ",
+  siteSearchBadgeAttended: "Đã tham gia",
+  siteSearchBadgeNoShow: "Vắng mặt",
+  siteSearchNumber: "Mã {n}",
+  siteSearchEntry: "Tìm kiếm toàn hệ thống",
+  siteSearchEntryFor: "Tìm “{q}” trên toàn hệ thống",
 };
 
 const EN: Messages = {
@@ -1732,6 +1825,37 @@ const EN: Messages = {
   searchingServerSub: "Local picks missed — asking the server.",
   imageNeedsChat: "Images need to be sent in the Proxy AI chat",
   notFoundQuerySub2: "Try another keyword, or tap the AI mark on the left to open a model chat.",
+  // SITE-SEARCH-001
+  siteSearchPlaceholder: "Search people, activities, places, opportunities, orders, posts",
+  siteSearchScopeAll: "All",
+  siteSearchScopePerson: "People",
+  siteSearchScopeActivity: "Activities",
+  siteSearchScopePlace: "Places",
+  siteSearchScopeOpportunity: "Opportunities",
+  siteSearchScopeOrder: "Orders",
+  siteSearchScopePost: "Posts",
+  siteSearchSeeAll: "See all {n}",
+  siteSearchIdle: "Search people, activities, places, opportunities, your orders and posts at once.",
+  siteSearchIdleNumber: "You can also type an order, activity or opportunity number.",
+  siteSearchSearching: "Searching “{q}”…",
+  siteSearchEmptySub: "Try another keyword or a different scope.",
+  siteSearchFailed: "Couldn’t search {kinds} right now. Try again.",
+  siteSearchRetry: "Retry",
+  siteSearchNeedsLogin: "Sign in to search {kinds}.",
+  siteSearchTooShort: "Enter at least 2 characters to search people.",
+  siteSearchListSep: ", ",
+  siteSearchBadgeOwned: "Mine",
+  siteSearchBadgePending: "Pending",
+  siteSearchBadgeConfirmed: "Confirmed",
+  siteSearchBadgeOngoing: "In progress",
+  siteSearchBadgeCompleted: "Completed",
+  siteSearchBadgeCancelled: "Cancelled",
+  siteSearchBadgeWaitlisted: "Waitlisted",
+  siteSearchBadgeAttended: "Attended",
+  siteSearchBadgeNoShow: "No-show",
+  siteSearchNumber: "No. {n}",
+  siteSearchEntry: "Search everywhere",
+  siteSearchEntryFor: "Search everywhere for “{q}”",
 };
 
 const LO: Messages = {
@@ -2150,6 +2274,37 @@ const LO: Messages = {
   searchingServerSub: "ການແນະນຳທ້ອງຖິ່ນບໍ່ພົບ ກຳລັງຖາມເຊີບເວີ",
   imageNeedsChat: "ຮູບຕ້ອງສົ່ງໃນການສົນທະນາ Proxy AI",
   notFoundQuerySub2: "ລອງຄຳອື່ນເພື່ອຄົ້ນຫາຕໍ່ ຫຼື ແຕະໄອຄອນ AI ທາງຊ້າຍເພື່ອເຂົ້າສົນທະນາກັບໂມເດລ",
+  // SITE-SEARCH-001
+  siteSearchPlaceholder: "ຄົ້ນຫາຄົນ, ກິດຈະກຳ, ສະຖານທີ່, ໂອກາດ, ຄຳສັ່ງ, ໂພສ",
+  siteSearchScopeAll: "ທັງໝົດ",
+  siteSearchScopePerson: "ຄົນ",
+  siteSearchScopeActivity: "ກິດຈະກຳ",
+  siteSearchScopePlace: "ສະຖານທີ່",
+  siteSearchScopeOpportunity: "ໂອກາດ",
+  siteSearchScopeOrder: "ຄຳສັ່ງ",
+  siteSearchScopePost: "ໂພສ",
+  siteSearchSeeAll: "ເບິ່ງທັງໝົດ {n}",
+  siteSearchIdle: "ຄົ້ນຫາຄົນ, ກິດຈະກຳ, ສະຖານທີ່, ໂອກາດ, ຄຳສັ່ງຂອງຂ້ອຍ ແລະ ໂພສ ພ້ອມກັນ.",
+  siteSearchIdleNumber: "ຍັງສາມາດພິມເລກຄຳສັ່ງ, ເລກກິດຈະກຳ ຫຼື ເລກໂອກາດໂດຍກົງໄດ້.",
+  siteSearchSearching: "ກຳລັງຄົ້ນຫາ “{q}”…",
+  siteSearchEmptySub: "ລອງຄຳຄົ້ນຫາອື່ນ ຫຼື ປ່ຽນຂອບເຂດການຄົ້ນຫາ.",
+  siteSearchFailed: "ຄົ້ນຫາ {kinds} ບໍ່ໄດ້ໃນຕອນນີ້. ກະລຸນາລອງໃໝ່.",
+  siteSearchRetry: "ລອງໃໝ່",
+  siteSearchNeedsLogin: "ເຂົ້າສູ່ລະບົບເພື່ອຄົ້ນຫາ {kinds}.",
+  siteSearchTooShort: "ການຄົ້ນຫາຄົນຕ້ອງມີຢ່າງໜ້ອຍ 2 ຕົວອັກສອນ.",
+  siteSearchListSep: ", ",
+  siteSearchBadgeOwned: "ຂອງຂ້ອຍ",
+  siteSearchBadgePending: "ລໍຖ້າຢືນຢັນ",
+  siteSearchBadgeConfirmed: "ຢືນຢັນແລ້ວ",
+  siteSearchBadgeOngoing: "ກຳລັງດຳເນີນ",
+  siteSearchBadgeCompleted: "ສຳເລັດ",
+  siteSearchBadgeCancelled: "ຍົກເລີກແລ້ວ",
+  siteSearchBadgeWaitlisted: "ລາຍຊື່ລໍຖ້າ",
+  siteSearchBadgeAttended: "ເຂົ້າຮ່ວມແລ້ວ",
+  siteSearchBadgeNoShow: "ບໍ່ມາ",
+  siteSearchNumber: "ເລກ {n}",
+  siteSearchEntry: "ຄົ້ນຫາທັງໝົດ",
+  siteSearchEntryFor: "ຄົ້ນຫາ “{q}” ທັງໝົດ",
 };
 
 const KO: Messages = {
@@ -2568,6 +2723,37 @@ const KO: Messages = {
   searchingServerSub: "로컬 추천에 없어서 서버에 물어보는 중이에요.",
   imageNeedsChat: "이미지는 Proxy AI 대화에서 보내야 해요",
   notFoundQuerySub2: "다른 키워드로 계속 검색하거나, 왼쪽 AI 표시를 눌러 모델 대화로 들어가세요.",
+  // SITE-SEARCH-001
+  siteSearchPlaceholder: "사람, 활동, 장소, 기회, 주문, 게시물 검색",
+  siteSearchScopeAll: "전체",
+  siteSearchScopePerson: "사람",
+  siteSearchScopeActivity: "활동",
+  siteSearchScopePlace: "장소",
+  siteSearchScopeOpportunity: "기회",
+  siteSearchScopeOrder: "주문",
+  siteSearchScopePost: "게시물",
+  siteSearchSeeAll: "{n}개 모두 보기",
+  siteSearchIdle: "사람, 활동, 장소, 기회, 내 주문, 게시물을 한 번에 검색해요.",
+  siteSearchIdleNumber: "주문·활동·기회 번호를 바로 입력해도 돼요.",
+  siteSearchSearching: "“{q}” 검색 중…",
+  siteSearchEmptySub: "다른 키워드를 쓰거나 검색 범위를 바꿔 보세요.",
+  siteSearchFailed: "지금은 {kinds} 검색을 못 했어요. 다시 시도해 주세요.",
+  siteSearchRetry: "다시 시도",
+  siteSearchNeedsLogin: "{kinds}은(는) 로그인 후 검색할 수 있어요.",
+  siteSearchTooShort: "사람 검색은 2글자 이상 입력하세요.",
+  siteSearchListSep: ", ",
+  siteSearchBadgeOwned: "내가 올림",
+  siteSearchBadgePending: "확인 대기",
+  siteSearchBadgeConfirmed: "확정",
+  siteSearchBadgeOngoing: "진행 중",
+  siteSearchBadgeCompleted: "완료",
+  siteSearchBadgeCancelled: "취소됨",
+  siteSearchBadgeWaitlisted: "대기 중",
+  siteSearchBadgeAttended: "참석",
+  siteSearchBadgeNoShow: "불참",
+  siteSearchNumber: "번호 {n}",
+  siteSearchEntry: "전체 검색",
+  siteSearchEntryFor: "“{q}” 전체 검색",
 };
 
 const JA: Messages = {
@@ -2986,6 +3172,37 @@ const JA: Messages = {
   searchingServerSub: "ローカル推薦にヒットせず、サーバーに問い合わせています。",
   imageNeedsChat: "画像は Proxy AI の会話で送信してください",
   notFoundQuerySub2: "別のキーワードで検索を続けるか、左の AI マークをタップしてモデル会話に入ってください。",
+  // SITE-SEARCH-001
+  siteSearchPlaceholder: "人・アクティビティ・場所・募集・注文・投稿を検索",
+  siteSearchScopeAll: "すべて",
+  siteSearchScopePerson: "ユーザー",
+  siteSearchScopeActivity: "アクティビティ",
+  siteSearchScopePlace: "場所",
+  siteSearchScopeOpportunity: "募集",
+  siteSearchScopeOrder: "注文",
+  siteSearchScopePost: "投稿",
+  siteSearchSeeAll: "すべての{n}件を見る",
+  siteSearchIdle: "人・アクティビティ・場所・募集・自分の注文・投稿をまとめて検索できます。",
+  siteSearchIdleNumber: "注文・アクティビティ・募集の番号を直接入力することもできます。",
+  siteSearchSearching: "「{q}」を検索中…",
+  siteSearchEmptySub: "別のキーワードを試すか、検索範囲を変えてください。",
+  siteSearchFailed: "いま{kinds}を検索できませんでした。もう一度お試しください。",
+  siteSearchRetry: "再試行",
+  siteSearchNeedsLogin: "{kinds}の検索にはログインが必要です。",
+  siteSearchTooShort: "ユーザー検索は2文字以上入力してください。",
+  siteSearchListSep: "、",
+  siteSearchBadgeOwned: "自分の募集",
+  siteSearchBadgePending: "確認待ち",
+  siteSearchBadgeConfirmed: "確定",
+  siteSearchBadgeOngoing: "進行中",
+  siteSearchBadgeCompleted: "完了",
+  siteSearchBadgeCancelled: "キャンセル済み",
+  siteSearchBadgeWaitlisted: "キャンセル待ち",
+  siteSearchBadgeAttended: "参加済み",
+  siteSearchBadgeNoShow: "不参加",
+  siteSearchNumber: "番号 {n}",
+  siteSearchEntry: "全体を検索",
+  siteSearchEntryFor: "「{q}」を全体検索",
 };
 
 export const I18N: Record<Language, Messages> = {

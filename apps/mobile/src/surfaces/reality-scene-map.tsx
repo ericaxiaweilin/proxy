@@ -25,6 +25,7 @@ import {
   type SceneActivity, type SceneActivityFeedState
 } from "../scene-activities";
 import { ProxyIcon } from "../components/proxy-icon";
+import { SiteSearchEntry } from "../components/site-search-entry";
 import { HorizontalSwipeRail } from "../components/horizontal-swipe-rail";
 import { useModuleBackHandler } from "../components/module-back";
 // SCENE-HUMANS-001: 一起玩的人只露圆头像 + 名字 + 可约状态 —— 和首页同款圆头像
@@ -152,7 +153,9 @@ function companionSignalLabel(signal: CompanionSuggestion["signal"]): string {
 
 type FeaturedHuman = { userId: string; name: string; city?: string | undefined; avatarUri?: string | undefined };
 
-export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile, onPickScene, pickSceneLabel, flatMap }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void; onPickScene?: ((sceneId: string) => void) | undefined; pickSceneLabel?: string | undefined; flatMap?: boolean | undefined }): React.JSX.Element {
+export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccount, featuredHuman, initialSceneId, initialOrigin, secureSessionStore, onBack, onOpenAIProfile, onOpenHumanProfile, onPickScene, pickSceneLabel, flatMap, onOpenSiteSearch }: { apiBaseUrl: string; authClient: SessionAuthClient; featuredAIAccount?: PlatformAIAccount | undefined; featuredHuman?: FeaturedHuman | undefined; initialSceneId?: string | undefined; initialOrigin?: { latitude: number; longitude: number } | undefined; secureSessionStore?: SecureSessionStore | undefined; onBack: () => void; onOpenAIProfile?: (account: PlatformAIAccount) => void; onOpenHumanProfile?: (person: FeaturedHuman) => void; onPickScene?: ((sceneId: string) => void) | undefined; pickSceneLabel?: string | undefined; flatMap?: boolean | undefined; onOpenSiteSearch?: ((input?: { query?: string }) => void) | undefined }): React.JSX.Element {
+  // SITE-SEARCH-001：onOpenSiteSearch —— 这一页的搜索只筛场景目录；这个回调把同一个词带去
+  // 全站搜索页。选点模式（onPickScene）不传，选点地图里没有「去搜别的」的出口。
   const [view, setView] = useState<SceneView>("MAP");
   const [filter, setFilter] = useState<SceneFilter>("ALL");
   // 供热：图钉换成真实聚合圈（sceneHeatScore），0 分不渲染。
@@ -1103,6 +1106,9 @@ export function RealitySceneMapSurface({ apiBaseUrl, authClient, featuredAIAccou
           <Pressable accessibilityLabel="关闭搜索" onPress={() => { setQuery(""); setSearchOpen(false); }}><Text selectable style={styles.searchClose}>×</Text></Pressable>
         </View>
       ) : null}
+      {searchOpen && onOpenSiteSearch && !onPickScene && query.trim() !== "" ? (
+        <SiteSearchEntry variant="row" query={query} onPress={() => onOpenSiteSearch({ query })} style={styles.siteSearchRow} />
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRail} contentContainerStyle={styles.filters}>
         {([['ALL','全部'], ['UNSEEN','没去过'], ['ACTIVE','开放中'], ['SAVED','收藏'], ['VISITED','足迹']] as const).map(([id, label]) => (
           <Pressable key={id} onPress={() => setFilter(id)} style={[styles.filter, filter === id && styles.filterActive]}><Text selectable style={[styles.filterText, filter === id && styles.filterTextActive]}>{label}</Text></Pressable>
@@ -1400,6 +1406,7 @@ const styles = StyleSheet.create({
   stats: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 10 }, stat: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 14, borderWidth: 1, flex: 1, paddingVertical: 9 }, statValue: { color: color.ink, fontSize: 19, fontWeight: "900" }, statLabel: { color: color.muted, fontSize: 11, marginTop: 2 },
   nearbyError: { color: color.error, fontSize: 12, marginBottom: 8, marginHorizontal: 16 },
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, flexDirection: "row", gap: 8, marginHorizontal: 16, paddingHorizontal: 13 }, searchInput: { color: color.ink, flex: 1, fontSize: 15, height: 46 }, searchClose: { color: color.muted, fontSize: 20, paddingHorizontal: 4 },
+  siteSearchRow: { marginHorizontal: 16, marginTop: 8 },
   filterRail: { flexGrow: 0, height: 54, maxHeight: 54, minHeight: 54 },
   filters: { alignItems: "center", gap: 8, height: 54, paddingHorizontal: 16 }, filter: { alignItems: "center", alignSelf: "center", backgroundColor: color.surface, borderRadius: 18, height: 34, justifyContent: "center", paddingHorizontal: 15 }, filterActive: { backgroundColor: color.ink }, filterText: { color: color.muted, fontSize: 13, fontWeight: "700", lineHeight: 18 }, filterTextActive: { color: color.white },
   // MAP-CONTAINER-PARITY-001: 跟 Market 内联地图同容器语言 —— 底 offWhite、

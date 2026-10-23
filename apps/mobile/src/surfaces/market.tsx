@@ -39,6 +39,8 @@ import {  OPPORTUNITY_LENS_LABEL,
 import { gridToLatLng } from "../components/location-options";
 import { clusterPins } from "../cluster-pins";
 import { ProxyIcon } from "../components/proxy-icon";
+import { SiteSearchEntry } from "../components/site-search-entry";
+import type { SiteSearchScope } from "../site-search";
 import { ProxyBackGlyph, ProxyLoading, ProxyTabs } from "../components/proxy-foundation";
 import { sessionAuthClient } from "../native-clients";
 import { fetchProviderApplication } from "../provider-application-client";
@@ -137,7 +139,10 @@ export function MarketSurface({
   onMapPickOpenChange,
   bottomNavVisible,
   userCenter,
-  onRequireKYC
+  onRequireKYC,
+  onOpenSiteSearch,
+  focusOpportunity,
+  onFocusOpportunityConsumed
 }: {
   activities: ActivityClient;
   marketplace: MarketplaceClient;
@@ -162,6 +167,12 @@ export function MarketSurface({
   // 地图初开就该以人为中心 —— 而不是先摆河内、非要点一下按钮。
   // 缺省 = 没接线：退回订单 centroid / 河内（原来唯一的样子），不编位置。
   userCenter?: { lat: number; lng: number } | undefined;
+  // SITE-SEARCH-001：全站搜索入口（订单页顶部的搜索条 + 活动页搜索词的「全站搜索」行）。
+  onOpenSiteSearch?: ((input?: { query?: string; scope?: SiteSearchScope }) => void) | undefined;
+  // SITE-SEARCH-001：从全站搜索点中一条机会 —— 壳把完整机会对象递过来，这里直接落到详情，
+  // 不依赖本页缓存里恰好有它（缓存可能比搜索结果旧）。落好就通知壳清掉，避免再次进入市场又弹一次。
+  focusOpportunity?: MarketOpportunity | undefined;
+  onFocusOpportunityConsumed?: (() => void) | undefined;
 }): React.JSX.Element {
   const normalized = normalizeTab(initialTab);
   const [tab, setTab] = useState<"OPPORTUNITY" | "ACTIVITY">(normalized);
@@ -210,6 +221,15 @@ export function MarketSurface({
   const [demandWizardOpen, setDemandWizardOpen] = useState(false);
   const [publishMenuOpen, setPublishMenuOpen] = useState(false);
   const [selectOpp, setSelectOpp] = useState<MarketOpportunity | null>(null);
+
+  // SITE-SEARCH-001：全站搜索点中一条机会 → 直接落到它的详情。
+  useEffect(() => {
+    if (!focusOpportunity) return;
+    setTab("OPPORTUNITY");
+    setPagerPage(0);
+    setOppDetail(focusOpportunity);
+    onFocusOpportunityConsumed?.();
+  }, [focusOpportunity, onFocusOpportunityConsumed]);
 
   // 规范 §4/§13：Android 硬件返回按真实嵌套深度逐层收起，最上层先消费；
   // 全部收起后返回 false 交给 shell 关模块。
@@ -548,6 +568,7 @@ export function MarketSurface({
           />
         ) : (
           <>
+            {onOpenSiteSearch ? <SiteSearchEntry variant="box" onPress={() => onOpenSiteSearch({ scope: "opportunity" })} style={styles.siteSearchEntry} /> : null}
             {opportunityError ? <Text selectable style={styles.marketError}>{opportunityError}</Text> : null}
             {opportunityPhase === "LOADING" ? <ProxyLoading tone="brand" style={{ marginVertical: 8 }} /> : null}
             <OpportunityTab items={opportunityItems} marketLabel={effectiveMarketLabel} onOpen={(o) => setOppDetail(o)} onDismiss={(id) => void dismissOpportunity(id)} />
@@ -560,6 +581,7 @@ export function MarketSurface({
               <TextInput onChangeText={setSearch} placeholder="搜活动、地点、主题…" placeholderTextColor="#A9A2B0" style={styles.searchInput} value={search} />
               <Text selectable style={styles.searchIcon}>⌕</Text>
             </View>
+            {onOpenSiteSearch && search.trim() !== "" ? <SiteSearchEntry variant="row" query={search} onPress={() => onOpenSiteSearch({ query: search, scope: "activity" })} style={styles.siteSearchRow} /> : null}
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.lensRow} style={styles.lensScroll}>
             {ACTIVITY_FILTERS.map((entry) => (
@@ -2209,6 +2231,8 @@ const styles = StyleSheet.create({
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 13, borderWidth: 1, flexDirection: "row", overflow: "hidden" },
   searchInput: { flex: 1, fontSize: 14, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10 },
   searchIcon: { color: color.ink, fontSize: 15, paddingHorizontal: 10 },
+  siteSearchEntry: { marginBottom: 10, marginHorizontal: 12, marginTop: 6 },
+  siteSearchRow: { marginTop: 8 },
   lensRow: { flexDirection: "row", gap: 5, paddingRight: 12 },
   lensSmRow: { flexDirection: "row", gap: 5, paddingRight: 12 },
   lensScroll: { marginVertical: 7 },

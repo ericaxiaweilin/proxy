@@ -6,6 +6,7 @@ import * as ImagePicker from "expo-image-picker";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { ProxyIcon } from "./proxy-icon";
 import { ProxyButton } from "./proxy-foundation";
+import { SiteSearchEntry } from "./site-search-entry";
 import { color, shadows } from "../theme";
 import { type HomeAttachment } from "./home-chat-box";
 import { type HomeSearchSuggestion } from "../home-search-intent";
@@ -40,6 +41,9 @@ export interface HomeSearchDockProps {
   onSelectClarify?: ((choice: string) => void) | undefined;
   // 左侧 AI 标识是显式的模型会话入口；普通输入保持搜索语义。
   onOpenConversation: () => void;
+  // SITE-SEARCH-001：有输入词时多出一行「全站搜索“词”」，把同一个词带去全站搜索页
+  // （人 / 活动 / 场景 / 机会 / 我的订单 / 动态）。没接线就不出现这一行。
+  onOpenSiteSearch?: ((query: string) => void) | undefined;
 }
 
 export function HomeSearchDock({
@@ -59,7 +63,8 @@ export function HomeSearchDock({
   clarifyQuestion,
   clarifyChoices,
   onSelectClarify,
-  onOpenConversation
+  onOpenConversation,
+  onOpenSiteSearch
 }: HomeSearchDockProps): React.JSX.Element {
   const inputRef = useRef<TextInput>(null);
   const [voiceState, setVoiceState] = useState<"IDLE" | "LISTENING" | "DONE">("IDLE");
@@ -299,6 +304,12 @@ export function HomeSearchDock({
         </View>
       ) : null}
 
+      {/* SITE-SEARCH-001：把输入框里的词带去全站搜索（人 / 活动 / 场景 / 机会 / 我的订单 / 动态）。
+          有词才出现；本地联想候选命不中时它是唯一的出路，命中时它是「不止这几个」的补充。 */}
+      {onOpenSiteSearch && value.trim() !== "" && !photo ? (
+        <SiteSearchEntry variant="row" query={value} onPress={() => onOpenSiteSearch(value.trim())} style={styles.siteSearchRow} />
+      ) : null}
+
       {/* 意图执行 chips */}
       {/* BUTTON-UNIFY-002：两个 action chip 改用公共 ProxyButton（原来手写 ink 底 +
           圆角 16 + 白字 12）。迁移后圆角/高度/字号/字重/禁用态/按压反馈全走
@@ -529,6 +540,7 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     marginTop: 4
   },
+  siteSearchRow: { marginTop: 8 },
   chipWrap: {
     flexDirection: "row",
     flexWrap: "wrap",

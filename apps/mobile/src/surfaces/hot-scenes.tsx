@@ -34,6 +34,7 @@ import { useI18n } from "../i18n";
 import { getCurrentFix } from "../device-location";
 import { expoLocationApi } from "../device-location-native";
 import { ProxyIcon } from "../components/proxy-icon";
+import { SiteSearchEntry } from "../components/site-search-entry";
 import { PhotoScrim, ProxyBackGlyph } from "../components/proxy-foundation";
 import {
   availableHotSorts, formatShopDistance, hotTopRank, sceneDistanceMeters, sceneTypeBucket, shopCardDistance, sortHotScenes,
@@ -85,10 +86,13 @@ export function HotScenesSurface({
   apiBaseUrl,
   onBack,
   onOpenSceneMap,
+  onOpenSiteSearch,
 }: {
   apiBaseUrl: string | undefined;
   onBack: () => void;
   onOpenSceneMap: (sceneId?: string) => void;
+  // SITE-SEARCH-001：这一页的搜索只筛场景目录；这个回调把同一个词带去全站搜索页。
+  onOpenSiteSearch?: ((input?: { query?: string }) => void) | undefined;
 }) {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -217,6 +221,9 @@ export function HotScenesSurface({
           <TextInput autoFocus onChangeText={setQuery} placeholder={t("hotSearchPlaceholder")} placeholderTextColor={color.muted} style={styles.searchInput} value={query} />
           <Pressable accessibilityLabel={t("hotSearchClose")} onPress={() => { setQuery(""); setSearchOpen(false); }}><Text selectable style={styles.searchClose}>×</Text></Pressable>
         </View>
+      ) : null}
+      {searchOpen && onOpenSiteSearch && query.trim() !== "" ? (
+        <SiteSearchEntry variant="row" query={query} onPress={() => onOpenSiteSearch({ query })} style={styles.siteSearchRow} />
       ) : null}
 
       {/* 控制行：大致城市（有反查结果才出现，纯展示不可点——切城市是一整套
@@ -363,6 +370,7 @@ const styles = StyleSheet.create({
   searchBox: { alignItems: "center", backgroundColor: color.white, borderColor: color.line, borderRadius: 15, borderWidth: 1, flexDirection: "row", gap: 8, marginBottom: 10, marginHorizontal: 16, paddingHorizontal: 13 },
   searchInput: { color: color.ink, flex: 1, fontSize: 15, height: 44 },
   searchClose: { color: color.muted, fontSize: 20, paddingHorizontal: 4 },
+  siteSearchRow: { marginBottom: 10, marginHorizontal: 16 },
   cityChip: { alignItems: "center", backgroundColor: color.surface, borderRadius: 20, flexDirection: "row", gap: 5, maxWidth: 120, paddingHorizontal: 10, paddingVertical: 7 },
   cityText: { color: color.ink, fontSize: 12, fontWeight: "900" },
   radiusChip: { alignItems: "center", backgroundColor: color.surface, borderRadius: 20, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 7 },

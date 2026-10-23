@@ -1653,6 +1653,13 @@ echo "    PUBLIC-NO-LOOKUP-001/PUBLIC-NO-LOOKUP-AUDIT-001/PUBLIC-NO-LOOKUP-GATE-
 pnpm --dir apps/mobile exec vitest run src/order-flow-copy.test.ts src/order-actions.test.ts src/market-fake-judgment.test.ts >/dev/null || exit $?
 echo "    ORDER-FLOW-COPY-001: PASS"
 
+# 第七轮（2026-09-29，用户「把全站搜索做一下 全部搜索按钮的搜索功能 比如home页的搜索」）。
+# SITE-SEARCH-001: 每个搜索按钮（首页 / 动态 / 消息 / 我的 / 热榜 / 场景地图 / 市场）都通往同一个
+# 全站搜索页（人 / 活动 / 场景 / 机会 / 我的订单 / 动态）；首页本地联想没命中不再落「没有找到」的死胡同；
+# 各来源独立成败，失败 / 访客 / 词太短如实报告而不是显示「没有」；订单只搜自己的，已取消的活动不出现。
+pnpm --dir apps/mobile exec vitest run src/site-search.test.ts src/site-search-service.test.ts src/site-search-wiring.test.ts >/dev/null || exit $?
+echo "    SITE-SEARCH-001: PASS"
+
 # LINES-EDITOR-001: the server has had UpsertStoreLines
 # since R18.x b77187a, but the storefront surface was
 # read-only: business owners saw their old lines but had

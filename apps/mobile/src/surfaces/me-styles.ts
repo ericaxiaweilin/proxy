@@ -1019,6 +1019,7 @@ export const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingHorizontal: 18
   },
+  profileSiteSearchRow: { marginTop: 8 },
   profileSearchEmpty: { color: color.muted, fontSize: 13, paddingVertical: 10, textAlign: "center" },
   profileSearchHit: { borderBottomColor: color.line, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
   profileSearchHitText: { color: color.ink, fontSize: 14, lineHeight: 20 },

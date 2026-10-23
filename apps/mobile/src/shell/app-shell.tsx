@@ -3,7 +3,7 @@
 // EXPERIENCE 仅作历史路由别名，新 UI 不展示体验货架。
 // Active Context（REQUESTER | BUSINESS）只是 Product State，切换不新增路由；
 // 视觉基线：Proxy_Market_Xiaomei_Value_Negotiation_R4.html 布局 + R3 紫粉 token 保留。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, AppState, BackHandler, Image, PanResponder, Platform, Pressable, StatusBar, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { AccessibilityInfo } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -78,12 +78,15 @@ import { AIAccountProfileSurface } from "../surfaces/ai-account-profile";
 import { OtherProfileSurface, type OtherProfileTarget } from "../surfaces/other-profile";
 import { RealitySceneMapSurface } from "../surfaces/reality-scene-map";
 import { HotScenesSurface } from "../surfaces/hot-scenes";
+import { SiteSearchSurface } from "../surfaces/site-search";
+import { buildSiteSearchSources, loadSearchableScenes } from "../site-search-service";
+import { avatarThumbPath, type SiteSearchHit, type SiteSearchScope } from "../site-search";
 // ACTIVITY-REF-001：动态里的活动引用卡片点开落到这里（带 initialActivityId）。
 import { ActivityDetailSurface } from "../surfaces/activity-detail";
 import { VoucherSurface } from "../surfaces/voucher";
 import { color, shadows } from "../theme";
 import { type ActiveContext } from "../uiplan/types";
-import { type MarketTab } from "../market-fixtures";
+import { type MarketOpportunity, type MarketTab } from "../market-fixtures";
 import type { SceneToolId } from "@proxy/contracts";
 import { SCENE_TOOLS } from "@proxy/contracts";
 import { selectShellChromeVisible } from "./app-shell-selectors";
@@ -325,6 +328,7 @@ export function AppShell({
   // currentPage 会是首屏旧值），MSG_* 页禁止向左跳页，向右保留。
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
+  const siteSearchOpenRef = useRef(false);
   function isMessagesPage(page: PageId): boolean {
     return page === "MSG_CHAT" || page === "MSG_FRIENDS";
   }
@@ -333,6 +337,8 @@ export function AppShell({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) => {
         if (rootSwipeBlockedRef.current) return false;
+        // SITE-SEARCH-001：搜索页盖在 tab 之上，横滑不该在它下面翻页（闭包只建一次，读 ref）。
+        if (siteSearchOpenRef.current) return false;
         // 消息页左滑归行内删除，不参与整页抢夺。
         if (isMessagesPage(currentPageRef.current) && gs.dx < 0) return false;
         const absDx = Math.abs(gs.dx);
@@ -347,7 +353,7 @@ export function AppShell({
         const absDy = Math.abs(dy);
         const swipeThreshold = 56;
         const isHorizontalSwipe = absDx > swipeThreshold && absDx > absDy * 1.25;
-        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !hotScenesOpen && !activityDetailId && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
+        const canSwipeRoot = !rootSwipeBlockedRef.current && !realitySceneOpen && !hotScenesOpen && !siteSearchOpenRef.current && !activityDetailId && !homeAssistant && !sceneComposerTool && !workspaceTarget && !feedChatAuthor && !feedPrefsOpen && !messageChatAuthor && !voucherOpen;
         if (isHorizontalSwipe && canSwipeRoot) {
           const page = currentPageRef.current;
           const idx = PAGE_SEQUENCE.indexOf(page);
@@ -403,6 +409,21 @@ export function AppShell({
   const [realitySceneHuman, setRealitySceneHuman] = useState<OtherProfileTarget>();
   const [aiProfileReturnToScene, setAIProfileReturnToScene] = useState(false);
   const [humanProfileReturnToScene, setHumanProfileReturnToScene] = useState(false);
+
+  // SITE-SEARCH-001：全站搜索页。它是「盖住整个 body 的目的地」（同 activityDetailId /
+  // hotScenesOpen），在下面的渲染链里排在各类详情之后：从搜索点进人 / 活动 / 场景详情时，
+  // 详情盖在它上面，按返回回到**同一份搜索结果**。词和范围放 ref 不放 state —— 每敲一个字
+  // 就重渲染整个 AppShell 不值得，页面重新挂载时从 ref 恢复即可。
+  const [siteSearchOpen, setSiteSearchOpen] = useState(false);
+  siteSearchOpenRef.current = siteSearchOpen;
+  const siteSearchDraft = useRef<{ query: string; scope: SiteSearchScope }>({ query: "", scope: "all" });
+  // 从热榜 / 场景地图里点的「全站搜索」：那两页在渲染链里排在搜索页前面，得先收掉它们，
+  // 搜索页才露得出来；返回时再把来源页打开，用户回到原来的地方。
+  const siteSearchReturn = useRef<"HOT_SCENES" | "SCENE_MAP" | undefined>(undefined);
+  // 最近一次搜索拉到的完整机会列表：点中一条机会时把完整对象交给市场页直接落详情。
+  const searchedOpportunities = useRef<readonly MarketOpportunity[]>([]);
+  const [focusOpportunity, setFocusOpportunity] = useState<MarketOpportunity>();
+  const clearFocusOpportunity = useCallback((): void => setFocusOpportunity(undefined), []);
 
   // R15.13 P6：mount 时拉一次"上次激活的自定义坐标" — 跨会话保留
   // 用户放置的 pin / 半径。如果从未放过，sheet 也仍能从 history
@@ -489,6 +510,7 @@ export function AppShell({
       if (activityDetailId) { setActivityDetailId(undefined); return true; }
       if (realitySceneOpen) { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneOpen(false); return true; }
       if (hotScenesOpen) { setHotScenesOpen(false); return true; }
+      if (siteSearchOpen && !siteSearchCovered) { closeSiteSearch(); return true; }
       if (voucherOpen) { setVoucherOpen(false); return true; }
       if (tab === "ME" && messageChatAuthor) { setMessageChat(undefined); return true; }
       if (tab === "MESSAGES" && messageChatAuthor) { setMessageChat(undefined); return true; }
@@ -564,6 +586,96 @@ export function AppShell({
     if (next !== "ME") setVoucherOpen(false);
   }
 
+  // SITE-SEARCH-001：全站搜索来源。同一份来源在账号 / 客户端不变时复用（内部有 TTL 缓存，
+  // 边输边搜不会每个字都重拉活动 / 机会 / 场景 / 订单整表）；换账号就整份重建。
+  const siteSearchSources = useMemo(() => {
+    const sources = buildSiteSearchSources({
+      isGuest: Boolean(isGuest),
+      profile,
+      localNet,
+      activities,
+      marketplace: {
+        list: async () => {
+          const items = await marketplace.list();
+          searchedOpportunities.current = items;
+          return items;
+        },
+      },
+      fulfillment,
+      listScenes: () => loadSearchableScenes(fetch, localApiBaseUrl),
+    });
+    return sources;
+  }, [isGuest, profile, localNet, activities, marketplace, fulfillment, localApiBaseUrl, viewerAccountId]);
+
+  const openSiteSearch = useCallback((input?: { query?: string; scope?: SiteSearchScope }): void => {
+    siteSearchDraft.current = { query: input?.query ?? "", scope: input?.scope ?? "all" };
+    siteSearchReturn.current = hotScenesOpen ? "HOT_SCENES" : realitySceneOpen ? "SCENE_MAP" : undefined;
+    setHotScenesOpen(false);
+    setRealitySceneOpen(false);
+    setSiteSearchOpen(true);
+  }, [hotScenesOpen, realitySceneOpen]);
+
+  function closeSiteSearch(): void {
+    setSiteSearchOpen(false);
+    const back = siteSearchReturn.current;
+    siteSearchReturn.current = undefined;
+    if (back === "HOT_SCENES") setHotScenesOpen(true);
+    if (back === "SCENE_MAP") setRealitySceneOpen(true);
+  }
+
+  // 点中一条结果去哪里。人 / 活动 / 场景是「详情盖在搜索页上」（搜索页留着，返回就回来）；
+  // 机会 / 订单 / 动态要换 tab，搜索页收掉。
+  function selectSiteSearchHit(hit: SiteSearchHit): void {
+    switch (hit.kind) {
+      case "person": {
+        const thumb = avatarThumbPath(hit.avatarPath);
+        setHumanProfileReturnToScene(false);
+        setOpenHumanProfile({
+          userId: hit.id,
+          name: hit.title,
+          ...(hit.city ? { city: hit.city } : {}),
+          ...(thumb ? { avatarUri: `${localApiBaseUrl.replace(/\/$/, "")}${thumb}` } : {}),
+          posts: [],
+          mediaByPost: {},
+        });
+        return;
+      }
+      case "activity":
+        setActivityDetailId(hit.id);
+        return;
+      case "place":
+        setRealitySceneAI(undefined);
+        setRealitySceneHuman(undefined);
+        setRealitySceneSelection(hit.id);
+        setRealitySceneOpen(true);
+        return;
+      case "opportunity": {
+        const full = searchedOpportunities.current.find((item) => item.id === hit.id);
+        siteSearchReturn.current = undefined;
+        setSiteSearchOpen(false);
+        if (full) setFocusOpportunity(full);
+        openMarket({ tab: "OPPORTUNITY" });
+        return;
+      }
+      case "order":
+        if (hit.orderKind === "ACTIVITY_JOIN" && hit.activityId) {
+          setActivityDetailId(hit.activityId);
+          return;
+        }
+        siteSearchReturn.current = undefined;
+        setSiteSearchOpen(false);
+        setMeOpenSubPage(meSubPage("myorders") ?? undefined);
+        setTab("ME");
+        return;
+      case "post":
+        siteSearchReturn.current = undefined;
+        setSiteSearchOpen(false);
+        setFeedSearchSeed(siteSearchDraft.current.query.trim() || undefined);
+        selectTab("FEED");
+        return;
+    }
+  }
+
   function openMarket(entry: { tab: MarketTab; viewMode?: MarketViewMode }): void {
     setMarketEntry({ tab: entry.tab, viewMode: entry.viewMode ?? "LIST" });
     setWorkspaceTarget(undefined);
@@ -608,7 +720,9 @@ export function AppShell({
   // body 的目的地」，不是某个 tab 的子页面 —— 所以也要一起收掉导航 chrome。
   // 否则从动态点进他人主页后底栏还在，用户切个 tab 就会被留在一个没人负责关闭的
   // 主页上（它的写入方不在那个 tab，返回键也回不到正确的来源）。
-  const isNavVisible = !realitySceneOpen && !hotScenesOpen && !activityMapPickOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
+  // 全站搜索页被详情盖住时（见渲染处）让位。
+  const siteSearchCovered = Boolean(activityDetailId) || realitySceneOpen || hotScenesOpen || Boolean(openAIProfile) || Boolean(openHumanProfile);
+  const isNavVisible = !realitySceneOpen && !hotScenesOpen && !siteSearchOpen && !activityMapPickOpen && !activityDetailId && !openAIProfile && !openHumanProfile && !meSubPageOpen && selectShellChromeVisible({
     tab,
     feedChromeVisible,
     homeChromeVisible,
@@ -731,11 +845,12 @@ export function AppShell({
             onBack={() => setActivityDetailId(undefined)}
           />
         ) : realitySceneOpen ? (
-          <RealitySceneMapSurface apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
+          <RealitySceneMapSurface onOpenSiteSearch={openSiteSearch} apiBaseUrl={localApiBaseUrl} authClient={sessionAuthClient} featuredAIAccount={realitySceneAI} featuredHuman={realitySceneHuman} initialSceneId={realitySceneSelection} {...(sceneMapOrigin ? { initialOrigin: sceneMapOrigin } : {})} secureSessionStore={secureSessionStore} onBack={() => { setRealitySceneAI(undefined); setRealitySceneHuman(undefined); setRealitySceneSelection(undefined); setRealitySceneOpen(false); }} onOpenAIProfile={(account) => { setAIProfileReturnToScene(true); setRealitySceneOpen(false); setOpenAIProfile(account); }} onOpenHumanProfile={(person) => { setHumanProfileReturnToScene(true); setRealitySceneOpen(false); setOpenHumanProfile({ ...person, posts: [], mediaByPost: {} }); }} />
         ) : hotScenesOpen ? (
           // HOT-SCENES-PAGE-001：跟 realitySceneOpen 同一个「点场景卡 → 进详情」
           // 落点——带 sceneId 直达该场景，不带 = 总览（SCENE-MAP-DEFAULT-001 同一条道理）。
           <HotScenesSurface
+            onOpenSiteSearch={openSiteSearch}
             apiBaseUrl={localApiBaseUrl}
             onBack={() => setHotScenesOpen(false)}
             onOpenSceneMap={(sceneId) => {
@@ -777,6 +892,9 @@ export function AppShell({
             onBack={() => { setOpenHumanProfile(undefined); if (humanProfileReturnToScene) { setHumanProfileReturnToScene(false); setRealitySceneOpen(true); } }}
             onMessage={(name, avatarUri) => {
               setOpenHumanProfile(undefined);
+              // 从全站搜索进来的主页：去聊天就不再回搜索页了。
+              siteSearchReturn.current = undefined;
+              setSiteSearchOpen(false);
               setMessageChat({ author: name, ...(avatarUri ? { avatarSource: { uri: avatarUri } } : {}) });
               setPageOverride("MSG_CHAT");
               setTab("MESSAGES");
@@ -825,6 +943,7 @@ export function AppShell({
             />
           ) : (
             <RequesterHome
+              onOpenSiteSearch={openSiteSearch}
               onChooserVisibilityChange={setRootSwipeBlocked}
               onEnterWorkspace={enterWorkspace}
               onOpenFeed={() => selectTab("FEED")}
@@ -941,6 +1060,9 @@ export function AppShell({
           )
         ) : tab === "MARKET" ? (
           <MarketSurface
+              onOpenSiteSearch={openSiteSearch}
+              {...(focusOpportunity ? { focusOpportunity } : {})}
+              onFocusOpportunityConsumed={clearFocusOpportunity}
               activities={activities}
               marketplace={marketplace}
               fulfillment={fulfillment}
@@ -974,6 +1096,7 @@ export function AppShell({
           ) : (
             <FeedSurface
               key={feedSearchSeed ?? "feed"}
+              onOpenSiteSearch={openSiteSearch}
               engagement={engagement}
               profileClient={profile}
               localNet={localNet}
@@ -1022,7 +1145,7 @@ export function AppShell({
               onOpenPeerProfile={openPeerProfile}
             />
           ) : (
-            <MessagesSurface conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={(conversationId) => { setRoomLayerInMore(false); setRoomChatId(conversationId); }} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
+            <MessagesSurface onOpenSiteSearch={openSiteSearch} conversationClient={conversation} profileClient={profile} apiBaseUrl={localApiBaseUrl} relationship={relationship} onOpenConversation={(author, conversationId, aiAccount, avatarSource, peerUserId) => setMessageChat(conversationId ? { author, conversationId, ...(aiAccount ? { aiAccount } : {}), ...(avatarSource ? { avatarSource } : {}), ...(peerUserId ? { peerUserId } : {}) } : { author, ...(peerUserId ? { peerUserId } : {}) })} onOpenRoom={(conversationId) => { setRoomLayerInMore(false); setRoomChatId(conversationId); }} onChromeVisibilityChange={setMessageChromeVisible} bottomNavVisible={isNavVisible} />
           )
         ) : isGuest ? (
           <View style={styles.guestMe}>
@@ -1035,6 +1158,7 @@ export function AppShell({
           ) : (
             <MeSurface
               key={viewerAccountId ?? "pending-account"}
+              onOpenSiteSearch={openSiteSearch}
               context={context}
               localNet={localNet}
               // PROFILE-ENGAGEMENT-WIRE-001（P0，2026-09-24，用户：「我的个人主页里 没有任何互动的信息 空白的」）：
@@ -1076,6 +1200,26 @@ export function AppShell({
               {...(scene ? { scene } : {})}
             />
           )}
+        {/*
+          SITE-SEARCH-001 — 全站搜索页是盖在当前 tab **之上**的一层，不是渲染链里的一支：
+          底下的首页 / 动态 / 消息 / 我的保持挂载（首页输入框里的词、四宫格选择、我的子页
+          都不丢）。点中人 / 活动 / 场景后，上面渲染链里的详情（activityDetailId /
+          openHumanProfile / realitySceneOpen）会接管 body —— 这时这一层用 display:none
+          让位但**不卸载**，搜索词和结果原样留着，详情按返回就回到同一份结果。
+        */}
+        {siteSearchOpen ? (
+          <View pointerEvents={siteSearchCovered ? "none" : "auto"} style={[styles.siteSearchLayer, siteSearchCovered && styles.siteSearchLayerHidden]}>
+            <SiteSearchSurface
+              initialQuery={siteSearchDraft.current.query}
+              initialScope={siteSearchDraft.current.scope}
+              sources={siteSearchSources}
+              onQueryChange={(query) => { siteSearchDraft.current = { ...siteSearchDraft.current, query }; }}
+              onScopeChange={(scope) => { siteSearchDraft.current = { ...siteSearchDraft.current, scope }; }}
+              onBack={closeSiteSearch}
+              onSelect={selectSiteSearchHit}
+            />
+          </View>
+        ) : null}
         </View>
         {isNavVisible ? <RootNav activePage={currentPage} compact={compactWidth} bottomInset={insets.bottom} onCommitPage={goToPage} /> : null}
         <ContextSwitcherSheet
@@ -1615,6 +1759,8 @@ const styles = StyleSheet.create({
   locationSub: { color: color.muted, fontSize: 12, lineHeight: 17, marginTop: 2 },
   locationSwitch: { color: "#6E6575", fontSize: 12, fontWeight: "800" },
   body: { flex: 1 },
+  siteSearchLayer: { backgroundColor: color.offWhite, bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  siteSearchLayerHidden: { display: "none" },
   dockWrap: {
     position: "absolute",
     alignSelf: "center",

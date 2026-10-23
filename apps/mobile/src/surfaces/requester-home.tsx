@@ -197,6 +197,7 @@ export function RequesterHome({
   onCreateScene,
   onOpenSceneMap,
   onOpenHotScenes,
+  onOpenSiteSearch,
   sceneApiBaseUrl,
   onChromeVisibilityChange,
   onChooserVisibilityChange,
@@ -255,6 +256,9 @@ export function RequesterHome({
   // HOT-SCENES-PAGE-001：热榜「更多」的真实落点（排序/筛选/网格整页），
   // 不是 onOpenSceneMap（那个是场景地图总览/详情）。没接就退回旧行为。
   onOpenHotScenes?: (() => void) | undefined;
+  // SITE-SEARCH-001：全站搜索页（人 / 活动 / 场景 / 机会 / 我的订单 / 动态）。首页搜索框
+  // 本地联想命不中时，不再落到「没有找到」的死胡同，而是带着这个词去全站搜。
+  onOpenSiteSearch?: ((input?: { query?: string }) => void) | undefined;
   sceneApiBaseUrl?: string | undefined;
   onChromeVisibilityChange?: (visible: boolean) => void;
   onChooserVisibilityChange?: (visible: boolean) => void;
@@ -978,6 +982,17 @@ export function RequesterHome({
       applyHomeSearchSuggestion(searchSuggestions[0]!);
     }
 
+    // 8a. SITE-SEARCH-001：本地联想（四宫格里的推荐人 / 活动 / 场景 / 时段）一个都没命中，
+    // 这句话就是一次真正的搜索——交给全站搜索页（人 / 活动 / 场景 / 机会 / 我的订单 / 动态，
+    // 含 8b 那次服务端真人搜索）。以前这里只剩 8b 的真人搜索，再往下就是「没有找到」的死胡同：
+    // 用户搜「老街」「咖啡馆」「订单号」，活动 / 机会 / 场景 / 帖子有没有都不知道。
+    // 带图的输入不是搜索意图（图要进模型对话），仍走下面 9 的提示。
+    if (!consumedLocal && !attachment && onOpenSiteSearch) {
+      setClarifyChoices(undefined);
+      onOpenSiteSearch({ query: q });
+      return;
+    }
+
     // 8b. HOME-PEOPLE-SEARCH-001: 全站真人兜底。本地 people 索引只是推荐
     // 预览，新注册用户不在里面；够长且有 client 就问服务端。本地命中也不拦
     // （同名会藏人），结果区独立展示，不断本地流程。
@@ -1269,6 +1284,7 @@ export function RequesterHome({
             handleExecuteHomeQuery(c);
           }}
           onOpenConversation={() => onOpenAssistantConversation?.()}
+          {...(onOpenSiteSearch ? { onOpenSiteSearch: (query: string) => onOpenSiteSearch({ query }) } : {})}
         />
       ) : null}
       {/* HOME-PEOPLE-SEARCH-001: 全站真人结果。本地推荐是 fixture 预览，

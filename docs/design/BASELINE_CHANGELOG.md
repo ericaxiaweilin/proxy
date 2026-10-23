@@ -4,6 +4,39 @@ Every intentional change to a baseline-sensitive implementation must update
 this file and `CURRENT_BASELINE.json` or `IMPLEMENTATION_CONTRACTS.json` in the
 same commit. Do not record routine business logic changes here.
 
+## Revision 333 — 2026-09-29
+
+- **全站搜索：所有搜索按钮通往同一个搜索页**（用户指示「把全站搜索做一下 全部搜索按钮的搜索功能
+  比如home页的搜索」）。修之前五个按钮五套范围：首页只在四宫格推荐实体里匹配、没命中落到
+  「没有找到」死胡同；动态只筛已加载的帖子；消息只筛会话；我的只筛自己的帖子；场景页只筛场景；
+  市场页只筛活动。改动：`surfaces/site-search.tsx`（**新增**）、`components/site-search-entry.tsx`
+  （**新增**）、`shell/app-shell.tsx`（**敏感**）、`surfaces/market.tsx`（**敏感**）、
+  `surfaces/me.tsx`（**敏感**）、`surfaces/reality-scene-map.tsx`（**敏感**）、
+  `surfaces/requester-home.tsx`、`surfaces/feed.tsx`、`surfaces/messages.tsx`、
+  `surfaces/hot-scenes.tsx`、`components/home-search-dock.tsx`、`i18n.ts`（30 个键 × 6 语言）。
+  1. **搜索页**：一个词同时问 人 / 活动 / 场景 / 机会 / 我的订单 / 动态，按类分组（每类先给
+     4 条 +「查看全部 N」），顶部范围 chip（全部 / 人 / 活动 / 地点 / 机会 / 订单 / 动态）。
+     6 位以上纯数字按编号搜（整号 / 号头 / 尾号），订单类排最前。
+  2. **诚实空态**：各来源独立成败——动态服务挂了，人和活动照常出结果，只在上方说「动态暂时没搜到」
+     并给重试；访客搜不了人和订单（说「登录后可搜索…」，不调用服务端）；搜人不足 2 个字如实提示。
+     「没有找到」只在没有任何来源失败时才出现。订单只来自本人的 `listMyOrders` /
+     `listMyActivities`，已取消的活动不出现，取消的订单作为历史仍可搜到并带状态角标。
+  3. **入口**：首页输入框有词时多一行「全站搜索“词”」，提交后本地联想（四宫格里的推荐）没命中就
+     直接打开全站搜索（原来是死胡同；带图的输入不算搜索，仍走模型对话提示）；动态 / 消息 / 我的
+     个人主页搜索 / 热榜 / 场景地图的就地搜索在输入了词后多一行同样的入口（选点地图不给）；
+     市场「订单」页顶部新增一条搜索框形状的入口（范围：机会），「活动」页搜索输入后同样多一行。
+  4. **落点**：人 → 他人主页；活动（含活动报名订单）→ 活动详情；场景 → 场景地图直达；
+     机会 → 市场页直接落该条详情；订单 → 我的订单；动态 → 动态页带同一个词。人 / 活动 / 场景
+     的详情盖在搜索页上，搜索页不卸载（`display:none` 让位），返回就是同一份结果；
+     底下的首页 / 动态 / 我的也保持挂载。搜索页打开时隐藏底栏、禁用根页横滑、Android 返回先关它。
+  5. **门禁**：新增 `SITE-SEARCH-001`（`site-search.test.ts` / `site-search-service.test.ts` /
+     `site-search-wiring.test.ts`）。仅新增，未改动任何既有门禁。
+  **没有设计稿**：这一屏用的是现有的搜索框 / chip 栏 / 列表行语汇（`hot-scenes.tsx`、`market.tsx`），
+  没有原型可对照，需要设计过一眼再当作定稿——`IMPLEMENTATION_CONTRACTS.json` 里 `site-search`
+  标为 PARTIAL 并写明。已知缺口：会话（收件箱）不是全站搜索的来源（消息页仍就地筛会话）；
+  搜索是客户端对既有读接口的聚合（活动 / 机会 / 场景 / 订单整表拉取后本地过滤，缓存 10–60 秒），
+  还没有服务端跨实体索引；没有搜索历史。
+
 ## Revision 332 — 2026-09-29
 
 - **下单 / 接单 / 订单页去废话 + 全数字编号 + 订单变更与变更记录入口**
